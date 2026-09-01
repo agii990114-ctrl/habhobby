@@ -483,19 +483,16 @@
   .day-h button:hover { background: var(--surface-3); }
 
   /* 요일을 열로 놓는 표. 같은 마크업이 좁은 화면에서는 세로로 쌓인다. */
-  /* 통은 굴리는 일만 한다 — 테두리와 둥근 모서리는 표(.cal-grid)가 그대로 갖는다.
-     그래야 표 끝을 지나 빈 자리로 굴러 내려가도 테두리가 표를 감싼 채로 남는다.
+  /* 테두리는 **통**이 갖는다 — 굴러도 제자리에 있어야 하고, 표가 벗어난 빈 자리까지
+     한 틀로 감싸야 한다. 안쪽 표는 테두리를 벗는다: 둘 다 두르면 두 겹이 된다.
      넓은 화면에서는 높이를 재지 않으므로(app.js 의 fitWeek) 굴릴 것도 없다. */
-  /* 표와 같은 모서리를 통에도 준다 — 굴러 올라간 표가 네모난 모서리에 잘리지 않게.
-     아래쪽은 빈 자리로 이어지므로 둥글릴 것이 없다. */
   .week-scroll {
-    border-radius: 11px 11px 0 0;
+    border: 1px solid var(--line); border-radius: 11px;
     overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
   }
   .cal-grid {
     display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 1px; background: var(--line);
-    border: 1px solid var(--line); border-radius: 11px; overflow: hidden;
   }
   .col { background: var(--surface); display: flex; flex-direction: column; min-width: 0; }
   .col[data-today] { background: var(--accent-soft); }
@@ -1045,6 +1042,8 @@
   .mini-btn[disabled] { opacity: .45; cursor: default; }
 
   .opts { display: flex; flex-direction: column; gap: 8px; }
+  /* 고르는 줄과 그 아래 고르개 사이를 띄운다 — 붙어 있으면 어느 쪽에 딸린 것인지 흐리다 */
+  [data-share-who] { margin-top: 14px; }
   .opt {
     display: flex; gap: 11px; align-items: flex-start; width: 100%; text-align: left;
     background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 11px;

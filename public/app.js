@@ -624,8 +624,12 @@ function calTail() {
   const dated = m => activeWorks().filter(w =>
     w.schedule.mode === "dated" && w.schedule.next && m(w.schedule.next));
 
-  /* 공개 예정도, 날짜에 놓이지 않는 작품(상시·완결·일정 미정)도 여기 늘어놓지 않는다 —
-     캘린더를 밀어내기만 한다. 오른쪽 아래 📋 아이콘의 곁창에서 단락별로 본다. */
+  /* 공개 예정은 **달력 바로 아래에** 제 단락으로 선다 — 날짜가 있는 것들이라 달력의
+     이야기이고, 한 줄씩 늘어놓는 대신 가로로 훑으므로 자리를 많이 먹지 않는다.
+     날짜에 놓이지 않는 작품(상시·완결·일정 미정)은 여기 두지 않는다 — 손봐야 할
+     목록이라 성격이 다르고, 오른쪽 아래 📋 의 「추가 목록」에서 본다. */
+  const soon = soonSection();
+  if (soon.items.length) html += secHtml(soon, "data-soon-all");
 
   // 이미 지난 공개는 앞으로 할 일이 아니고 시간이 갈수록 쌓이기만 한다 — 목록에서 뺀다.
   const past = dated(t => t < t0);
@@ -665,18 +669,49 @@ const upcoming = () => activeWorks()
   .filter(w => w.schedule.mode === "dated" && w.schedule.next && w.schedule.next >= midnight().getTime())
   .sort((a, b) => a.schedule.next - b.schedule.next);
 
-/** 곁창의 단락들. 공개 예정이 맨 앞이고, 그다음이 날짜 미지정 묶음들이다. */
-function idleSections() {
-  const soon = upcoming();
-  return (soon.length ? [{ key: "_soon", label: "공개 예정", color: "var(--accent)", items: soon }] : [])
-    .concat(idleGroups());
-}
+/** 가로로 훑는 단락 하나. 추가 목록과 캘린더의 「공개 예정」이 같은 모양을 쓴다 —
+    같은 물건을 두 곳에서 다르게 그릴 이유가 없다.
 
-const idleTotal = () => idleSections().reduce((n, g) => n + g.items.length, 0);
+    공개 예정은 "언제 봤는지" 가 뜻이 없다(아직 안 나왔으니 본 적이 없다). 그 자리에
+    며칠 남았는지를 적는다. */
+const secHtml = (g, allAttr) => `<section class="plat">
+    <div class="plat-h">
+      <i class="idot" style="background:${g.color}"></i>
+      <b>${esc(g.label)}</b><span>${g.items.length}편</span>
+      <span class="plat-act">
+        <button class="edit-dom" ${allAttr}
+          title="전체 목록" aria-label="${esc(g.label)} 전체 목록">☰</button>
+      </span>
+    </div>
+    <div class="rail">${g.items.map(w => workCard(w,
+      g.key === "_soon" ? daysLeft(w.schedule.next) : undefined)).join("")}</div>
+  </section>`;
+
+/** 공개 예정 — 날짜는 정해졌지만 아직 안 온 것. 캘린더 아래에 제 단락으로 선다. */
+const soonSection = () => ({ key: "_soon", label: "공개 예정",
+  color: "var(--accent)", items: upcoming() });
+
+/* 추가 목록에는 **날짜 미지정만** 담는다. 공개 예정은 달력 바로 아래에서 보는 것이
+   더 가깝다 — 날짜가 있는 것들이라 달력의 이야기이고, 미지정은 손봐야 할 목록이다. */
+const idleSections = () => idleGroups();
+
+const idleTotal = () => idleWorks().length;
 
 function openIdle() {
   idleSec = null;
   drawIdle();
+}
+
+/** 공개 예정 전부 — 캘린더 아래 단락의 ☰ 가 연다. 추가 목록의 전체 목록과 같은 줄 모양이다. */
+function openSoon() {
+  const g = soonSection();
+  openSheet(g.items.map(w => rowHtml(w,
+    `${daysLeft(w.schedule.next)} · ${schedText(w)} · ${platformOf(w.platformId).name}`)).join(""),
+    { full: true, title: "공개 예정", sub: `${g.items.length}편 · 가까운 날부터` });
+  sheet.querySelector(".sheet-body").addEventListener("click", e => {
+    const r = e.target.closest("[data-id]");
+    if (r) openWork(r.dataset.id, openSoon);   // 목록 위에 겹친다
+  });
 }
 
 /* 폴더가 아니라 "왜 날짜가 없는지" 로 나눈다. 상시로 담은 작품이 폴더가 없다는 이유로
@@ -733,21 +768,8 @@ function drawIdle() {
     /* 페이지 탭과 같은 모양 — 단락마다 가로로 밀어 보고, ☰ 로 그 단락 전부를 편다.
        훑는 것과 다루는 것은 다른 일이라 화면을 나눈다. */
     body = head("추가 목록", false)
-      + `<p class="sub">${total}편 · 달력 칸에 없거나 아직 오지 않은 것들입니다.</p>`
-      + secs.map(g => `<section class="plat">
-        <div class="plat-h">
-          <i class="idot" style="background:${g.color}"></i>
-          <b>${esc(g.label)}</b><span>${g.items.length}편</span>
-          <span class="plat-act">
-            <button class="edit-dom" data-idle-all="${esc(g.key)}"
-              title="전체 목록" aria-label="${esc(g.label)} 전체 목록">☰</button>
-          </span>
-        </div>
-        ${/* 공개 예정은 "언제 봤는지" 가 뜻이 없다 — 아직 안 나온 것이라 본 적이 없다.
-             그 자리에 며칠 남았는지를 적는다. */""}
-        <div class="rail">${g.items.map(w => workCard(w,
-          g.key === "_soon" ? daysLeft(w.schedule.next) : undefined)).join("")}</div>
-      </section>`).join("");
+      + `<p class="sub">${total}편 · 달력에 놓일 근거가 아직 없는 것들입니다.</p>`
+      + secs.map(g => secHtml(g, `data-idle-all="${esc(g.key)}"`)).join("");
   } else {
     body = head(`<i class="idot" style="background:${sec.color}"></i>${esc(sec.label)}`, true)
       + `<p class="sub">${sec.items.length}편</p>`
@@ -914,7 +936,10 @@ function fitWeek() {
   const box = screenEl.querySelector(".week-scroll");
   if (!box) return;
   if (!narrow()) { box.style.maxHeight = ""; return; }
-  box.style.maxHeight = `${Math.max(240, innerHeight - box.getBoundingClientRect().top - 14)}px`;
+  /* 아래에 「공개 예정」 단락이 서므로 화면 끝까지 채우지 않는다. 남는 자리의 3분의 2쯤만
+     쓰고 나머지를 넘겨준다 — 통이 화면을 다 먹으면 그 아래가 있는 줄도 모른다. */
+  const room = innerHeight - box.getBoundingClientRect().top - 14;
+  box.style.maxHeight = `${Math.max(240, Math.round(room * 0.68))}px`;
 
   const today = box.querySelector("[data-today]");
   const pad = box.querySelector(".week-pad");
@@ -2374,23 +2399,35 @@ function openFolderForm(existing, after) {
 
        고르개에는 **아직 안 담은 사람만** 올린다. 이미 담은 이름이 남아 있으면 골랐을 때
        아무 일도 안 일어나는 것처럼 보인다. 담긴 이름을 누르면 빠진다. */
+    /* 고르개에 올릴 이름을 좁히는 찾기 칸. 친구가 수십 명이면 고르개를 열어 놓고
+       한참 굴려야 하는데, 그 안에서는 눈으로 훑는 것 말고 할 수 있는 게 없다.
+       여기서 몇 글자 치면 고르개가 그만큼 짧아진다. */
+    let query = "";
+
     const paintWho = () => {
-      const left = friends.filter(f => !share.with.includes(f.id));
-      const got = share.with
-        .map(id => friends.find(f => f.id === id))
-        .filter(Boolean);
+      const q = query.trim().toLowerCase();
+      const left = friends
+        .filter(f => !share.with.includes(f.id))
+        .filter(f => !q || f.displayName.toLowerCase().includes(q));
+      const got = share.with.map(id => friends.find(f => f.id === id)).filter(Boolean);
+      const none = q ? "찾는 이름이 없습니다" : left.length ? "친구 고르기…" : "모두 골랐습니다";
       whoBox.innerHTML = `
-        ${friends.length ? `<select data-who-add aria-label="공개할 친구 고르기">
-            <option value="">${left.length ? "친구 고르기…" : "모두 골랐습니다"}</option>
+        ${friends.length ? `
+          ${friends.length > 8 ? searchHtml("이름으로 좁히기", query, "margin-bottom:8px") : ""}
+          <select data-who-add aria-label="공개할 친구 고르기">
+            <option value="">${none}</option>
             ${left.map(f => `<option value="${esc(f.id)}">${
               f.starred ? "★ " : ""}${esc(f.displayName)}</option>`).join("")}
           </select>`
-          : `<div class="rest" style="text-align:left;padding:8px 2px 0">아직 친구가 없습니다.</div>`}
-        ${got.length ? `<div class="pickers" style="margin-top:8px">${got.map(f =>
+          : `<div class="rest" style="text-align:left;padding:2px">아직 친구가 없습니다.</div>`}
+        ${got.length ? `<div class="pickers" style="margin-top:10px">${got.map(f =>
             `<button class="pick on" data-w="${esc(f.id)}" title="빼기"
               >${esc(f.displayName)} <i>✕</i></button>`).join("")}</div>`
-          : friends.length ? `<div class="rest" style="text-align:left;padding:8px 2px 0">
+          : friends.length ? `<div class="rest" style="text-align:left;padding:10px 2px 0">
               고른 사람이 없어 아무에게도 보이지 않습니다.</div>` : ""}`;
+      // 치는 자리를 지킨다 — 글자마다 다시 그리므로 커서를 되돌려 놓아야 한다
+      const qEl = whoBox.querySelector(".arch-q");
+      if (qEl && query) { qEl.focus(); qEl.setSelectionRange(query.length, query.length); }
     };
 
     // "고른 친구에게만" 을 골랐을 때 처음 한 번만 불러온다 — 그 전에는 쓸 일이 없다
@@ -2411,9 +2448,15 @@ function openFolderForm(existing, after) {
     });
     wireOpts(sheet, "take", v => { take = v; });
 
+    whoBox.addEventListener("input", e => {
+      if (!e.target.closest(".arch-q")) return;
+      query = e.target.value;                // 고르개에 올릴 이름만 좁힌다
+      paintWho();
+    });
     whoBox.addEventListener("change", e => {
       const sel = e.target.closest("[data-who-add]"); if (!sel?.value) return;
       share.with = [...share.with, sel.value];
+      query = "";                            // 담았으면 찾던 것은 지운다 — 다음 사람을 찾게
       paintWho();                            // 고르개에서 빠지고 아래에 이름이 붙는다
     });
     whoBox.addEventListener("click", e => {
@@ -3587,6 +3630,7 @@ screenEl.addEventListener("click", e => {
     return render();
   }
 
+  if (e.target.closest("[data-soon-all]")) return openSoon();
   const da = e.target.closest("[data-day-all]");
   if (da) return openDayList(Number(da.dataset.dayAll));
   const all = e.target.closest("[data-plat-all]");

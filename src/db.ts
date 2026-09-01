@@ -163,6 +163,20 @@ CREATE TABLE IF NOT EXISTS folder (
   ord     INTEGER NOT NULL DEFAULT 0
 );
 
+/* 남의 작품을 **내가** 언제 봤는지. 비추는 폴더와 함께 고치는 폴더에서 쓴다.
+
+   visits·last_at 은 그 작품 주인의 칸이라 내 기록을 적을 수 없다. 적었다면 친구가 열 때마다
+   내 목록이 흔들리고, 내가 열면 친구 목록이 흔들렸을 것이다. 보는 사람 쪽에 따로 담는다.
+
+   seen_at 은 붉은 점을 끄고, opened_at 은 **내 목록에서의 차례**를 정한다. */
+CREATE TABLE IF NOT EXISTS work_seen (
+  user_id   TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  work_id   TEXT NOT NULL REFERENCES work(id) ON DELETE CASCADE,
+  seen_at   INTEGER NOT NULL,
+  opened_at INTEGER,
+  PRIMARY KEY (user_id, work_id)
+);
+
 CREATE TABLE IF NOT EXISTS work_folder (
   work_id   TEXT NOT NULL REFERENCES work(id)   ON DELETE CASCADE,
   folder_id TEXT NOT NULL REFERENCES folder(id) ON DELETE CASCADE,
@@ -245,6 +259,12 @@ try { db.exec("ALTER TABLE folder ADD COLUMN take_mode TEXT NOT NULL DEFAULT 'co
    그래서 주인이 고치면 나에게도 바뀌고, 나는 고칠 수 없다. */
 try { db.exec("ALTER TABLE folder ADD COLUMN mirror_owner  TEXT"); } catch { }
 try { db.exec("ALTER TABLE folder ADD COLUMN mirror_folder TEXT"); } catch { }
+/* 함께 고치는 폴더에 이름이 올랐다고 곧바로 참여자가 되지는 않는다 — **수락해야** 한다.
+   pending(초대함) · ok(수락함). 거절하면 줄을 지우므로 따로 값을 두지 않는다.
+
+   기본을 ok 로 둔다: 이 칸이 생기기 전에 공개해 둔 폴더들은 이미 보이고 있었으므로,
+   말없이 pending 으로 되돌리면 어제까지 보이던 것이 오늘 사라진다. */
+try { db.exec("ALTER TABLE folder_share ADD COLUMN state TEXT NOT NULL DEFAULT 'ok'"); } catch { }
 /* 이미 내려둔 작품은 언제 내렸는지 모른다 — 마지막으로 연 때를 대신 쓴다.
    캘린더에 남길 구간의 끝을 정하는 값이라 비워두면 아예 안 보인다. */
 db.prepare("UPDATE work SET state_at = last_at WHERE state != 'active' AND state_at IS NULL").run();
@@ -556,7 +576,8 @@ export function folderMembers(folderId: string): { owner: string; all: string[] 
     return { owner, all: [owner, ...rows.map(r => r.friend_id)] };
   }
   if (f.share_mode === "some") {
-    const rows = db.prepare("SELECT viewer_id FROM folder_share WHERE folder_id = ?")
+    // **수락한 사람만** 넣고 뺄 수 있다 — 이름만 올라 있는 사람은 아직 참여자가 아니다
+    const rows = db.prepare("SELECT viewer_id FROM folder_share WHERE folder_id = ? AND state = 'ok'")
       .all(folderId) as any[];
     return { owner, all: [owner, ...rows.map(r => r.viewer_id)] };
   }
@@ -565,8 +586,16 @@ export function folderMembers(folderId: string): { owner: string; all: string[] 
 
 /** 내가 이 폴더에 작품을 넣고 뺄 수 있는가 */
 export const mayFile = (userId: string, folderId: string): boolean => {
-  const own = db.prepare("SELECT 1 FROM folder WHERE id = ? AND user_id = ?").get(folderId, userId);
-  if (own) return true;
+  const f = db.prepare("SELECT user_id, mirror_owner FROM folder WHERE id = ?").get(folderId) as any;
+  if (!f) return false;
+  /* **비추는 폴더에는 담지 않는다.** 그건 남의 폴더를 보여 주는 껍데기일 뿐이라,
+     거기 걸면 나만 보이고 주인에게도 함께 쓰는 사람에게도 가지 않는다.
+     함께 고치는 폴더에 넣을 때 이어지는 곳은 늘 **원본 폴더**다.
+
+     겹쳐서 대체된 작품도 이 규칙에 걸린다 — 화면에서는 그 폴더 안에 있는 것처럼 보이지만
+     실제로 건 사람은 친구이고, 그 이음줄은 **건 사람만** 풀 수 있다. */
+  if (f.mirror_owner) return false;
+  if (f.user_id === userId) return true;
   return !!folderMembers(folderId)?.all.includes(userId);
 };
 
@@ -574,6 +603,8 @@ export type Folder = {
   id: string; name: string; emoji: string; ord: number;
   share: { mode: ShareMode; with: string[] };
   take: TakeMode;
+  /** 함께 고치는 폴더에 이름이 오른 사람들과 그 상태 (pending · ok) */
+  people: { id: string; state: string }[];
   /** 남의 폴더를 비추는 중이면 원본을 가리킨다. 내 폴더면 null. */
   mirror: { owner: string; folder: string } | null;
 };
@@ -587,14 +618,20 @@ function folderRows(where: string, ...args: unknown[]): Folder[] {
   if (!rows.length) return [];
   const marks = rows.map(() => "?").join(",");
   const pairs = db.prepare(
-    `SELECT folder_id, viewer_id FROM folder_share WHERE folder_id IN (${marks})`)
-    .all(...rows.map(r => r.id)) as { folder_id: string; viewer_id: string }[];
+    `SELECT folder_id, viewer_id, state FROM folder_share WHERE folder_id IN (${marks})`)
+    .all(...rows.map(r => r.id)) as { folder_id: string; viewer_id: string; state: string }[];
   const by = new Map<string, string[]>();
   for (const x of pairs) (by.get(x.folder_id) ?? by.set(x.folder_id, []).get(x.folder_id)!).push(x.viewer_id);
+  const st = new Map<string, { id: string; state: string }[]>();
+  for (const x of pairs)
+    (st.get(x.folder_id) ?? st.set(x.folder_id, []).get(x.folder_id)!)
+      .push({ id: x.viewer_id, state: x.state ?? "ok" });
   return rows.map(r => ({
     id: r.id, name: r.name, emoji: r.emoji, ord: r.ord,
     share: { mode: (r.share_mode ?? "none") as ShareMode, with: by.get(r.id) ?? [] },
     take: (r.take_mode ?? "copy") as TakeMode,
+    /* 함께 고치는 폴더의 참여자와 그 상태. 주인이 「공유자」 창에서 보는 값이다. */
+    people: st.get(r.id) ?? [],
     mirror: r.mirror_owner && r.mirror_folder
       ? { owner: r.mirror_owner, folder: r.mirror_folder } : null,
   }));
@@ -626,12 +663,71 @@ export const setFolderTake = (folderId: string, take: TakeMode): void => {
 };
 
 /** 그 폴더를 누구에게 보여 줄지 정한다. mode 가 "some" 이 아니면 짝은 지운다. */
-export function setFolderShare(folderId: string, mode: ShareMode, viewers: string[]): void {
+/* 이름을 지웠다 다시 올리면 처음부터다 — 그래서 지금 상태를 먼저 챙겨 두고 다시 심는다.
+   **함께 고치는 폴더**에 새로 부른 사람은 pending 으로 시작한다. 수락해야 참여자가 된다.
+   그냥 보여 주기만 하는 폴더는 수락할 것이 없으므로 곧바로 ok 다. */
+export function setFolderShare(folderId: string, mode: ShareMode, viewers: string[],
+                               needsAccept = false): void {
+  const was = new Map((db.prepare("SELECT viewer_id, state FROM folder_share WHERE folder_id = ?")
+    .all(folderId) as any[]).map(r => [r.viewer_id, r.state ?? "ok"]));
   db.prepare("UPDATE folder SET share_mode = ? WHERE id = ?").run(mode, folderId);
   db.prepare("DELETE FROM folder_share WHERE folder_id = ?").run(folderId);
   if (mode !== "some") return;
-  const ins = db.prepare("INSERT OR IGNORE INTO folder_share(folder_id, viewer_id) VALUES(?,?)");
-  for (const v of new Set(viewers)) ins.run(folderId, v);
+  const ins = db.prepare("INSERT OR IGNORE INTO folder_share(folder_id, viewer_id, state) VALUES(?,?,?)");
+  for (const v of new Set(viewers)) ins.run(folderId, v, was.get(v) ?? (needsAccept ? "pending" : "ok"));
+}
+
+/** 내가 받은 폴더 초대 — 아직 수락도 거절도 안 한 것들 */
+export function folderInvites(userId: string): {
+  folder: string; name: string; emoji: string; owner: string; ownerName: string; count: number;
+}[] {
+  return (db.prepare(`
+    SELECT f.id, f.name, f.emoji, f.user_id AS owner, u.display_name AS who,
+           (SELECT COUNT(*) FROM work_folder wf WHERE wf.folder_id = f.id) AS n
+    FROM folder_share fs
+    JOIN folder f ON f.id = fs.folder_id
+    JOIN user u ON u.id = f.user_id
+    WHERE fs.viewer_id = ? AND fs.state = 'pending' AND f.take_mode = 'edit'
+    ORDER BY f.rowid DESC`).all(userId) as any[])
+    .map(r => ({ folder: r.id, name: r.name, emoji: r.emoji,
+                 owner: r.owner, ownerName: r.who ?? "이름 없음", count: r.n }));
+}
+
+/** 초대를 받아들인다 — 참여자가 되고, 내 폴더 목록에 그 폴더가 선다 */
+export function acceptFolder(userId: string, folderId: string): Folder | null {
+  const r = db.prepare("UPDATE folder_share SET state = 'ok' WHERE folder_id = ? AND viewer_id = ? AND state = 'pending'")
+    .run(folderId, userId);
+  if (!r.changes) return null;
+  const src = db.prepare("SELECT user_id, name, emoji FROM folder WHERE id = ?").get(folderId) as any;
+  if (!src) return null;
+  /* 수락하면 **곧바로 내 목록에 선다.** 따로 찾아 들어가 미러링을 누르게 하면,
+     수락했는데 아무 일도 안 일어난 것처럼 보인다. 이미 있으면 그대로 둔다. */
+  const had = db.prepare("SELECT id FROM folder WHERE user_id = ? AND mirror_folder = ?")
+    .get(userId, folderId) as any;
+  if (had) return getFolder(userId, had.id);
+  return createFolder(userId, { name: src.name, emoji: src.emoji,
+    mirror: { owner: src.user_id, folder: folderId } });
+}
+
+/** 초대를 물린다 — 이름이 명단에서 지워진다 */
+export const declineFolder = (userId: string, folderId: string): boolean =>
+  !!db.prepare("DELETE FROM folder_share WHERE folder_id = ? AND viewer_id = ? AND state = 'pending'")
+    .run(folderId, userId).changes;
+
+/** 내가 남의 작품을 어떻게 보고 있는지 — 한 번에 다 읽어 온다 */
+export function seenByMe(userId: string): Map<string, { seen: number; opened: number | null }> {
+  const rows = db.prepare("SELECT work_id, seen_at, opened_at FROM work_seen WHERE user_id = ?")
+    .all(userId) as any[];
+  return new Map(rows.map(r => [r.work_id, { seen: r.seen_at, opened: r.opened_at }]));
+}
+
+/** 눌러 봤다(붉은 점 끄기) · 보러 갔다(차례 올리기). opened 는 한 번 적히면 갱신된다. */
+export function markSeen(userId: string, workId: string, opened: boolean): void {
+  const now = Date.now();
+  db.prepare(`INSERT INTO work_seen(user_id, work_id, seen_at, opened_at) VALUES(?,?,?,?)
+    ON CONFLICT(user_id, work_id) DO UPDATE SET
+      opened_at = COALESCE(excluded.opened_at, work_seen.opened_at)`)
+    .run(userId, workId, now, opened ? now : null);
 }
 
 export const newId = (prefix: string): string =>

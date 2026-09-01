@@ -24,6 +24,8 @@ let works = [], folders = [], settings = { openMode: "app" }, platforms = {}, me
    쓰는 곳은 폴더 탭의 "친구 폴더 보기" 와 사이드 메뉴뿐이라, 캘린더만 보고 나가는
    사람에게는 200명분 17KB가 그냥 버려진다. 사이드 메뉴에 적을 숫자만 미리 받는다. */
 let friends = null, friendCount = 0;
+/** 받은 폴더 초대. 첫 화면에 함께 실려 온다 — 대개 비어 있어 무게가 없다. */
+let folderInvites = [];
 let tab = "cal", filter = "all", openFolderId = null;   // 들어오면 캘린더부터 보인다
 /* 폴더 탭은 내 폴더 아니면 친구의 공개 폴더를 보여 준다.
    null 이면 내 것. 친구 것을 볼 때는 그 친구가 준 화면을 통째로 들고 있는다
@@ -42,6 +44,7 @@ async function reload() {
   works = s.works; folders = s.folders; settings = s.settings;
   platforms = s.platforms; me = s.me;
   friendCount = s.friendCount ?? 0;
+  folderInvites = s.folderInvites ?? [];
   friends = null;              // 친구가 바뀌었을 수 있다 — 다음에 열 때 새로 부른다
   siteNamesPending = s.siteNamesPending ?? 0;
   applyTheme(settings.themeColor);
@@ -442,6 +445,7 @@ function schedText(w) {
 const screenEl = document.getElementById("screen");
 const fabEl = document.getElementById("btn-inbox");
 const idleEl = document.getElementById("btn-idle");
+const fiEl = document.getElementById("btn-fi");
 /* 좁은 화면에서는 문서가, 넓은 화면에서는 .screen 이 구른다 (styles.css 끝 참고).
    어느 쪽이든 같은 값을 읽을 수 있게 한 곳에 묶어 둔다. */
 const narrow = () => matchMedia("(max-width: 700px)").matches;
@@ -479,6 +483,7 @@ const onScroll = () => {
   const tuck = d > 0 && y > 28;
   fabEl.classList.toggle("tucked", tuck);
   idleEl.classList.toggle("tucked", tuck);
+  fiEl.classList.toggle("tucked", tuck);
   lastScrollY = y;
 };
 // 둘 중 하나만 실제로 구르므로 양쪽에 걸어 두어도 겹치지 않는다
@@ -897,6 +902,21 @@ function openFolderSheet(id) {
   if (f) {
     // 전체·미분류는 진짜 폴더가 아니라 고칠 것이 없다
     const head = sheet.querySelector(".sheet-head");
+    /* 함께 고치는 폴더에는 **누가 들어와 있는지**가 제목 옆에 있어야 한다 —
+       초대해 놓고 아무도 안 왔는데 그것을 알 길이 없으면 기다리는 줄도 모른다. */
+    if (f.take === "edit" || f.canEdit) {
+      const who = document.createElement("button");
+      who.className = "icon-btn";
+      who.textContent = "🤝";
+      who.title = "공유자";
+      who.setAttribute("aria-label", "공유자");
+      who.onclick = guard(async () => {
+        // 이름을 보여 주려면 친구 목록이 있어야 한다 (「친구가 많아지면」)
+        try { await loadFriends(); } catch { /* 못 불러와도 상태는 보여 준다 */ }
+        openFolderPeople(f, () => openFolderSheet(id));
+      });
+      head.append(who);
+    }
     const more = document.createElement("button");
     more.className = "icon-btn";
     more.textContent = "⋯";
@@ -1095,6 +1115,43 @@ function whoseBar() {
        </div>`;
 }
 
+/** 받은 폴더 초대 — 수락하면 곧바로 내 폴더 목록에 선다. */
+function openFolderInvites() {
+  const draw = () => {
+    openSheet(`
+      ${headHtml("폴더 초대", { back: false, actions: false,
+        sub: "수락하면 그 폴더가 내 폴더 목록에 함께 섭니다." })}
+      ${folderInvites.length ? `<div class="fr-list">${folderInvites.map(v => `
+        <div class="inv">
+          <span class="thumb ph">${esc(v.emoji)}</span>
+          <span class="ub"><b>${esc(v.name)}</b>
+            <span>${esc(v.ownerName)}님이 불렀습니다 · ${v.count}편</span></span>
+          <span class="inv-act">
+            <button class="mini-btn" data-no="${esc(v.folder)}">거절</button>
+            <button class="mini-btn on" data-yes="${esc(v.folder)}">수락</button>
+          </span>
+        </div>`).join("")}</div>`
+        : `<div class="empty">받은 초대가 없습니다.</div>`}
+      <div class="rest" style="text-align:left;padding:10px 2px 0">
+        함께 고치는 폴더입니다. 수락하면 내 작품을 넣고 뺄 수 있고, 남이 넣은 작품은
+        폴더 안에서만 보입니다 — 내 캘린더에는 올라오지 않습니다.</div>`);
+
+    sheet.querySelector(".sheet-body").addEventListener("click", guard(async e => {
+      const yes = e.target.closest("[data-yes]"), no = e.target.closest("[data-no]");
+      if (!yes && !no) return;
+      const id = (yes ?? no).dataset[yes ? "yes" : "no"];
+      const name = folderInvites.find(v => v.folder === id)?.name ?? "";
+      await api("POST", `/api/folder-invites/${id}/${yes ? "accept" : "decline"}`);
+      await reload();
+      render();
+      if (!folderInvites.length) { closeSheet(); }
+      else draw();
+      toast(yes ? `«${name}» 폴더에 들어왔습니다` : `«${name}» 초대를 물렸습니다`);
+    }));
+  };
+  draw();
+}
+
 /** 누구의 폴더를 볼지 고른다 */
 async function openWhose() {
   try { await loadFriends(); } catch (e) { toast(e.message); return; }
@@ -1240,17 +1297,36 @@ function openOthersWork(w, opts) {
   const mayTake = linked && canCopy(takeMode);
   openSheet(`
     ${headHtml(esc(w.title), { back: false, actions: false,
-      sub: `${esc(ownerName)}님의 목록 · ${esc(plat.name)}${
-        linked ? ` · ${MEDIA[w.mediaType] ?? "링크"}` : ""}` })}
+      sub: `${esc(ownerName)}님의 목록` })}
+    ${/* 담기 전에 **무엇인지 알 수 있어야** 한다. 고칠 수는 없으니 값만 늘어놓는다 —
+         작품 설정과 같은 것들을 같은 차례로 두어 어느 쪽을 보든 같은 자리에서 읽게 한다. */""}
+    <div class="ov">
+      ${w.coverUrl ? `<div class="ov-cover" style="${coverStyle(w)}"></div>` : ""}
+      <dl class="kv">
+        <dt>플랫폼</dt><dd>${esc(plat.name)} · ${MEDIA[w.mediaType] ?? "링크"}</dd>
+        <dt>연재 일정</dt><dd>${esc(schedText(w))}</dd>
+        ${w.episode ? `<dt>회차</dt><dd>${esc(w.episode)}</dd>` : ""}
+        <dt>담은 사람</dt><dd>${esc(ownerName)}</dd>
+        <dt>담긴 때</dt><dd>${ago(w.addedAt)}</dd>
+      </dl>
+    </div>
     ${linked ? goHtml(w, plat, false) : ""}
     ${mayTake
-      ? `<button class="btn primary" style="width:100%;margin-top:9px" data-take>내 목록에 담기</button>`
+      ? `<button class="btn primary" style="width:100%;margin-top:9px" data-take>내 목록에 담기</button>
+         <div class="rest" style="text-align:left;padding:7px 2px 0">
+           담아 오면 내 것이 되어 일정도 표지도 내가 고칠 수 있습니다. 그 전에는 볼 수만 있어요.</div>`
       : `<div class="rest" style="text-align:left;padding:9px 2px 0">${
           !linked ? "주소 없이 담은 항목입니다. 가져올 것이 제목뿐이라 담아 갈 수 없습니다."
             : `${esc(ownerName)}님이 이 폴더를 가져가는 것은 막아 두었습니다. 보기만 할 수 있어요.`}</div>`}
   `, { over });
 
-  wireGo(w, false);      // 남의 작품이라 접속 기록은 남기지 않는다
+  wireGo(w);
+  /* 눌러 봤으면 붉은 점을 끈다. 남의 작품이라 그 줄에는 못 적고 **내 쪽 기록**에 남는다. */
+  if (!w.visits) {
+    w.visits = 1;
+    for (const el of document.querySelectorAll(`.work[data-id="${w.id}"]`)) el.classList.remove("unseen");
+    api("POST", `/api/works/${w.id}/seen`).catch(() => {});
+  }
   const take = sheet.querySelector("[data-take]");
   /* 곧바로 담는다. 한때 URL 추가 창으로 넘겼는데, 그러면 **서버가 그 페이지를 다시 읽는다** —
      이미 친구 쪽에 제목·표지·플랫폼·일정이 다 있는데도. 게다가 읽기를 막는 사이트라면
@@ -1262,6 +1338,43 @@ function openOthersWork(w, opts) {
     closeSheet();                       // 보던 폴더로 돌아간다 — 이어서 더 담을 수 있게
     toast(`«${r.title}» 담았습니다`);
   });
+}
+
+/** 이 폴더를 함께 쓰는 사람들. 주인은 명단을 고칠 수 있고, 불려 간 사람은 보기만 한다. */
+function openFolderPeople(f, back) {
+  const mine = !f.mirror;                    // 내가 연 폴더인가
+  const rows = () => {
+    if (mine) {
+      const list = (f.people ?? []);
+      if (!list.length)
+        return `<div class="empty">아직 아무도 부르지 않았습니다.<br>
+          폴더 설정의 「친구에게 공개」에서 함께 쓸 사람을 고르세요.</div>`;
+      return `<div class="fr-list">${list.map(x => {
+        const fr = (friends ?? []).find(y => y.id === x.id);
+        const nm = fr?.displayName ?? "이름 없음";
+        return `<div class="uf-row" style="padding:8px 2px">
+          <span class="thumb ph">${esc(nm.slice(0, 1))}</span>
+          <span class="ub" style="flex:1"><b>${esc(nm)}</b></span>
+          <span class="${x.state === "ok" ? "st-ok" : "st-wait"}">${
+            x.state === "ok" ? "수락함" : "대기 중"}</span>
+        </div>`;
+      }).join("")}</div>`;
+    }
+    return `<div class="rest" style="text-align:left;padding:2px">
+      ${esc(f.mirrorOf)}님이 연 폴더입니다. 함께 쓰는 사람 명단은 그쪽에서 정합니다.</div>`;
+  };
+
+  const wait = mine ? (f.people ?? []).filter(x => x.state !== "ok").length : 0;
+  openSheet(`
+    ${headHtml(`${f.emoji} ${esc(f.name)}`, { back: true, actions: false,
+      sub: mine
+        ? `함께 쓰는 사람${wait ? ` · ${wait}명이 아직 대기 중입니다` : ""}`
+        : `${esc(f.mirrorOf)}님과 함께 쓰는 폴더` })}
+    ${rows()}
+    ${mine ? `<div class="rest" style="text-align:left;padding:10px 2px 0">
+      거절한 사람은 명단에서 사라집니다. 부를 사람을 더하거나 빼려면 폴더 설정에서
+      「친구에게 공개」를 고치세요.</div>` : ""}`);
+  sheet.querySelector("[data-head-back]").onclick = back;
 }
 
 function folderRow(fid, emoji, name, f) {
@@ -1278,9 +1391,12 @@ function folderRow(fid, emoji, name, f) {
     <button class="folder" data-folder="${fid}">${mini}
       ${/* 딱지에 **누구를** 미러링하는지까지 적는다. 아래 작은 글씨를 읽지 않고 목록을
             훑는 것만으로 남의 폴더임을 알아야 한다 — 내 폴더와 한 줄로 섞여 있기 때문이다. */""}
+      ${/* 함께 고치는 폴더는 **내가 연 것인지 불려 간 것인지**가 먼저 보여야 한다 —
+           목록에서 둘이 나란히 서기 때문이다. */""}
       <span class="txt"><b>${emoji ? emoji + " " : ""}${esc(name)}${
-        f?.mirror ? ` <i class="mtag">${f.canEdit ? "함께" : "미러링"} · ${esc(f.mirrorOf)}</i>`
-          : f?.take === "edit" ? ` <i class="mtag">함께</i>` : ""}</b><span>${
+        f?.mirror
+          ? ` <i class="mtag">${f.canEdit ? `공유폴더 · ${esc(f.mirrorOf)}` : `미러링 · ${esc(f.mirrorOf)}`}</i>`
+          : f?.take === "edit" ? ` <i class="mtag">공유폴더 · 오너</i>` : ""}</b><span>${
         f?.broken ? esc(f.broken) : `${worksIn(fid).length}개`}</span></span>
       ${real ? "" : `<span class="chev">›</span>`}</button>
     ${real && !folderSel ? `<button class="folder-more" data-folder-edit="${fid}"
@@ -1371,6 +1487,15 @@ function render() {
   const ib = document.getElementById("idle-badge");
   ib.textContent = idleN > 99 ? "99+" : idleN;
   ib.hidden = !idleN;
+
+  /* 폴더 초대는 **폴더 탭에서, 받은 것이 있을 때만** 나온다 — 없는데 자리를 차지하면
+     눌러 봐야 빈 창이다. */
+  const fiN = tab === "lib" && !viewing ? folderInvites.length : 0;
+  fiEl.hidden = !fiN;
+  fiEl.classList.remove("tucked");
+  const fb = document.getElementById("fi-badge");
+  fb.textContent = fiN > 99 ? "99+" : fiN;
+  fb.hidden = !fiN;
   // 안쪽이 구를 때는 내용을 갈아 끼우면 저절로 맨 위가 됐다 — 문서가 구를 땐 직접 올린다
   toTop();
   lastScrollY = 0;
@@ -1819,8 +1944,9 @@ const goHtml = (w, plat, primary) => `<a class="link-btn${primary ? " primary" :
     ${viaWeb(w) ? 'target="_blank" rel="noopener"' : ""}>보러가기<small>${viaWeb(w)
     ? (w.appUrl ? "웹으로 (설정에서 변경)" : "웹으로") : `${esc(plat.name)} 앱으로`}</small></a>`;
 
-/** count 는 내 작품일 때만 — 남의 작품에 내 접속 기록을 남길 자리는 없다. */
-function wireGo(w, count) {
+/** 어디에 적을지는 서버가 정한다 — 내 작품이면 그 줄에, 남의 작품이면 **내 쪽 기록**에.
+    남의 칸을 고칠 수는 없지만, 내가 언제 보러 갔는지는 내 목록의 차례를 정하는 값이다. */
+function wireGo(w) {
   const el = sheet.querySelector("#go"); if (!el) return;
   el.onclick = guard(async () => {
     if (!viaWeb(w)) {
@@ -1847,7 +1973,6 @@ function wireGo(w, count) {
       window.addEventListener("blur", cancel, { once: true });
     }
     closeSheet();
-    if (!count) return;
     await api("POST", `/api/works/${w.id}/open`);
     await reload(); render();
   });
@@ -1860,8 +1985,9 @@ function openWork(id, over) {
 
      마지막으로 연 때(lastAt)는 건드리지 않는다. 그건 **실제로 보러 간 때**이고 목록의
      차례를 정하는 값이라, 열어만 봐도 앞으로 튀어 오르면 차례가 뜻을 잃는다.
-     화면에서 먼저 지우고 서버에는 조용히 알린다 — 실패해도 다음에 다시 알린다. */
-  if (!w.mirror && !w.visits) {
+     화면에서 먼저 지우고 서버에는 조용히 알린다 — 실패해도 다음에 다시 알린다.
+     남의 작품은 여기 오지 않는다 — 위에서 openOthersWork 로 보냈다. */
+  if (!w.visits) {
     w.visits = 1;
     for (const el of document.querySelectorAll(`.work[data-id="${id}"]`)) el.classList.remove("unseen");
     api("POST", `/api/works/${id}/seen`).catch(() => {});
@@ -1881,7 +2007,7 @@ function openWork(id, over) {
            주소 없이 담은 항목입니다. 나중에 페이지가 생기면 설정에서 주소를 붙일 수 있습니다.</div>`}
     <button class="btn" data-act="settings" style="width:100%;margin-top:9px">설정</button>
   `, { over });
-  wireGo(w, true);
+  wireGo(w);
   sheet.querySelector('[data-act="settings"]').onclick = () =>
     openWorkSettings(id, { back: () => openWork(id, over) });
 }
@@ -3615,6 +3741,7 @@ document.getElementById("btn-menu").onclick = () => {
 };
 drawerBack.addEventListener("click", e => { if (e.target === drawerBack) closeDrawer(); });
 idleEl.onclick = openIdle;
+fiEl.onclick = openFolderInvites;
 document.getElementById("menu-close").onclick = closeDrawer;   // 마우스가 있는 기기에만 보인다
 
 /* 사이드 메뉴도 끌어 닫는다. 시트는 아래로, 이쪽은 **왼쪽으로** — 그래서 손잡이도

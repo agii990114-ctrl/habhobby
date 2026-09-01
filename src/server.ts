@@ -12,7 +12,8 @@ import {
   createGuest, linkGuest, isGuest,
   createPasswordUser, passwordUser, linkGuestPassword, markLogin,
   sharedView, createInvite, inviteOwner, getUser, setFolderShare, setFolderTake,
-  getFolder, createFolder, canCopy, canMirror, canEdit,
+  getFolder, createFolder, canCopy, canMirror, canEdit, seenByMe, markSeen,
+  folderInvites, acceptFolder, declineFolder,
   type Work, type User, type ShareMode, type TakeMode,
 } from "./db.ts";
 import {
@@ -172,6 +173,24 @@ function withMirrors(me: string): { folders: any[]; works: any[] } {
   const folders = listFolders(me);
   const works: any[] = listWorks(me);
 
+  /* 남의 작품을 **내가** 어떻게 보고 있는지. 붉은 점과 차례를 정하는 값이라 미리 읽어 둔다. */
+  const seen = seenByMe(me);
+  /* 이미 내가 담아 둔 작품인지 가리는 열쇠 — 같은 곳의 같은 시리즈면 같은 작품이다. */
+  const keyOf = (w: any) => `${w.platformId} ${w.seriesId}`;
+  const mineByKey = new Map<string, any>(works.map(w => [keyOf(w), w]));
+
+  /** 남의 작품 한 줄을 내 목록에 놓을 모양으로 바꾼다 */
+  const asGuest = (w: any, folderId: string, owner: string, who: string,
+                   take: string, folderOnly: boolean) => {
+    const mark = seen.get(w.id);
+    return { ...w, folders: [folderId], filed: true,
+      /* 눌러 봤으면 붉은 점을 끄고, 보러 갔으면 그때를 차례로 쓴다. 한 번도 안 갔으면
+         담긴 때 — 친구가 여는 것에 내 목록이 흔들리지 않게. */
+      visits: mark?.seen ? 1 : 0,
+      lastAt: mark?.opened ?? w.addedAt,
+      mirror: owner, mirrorOf: who, mirrorTake: take, folderOnly };
+  };
+
   /* 내가 주인인 **함께 고치는 폴더**에는 친구들이 넣은 작품도 들어 있다.
      내 표에는 없으므로 따로 모아 온다 — 남의 것이라 고칠 수 없고 달력에도 올리지 않는다. */
   for (const f of folders.filter(x => !x.mirror && canEdit(x.take))) {
@@ -183,8 +202,10 @@ function withMirrors(me: string): { folders: any[]; works: any[] } {
     for (const r of rows) {
       const w = getWork(r.user_id, r.id);
       if (!w) continue;
-      works.push({ ...w, folders: [f.id], filed: true, visits: 0, lastAt: w.addedAt,
-        mirror: r.user_id, mirrorOf: r.who ?? "이름 없음", mirrorTake: f.take, folderOnly: true });
+      // 내가 이미 담아 둔 것이면 내 것이 이긴다 — 비추는 폴더와 같은 규칙이다
+      const mine = mineByKey.get(keyOf(w));
+      if (mine) { if (!mine.folders.includes(f.id)) mine.folders = [...mine.folders, f.id]; continue; }
+      works.push(asGuest(w, f.id, r.user_id, r.who ?? "이름 없음", f.take, true));
     }
   }
 
@@ -204,7 +225,7 @@ function withMirrors(me: string): { folders: any[]; works: any[] } {
   };
   /* 한 작품이 비추는 폴더 둘에 다 들어 있을 수 있다. 그때 두 번 밀어 넣으면 같은 번호를
      가진 줄이 둘이 되어 「전체」와 캘린더에 겹쳐 보인다 — 한 줄만 두고 폴더만 보탠다. */
-  const seen = new Map<string, any>();
+  const placed = new Map<string, any>();
 
   const out = folders.map(f => {
     if (!f.mirror) return f;
@@ -232,20 +253,20 @@ function withMirrors(me: string): { folders: any[]; works: any[] } {
       // 내가 넣은 것은 위에서 이미 제자리를 잡았다 — 남의 작품으로 다시 놓지 않는다
       if (edit && (w as any).owner === me) continue;
       if (!w.folders.includes(src!.id)) continue;
-      const had = seen.get(w.id);
-      if (had) { had.folders.push(f.id); continue; }
-      /* 남의 작품을 **내 폴더 안에 있는 것처럼** 놓는다. 고칠 수 없다는 표를 달아 둔다.
+      /* **이미 내가 담아 둔 작품이면 내 것이 이긴다.** 내 것에는 내 일정·별점·기록이
+         붙어 있어 실제로 다루는 쪽이고, 비쳐 온 쪽은 고칠 수도 없다. 둘 다 보이면
+         어느 것을 눌러야 하는지 알 수 없으므로, 그 자리에 내 것을 놓는다. */
+      const mine = mineByKey.get(keyOf(w));
+      if (mine) { if (!mine.folders.includes(f.id)) mine.folders = [...mine.folders, f.id]; continue; }
 
-         마지막으로 연 때는 **내 것으로 바꾼다.** 그대로 두면 친구가 무엇을 열 때마다
-         내 「최근 본 순」 맨 위로 튀어 오른다 — 나는 한 번도 안 본 작품인데. 대신 담긴
-         때를 쓰면 "친구 목록에 새로 들어온 순" 이 되어 흔들리지 않는다. */
+      const had = placed.get(w.id);
+      if (had) { had.folders.push(f.id); continue; }
       /* 함께 고치는 폴더에서 **남이 넣은 작품**은 폴더 안에서만 보인다. 그 사람이 정한
          일정이 내 캘린더를 채우면, 내가 보기로 한 것과 남이 넣어 둔 것이 뒤섞인다.
          마음에 들면 「내 목록에 담기」로 한 번 눌러 내 것으로 만든다. */
-      const row = { ...w, folders: [f.id], filed: true, visits: 0, lastAt: w.addedAt,
-        mirror: (w as any).owner ?? f.mirror.owner, mirrorOf: nameOf((w as any).owner ?? f.mirror.owner),
-        mirrorTake: src!.take, folderOnly: edit };
-      seen.set(w.id, row);
+      const owner = (w as any).owner ?? f.mirror.owner;
+      const row = asGuest(w, f.id, owner, nameOf(owner), src!.take, edit);
+      placed.set(w.id, row);
       works.push(row);
     }
     return { ...f, mirrorOf: who, broken: null, mirrorTake: src!.take, canEdit: edit };
@@ -269,6 +290,8 @@ function stateSnapshot(user: User) {
        메뉴뿐인데, 앱을 열 때마다 따라오면 캘린더만 보고 나가는 사람에게는 그냥 버려진다.
        200명이면 17KB다. 사이드 메뉴에 적을 숫자만 담고, 목록은 GET /api/friends 로 부른다. */
     friendCount: isGuest(user) ? 0 : countFriends(user.id),
+    // 폴더 탭의 초대 아이콘에 적을 숫자. 목록은 열 때 따로 부른다.
+    folderInvites: isGuest(user) ? [] : folderInvites(user.id),
     // 0이면 클라이언트가 사이트 이름을 물으러 갈 이유가 없다
     siteNamesPending: pendingSiteNames(user.id).length,
   };
@@ -645,8 +668,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
   if (seg[0] === "api" && seg[1] === "works" && seg[2]) {
     const id = seg[2];
     if (seg[3] === "open" && m === "POST") {
-      db.prepare("UPDATE work SET visits = visits + 1, last_at = ? WHERE id = ? AND user_id = ?")
+      const r = db.prepare("UPDATE work SET visits = visits + 1, last_at = ? WHERE id = ? AND user_id = ?")
         .run(Date.now(), id, user.id);
+      /* 남의 작품을 보러 갔으면 **내 쪽 기록**에 적는다. 그 사람의 last_at 을 건드리면
+         내가 열 때마다 친구 목록이 흔들린다. */
+      if (!r.changes) markSeen(user.id, id, true);
       json(res, 200, { ok: true, work: getWork(user.id, id) });
       return true;
     }
@@ -655,8 +681,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
        마지막으로 연 때(last_at)는 건드리지 않는다. 그건 **실제로 보러 간 때**이고
        목록의 차례를 정하는 값이라, 열어만 봐도 앞으로 튀어 오르면 차례가 뜻을 잃는다. */
     if (seg[3] === "seen" && m === "POST") {
-      db.prepare("UPDATE work SET visits = MAX(visits, 1) WHERE id = ? AND user_id = ?")
+      const r = db.prepare("UPDATE work SET visits = MAX(visits, 1) WHERE id = ? AND user_id = ?")
         .run(id, user.id);
+      // 내 작품이 아니면 내 쪽 기록에 적는다 — 남의 칸을 고칠 수는 없다
+      if (!r.changes) markSeen(user.id, id, false);
       json(res, 200, { ok: true });
       return true;
     }
@@ -722,7 +750,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     if (b.share && ["none", "all", "some"].includes(b.share.mode) && !isGuest(user)) {
       const want: string[] = Array.isArray(b.share.with)
         ? b.share.with.filter((x: any) => typeof x === "string") : [];
-      setFolderShare(id, b.share.mode as ShareMode, want.filter(v => areFriends(user.id, v)));
+      /* 함께 고치는 폴더는 **부른다고 곧바로 참여자가 되지 않는다** — 수락을 받는다.
+         퍼가기 값이 이번에 함께 왔으면 그것을, 아니면 지금 폴더에 적힌 것을 본다. */
+      const take = ["none", "copy", "mirror", "both", "edit"].includes(b.take)
+        ? b.take : getFolder(user.id, id)?.take;
+      setFolderShare(id, b.share.mode as ShareMode, want.filter(v => areFriends(user.id, v)),
+        take === "edit");
     }
     /* 퍼가기 권한 — 공개하지 않은 폴더에는 뜻이 없지만, 껐다 켰다 할 때마다 값이
        날아가면 다시 정해야 하므로 공개 여부와 상관없이 그대로 담아 둔다. */
@@ -851,6 +884,28 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       }
       addFriend(user.id, owner.id);
       json(res, 200, { ok: true, friend: { id: owner.id, displayName: owner.displayName } });
+      return true;
+    }
+  }
+
+  /* ── 폴더 초대 ── */
+  if (p === "/api/folder-invites" && m === "GET") {
+    json(res, 200, { ok: true, invites: folderInvites(user.id) });
+    return true;
+  }
+  if (seg[0] === "api" && seg[1] === "folder-invites" && seg[2] && m === "POST") {
+    const id = seg[2];
+    if (seg[3] === "accept") {
+      const f = acceptFolder(user.id, id);
+      if (!f) { json(res, 404, { ok: false, reason: "이미 지난 초대입니다." }); return true; }
+      json(res, 200, { ok: true, folder: f });
+      return true;
+    }
+    if (seg[3] === "decline") {
+      // 한 번만 부른다 — 두 번 부르면 첫 번째가 이미 지워 놓아 늘 없다고 답한다
+      const gone = declineFolder(user.id, id);
+      json(res, gone ? 200 : 404,
+        gone ? { ok: true } : { ok: false, reason: "이미 지난 초대입니다." });
       return true;
     }
   }

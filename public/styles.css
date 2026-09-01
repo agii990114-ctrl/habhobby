@@ -796,6 +796,23 @@
     font-style: normal; font-size: 9.5px; font-weight: 700; line-height: 1;
     text-align: center; color: var(--ink-3); padding: 1px 0;
   }
+  /* 받은 초대 한 줄 */
+  .inv {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 2px; border-bottom: 1px solid var(--line);
+  }
+  .inv:last-child { border-bottom: 0; }
+  .inv .ub { min-width: 0; flex: 1; }
+  .inv .ub b { display: block; font-size: 13px; font-weight: 600; line-height: 1.35; }
+  .inv .ub span { font-size: 11px; color: var(--ink-3); }
+  .inv-act { display: flex; gap: 6px; flex: none; }
+  /* 수락했는지 기다리는지 — 글자만으로도 갈리지만 빛깔이 있으면 훑을 때 바로 걸린다 */
+  .st-ok, .st-wait {
+    flex: none; font-size: 11px; font-weight: 600; border-radius: 99px; padding: 2px 9px;
+  }
+  .st-ok { color: var(--good); background: var(--good-soft); }
+  .st-wait { color: var(--ink-3); background: var(--surface-2); }
+
   .cho-rail i.off { color: var(--line-2); }
   .cho-rail.on { background: var(--accent-soft); border-radius: 99px; }
   .cho-rail.on i { color: var(--accent-ink); }
@@ -1073,6 +1090,15 @@
   .opt .ot b { display: block; font-size: 13.5px; font-weight: 600; margin-bottom: 2px; }
   .opt[aria-pressed="true"] .ot b { color: var(--accent-ink); }
   .opt .ot span { font-size: 12px; color: var(--ink-2); line-height: 1.55; }
+
+  /* 남의 작품을 들여다보는 자리 — 표지를 옆에 세우고 값을 늘어놓는다 */
+  .ov { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 14px; }
+  .ov-cover {
+    flex: none; width: 84px; aspect-ratio: 3 / 4; border-radius: 9px;
+    background-size: cover; background-position: center; border: 1px solid var(--line);
+  }
+  .ov .kv { flex: 1; min-width: 0; margin: 0; }
+  @media (max-width: 430px) { .ov-cover { width: 68px; } }
 
   .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12.5px; margin: 0 0 14px; }
   .kv dt { color: var(--ink-3); white-space: nowrap; }

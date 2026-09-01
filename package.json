@@ -1,0 +1,14 @@
+{
+  "name": "habhobby",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "흩어진 미디어 생활을 하나의 목록으로 — 통합 미디어 런처",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node --no-warnings --env-file-if-exists=.env src/server.ts",
+    "reset": "node --no-warnings -e \"import('node:fs').then(f=>{f.rmSync('data/habhobby.db',{force:true});console.log('db removed')})\""
+  }
+}

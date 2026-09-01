@@ -1,0 +1,19 @@
+{
+  "name": "HabHobby",
+  "short_name": "HabHobby",
+  "description": "웹툰·드라마·영화를 한 곳에서 관리하고 앱으로 바로 이어 보는 통합 미디어 런처",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#FBF9FA",
+  "theme_color": "#C94F0D",
+  "lang": "ko",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ],
+  "share_target": {
+    "action": "/",
+    "method": "GET",
+    "params": { "title": "title", "text": "text", "url": "url" }
+  }
+}

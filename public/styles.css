@@ -1,0 +1,1151 @@
+/* 기본 테마 — 흰 바탕에 주황 포인트.
+   설정에서 색을 바꾸면 app.js 가 이 값들을 다시 만들어 덮는다. 여기 적어 두는 건
+   화면이 처음 뜨는 순간 옛 색조가 번쩍이지 않게 하기 위한 것이다. */
+:root {
+    --bg: #FCFBFB;
+    --surface: #FFFFFF;
+    --surface-2: #F6F4F3;
+    --surface-3: #EDEAE8;
+    --ink: #221E1C;
+    --ink-2: #5D5551;
+    --ink-3: #6F6762;
+    --line: #EBE7E5;
+    --line-2: #DCD5D1;
+    --accent: #C94F0D;
+    --accent-soft: #FCF3EE;
+    --accent-ink: #BD490A;
+    --good: #2B8A3E;
+    --good-soft: #EBFBEE;
+    --warn: #9C6F00;
+    --warn-soft: #FFF9DB;
+    --sun: #C2410C;
+    --sat: #1D4ED8;
+    --star: #B87400;
+    --bad: #C92A2A;
+    --bad-ink: #A61E1E;
+    --bad-soft: #FFF0F0;
+    --shadow: 0 1px 2px rgba(36,27,31,.06), 0 8px 24px -12px rgba(36,27,31,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141110;
+      --surface: #1F1B19;
+      --surface-2: #2D2825;
+      --surface-3: #3B3430;
+      --ink: #F3F2F1;
+      --ink-2: #C1BCB9;
+      --ink-3: #9D9590;
+      --line: #3E3632;
+      --line-2: #534A46;
+      --accent: #F38549;
+      --accent-soft: #33261E;
+      --accent-ink: #E76A27;
+      --good: #69DB7C;
+      --good-soft: #1E2E22;
+      --warn: #E6C229;
+      --warn-soft: #2E2818;
+      --sun: #FF922B;
+      --sat: #74C0FC;
+      --star: #FFD43B;
+      --bad: #E03131;
+      --bad-ink: #F03E3E;
+      --bad-soft: #2E1B1B;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141110; --surface: #1F1B19; --surface-2: #2D2825; --surface-3: #3B3430;
+    --ink: #F3F2F1; --ink-2: #C1BCB9; --ink-3: #9D9590;
+    --line: #3E3632; --line-2: #534A46;
+    --accent: #F38549; --accent-soft: #33261E; --accent-ink: #E76A27;
+    --good: #69DB7C; --good-soft: #1E2E22; --warn: #E6C229; --warn-soft: #2E2818;
+    --sun: #FF922B; --sat: #74C0FC; --star: #FFD43B;
+    --bad: #E03131; --bad-ink: #F03E3E; --bad-soft: #2E1B1B;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+  * { box-sizing: border-box; }
+  /* 두 번 톡 쳤을 때 화면이 확대되지 않게 한다. 손가락으로 벌리는 확대는 그대로 둔다 —
+     막아 버리면 눈이 불편한 사람이 화면을 키울 길이 없어진다. */
+  button, a, label, input, select, textarea, .work, .row, .arch, .folder, .mon-cell, .opt, .pick {
+    touch-action: manipulation;
+  }
+  /* 문서 끝에서 고무줄처럼 튕기는 것은 그대로 둔다 — 손맛이고, 아이폰다운 움직임이다.
+     그 움직임에 ＋ 버튼이 딸려 나오던 문제는 app.js 의 onScroll 에서 가른다. */
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    font-size: 15px; line-height: 1.6;
+    word-break: keep-all;
+    padding: 20px;
+  }
+  button, input, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+  .page { max-width: 1080px; margin: 0 auto; }
+
+  /* ── App shell ───────────────────────── */
+  .app {
+    background: var(--surface); border: 1px solid var(--line-2);
+    border-radius: 22px; box-shadow: var(--shadow);
+    overflow: hidden; display: flex; flex-direction: column;
+    height: calc(100vh - 40px); max-height: 820px; min-height: 520px; position: relative;
+    max-width: 880px; margin: 0 auto;
+  }
+
+  /* 모바일에서는 앱이 화면 전체를 쓴다 — 창 안의 창처럼 보일 이유가 없다 */
+  @media (max-width: 700px) {
+    body { padding: 0; }
+    .app {
+      height: 100vh; height: 100dvh;
+      max-height: none; min-height: 0; max-width: none;
+      border: 0; border-radius: 0; box-shadow: none;
+    }
+  }
+  .app-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 18px 12px; border-bottom: 1px solid var(--line); flex: none;
+  }
+  .brand { font-family: "Hahmlet", serif; font-weight: 700; font-size: 18px; letter-spacing: -.01em; }
+  .brand span { color: var(--accent); }
+  .bar-left { display: flex; align-items: center; gap: 9px; }
+  /* 좁은 화면에서는 검색을 사이드 메뉴로 보낸다. 상단바가 빠듯해 로고를 접어야 했는데,
+     검색이 메뉴로 가면 그럴 필요가 없다. */
+  #menu-search { display: none; }
+  @media (max-width: 430px) {
+    #btn-search { display: none; }
+    #menu-search { display: flex; }
+  }
+  .icon-btn {
+    width: 30px; height: 30px; flex: none; border-radius: 9px; cursor: pointer;
+    border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-3);
+    font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center;
+  }
+  .icon-btn:hover { border-color: var(--ink-3); color: var(--ink); }
+  .tabs { display: flex; gap: 4px; background: var(--surface-2); border-radius: 99px; padding: 3px; }
+  .tabs button {
+    border: 0; background: transparent; color: var(--ink-3);
+    font-size: 13px; font-weight: 600; padding: 5px 13px; border-radius: 99px; cursor: pointer;
+  }
+  .tabs button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+
+  /* ＋ 버튼이 스크롤 방향에 따라 비켜주므로 아래 여백은 최소만 둔다 */
+  .screen { flex: 1; overflow-y: auto; padding: 14px 16px 22px; }
+  .screen-title { font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin: 2px 0 12px; }
+
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .chip {
+    border: 1px solid var(--line-2); background: var(--surface); color: var(--ink-2);
+    font-size: 12.5px; padding: 4px 11px; border-radius: 99px; cursor: pointer;
+  }
+  .chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(106px, 1fr)); gap: 14px; }
+  .work { cursor: pointer; border: 0; background: none; padding: 0; text-align: left; display: block; }
+  .cover {
+    aspect-ratio: 3/4; border-radius: 10px; position: relative; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Hahmlet", serif; font-weight: 700; font-size: 26px; color: #fff;
+    text-shadow: 0 1px 6px rgba(0,0,0,.35);
+  }
+  .cover .badge {
+    position: absolute; left: 5px; top: 5px; width: 15px; height: 15px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: "IBM Plex Sans KR", sans-serif; font-size: 8.5px; font-weight: 700;
+    text-shadow: none; box-shadow: 0 1px 3px rgba(0,0,0,.3);
+  }
+  .cover .ep {
+    position: absolute; right: 0; bottom: 0; left: 0; padding: 12px 6px 4px;
+    background: linear-gradient(transparent, rgba(0,0,0,.62));
+    font-family: "IBM Plex Mono", monospace; font-size: 10px; font-weight: 500;
+    text-align: right; text-shadow: none;
+    /* 네이버 블로그의 logNo 처럼 긴 값이 온다 — 줄바꿈되면 표지를 덮는다.
+       폭도 묶어 둔다. 한 줄에 딱 맞게 들어가도 표지를 가로질러 읽기 어려워진다. */
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 70%; left: auto;
+  }
+  /* 제목이 한 줄이든 두 줄이든 같은 높이를 차지한다 — 아래 시간 줄이 카드마다
+     들쭉날쭉하지 않도록 두 줄 자리를 미리 잡아 둔다. */
+  .work h4 { margin: 6px 0 1px; font-size: 12.5px; font-weight: 600; line-height: 1.3;
+    min-height: 2.6em;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .work time { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+  .empty { text-align: center; color: var(--ink-3); font-size: 13.5px; padding: 40px 20px; }
+
+  /* ── 플랫폼별 가로 슬라이드 ───────────────────────── */
+  .plat { margin-bottom: 20px; }
+  .plat:last-child { margin-bottom: 4px; }
+  /* 레일이 화면 끝까지 흘러나가므로 구분선도 같이 흘려보낸다 */
+  .plat + .plat::before {
+    content: ""; display: block; height: 1px;
+    background: var(--line); margin: 0 -16px 18px;
+  }
+  .plat-h { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .plat-h .pmark {
+    width: 19px; height: 19px; flex: none; border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9.5px; font-weight: 700; box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+  }
+  /* 사이트가 밝힌 이름이 길 수 있다 — 두 줄이 되면 머리글이 통째로 부푼다 */
+  .plat-h b {
+    font-size: 14px; font-weight: 600;
+    min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* 아직 이름을 안 붙인 도메인은 주소 그대로 — 주소처럼 보이게 둔다 */
+  .plat-h b.dom { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; font-weight: 500; color: var(--ink-2); }
+  .plat-h span { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; flex: none; }
+  .edit-dom {
+    border: 0; background: none; cursor: pointer; padding: 2px 4px; flex: none;
+    font-size: 12px; line-height: 1; opacity: .45; border-radius: 6px;
+  }
+  .edit-dom:hover { opacity: 1; background: var(--surface-2); }
+  /* 머리글 오른쪽 끝으로 밀어 둔다 */
+  .plat-act { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
+  /* 보이는 크기는 그대로 두고 누르는 영역만 넓힌다 — 음수 여백으로 머리글 높이를 지킨다 */
+  .plat-act .edit-dom { font-size: 13px; padding: 12px; margin: -12px 0; }
+
+  /* 도메인 색 고르기 */
+  /* 견본 옆의 "직접 넣기" 버튼 */
+  .emo-more {
+    width: 34px; height: 34px; border-radius: 8px; cursor: pointer; font-size: 15px;
+    border: 1px dashed var(--line-2); background: none; color: var(--ink-3); line-height: 1;
+  }
+  .emo-more:hover { border-color: var(--ink-3); color: var(--ink); }
+  .emo-more[aria-pressed="true"] {
+    border-style: solid; border-color: var(--accent);
+    background: var(--accent-soft); color: var(--accent-ink);
+  }
+
+  /* 견본에 없는 아이콘을 직접 넣는 칸 */
+  .emoji-own { display: flex; align-items: center; gap: 9px; margin-top: 7px; }
+  .emoji-own[hidden] { display: none; }
+  /* .field input 이 파일 뒤쪽에서 width:100% 를 주므로 한 단계 더 좁혀 이긴다 */
+  .field .emoji-own input {
+    width: 62px; flex: none; text-align: center; padding: 6px 4px;
+    background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 9px;
+    color: inherit; font-family: inherit;
+  }
+  .emoji-own .rest { padding: 0; text-align: left; }
+
+  /* 날짜 없는 작품 — 상태를 색으로 구분한다 */
+  .idot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 99px;
+    margin-right: 7px; vertical-align: 1px; flex: none;
+  }
+
+  /* 색 고르개 — 네모를 누르면 브라우저 스펙트럼이 열린다 */
+  .cpick { display: flex; align-items: center; gap: 8px; }
+  .cp-open {
+    position: relative; width: 44px; height: 40px; flex: none; border-radius: 9px;
+    cursor: pointer; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .2);
+  }
+  .cp-open input { position: absolute; inset: 0; opacity: 0; border: 0; padding: 0; cursor: pointer; }
+  .field .cp-hex {
+    flex: 1; min-width: 0; width: auto; font-family: "IBM Plex Mono", monospace;
+    text-transform: lowercase;
+  }
+  .cpick .btn { flex: none; padding: 9px 12px; font-size: 12px; }
+  .cpick.auto .btn {
+    border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink);
+  }
+
+  .dom-preview {
+    display: flex; align-items: center; gap: 8px; padding: 11px 13px;
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 14px;
+  }
+  /* 글자가 글줄 기준선에 앉아 한쪽으로 쏠려 보였다 — 네모 한가운데에 놓는다 */
+  .dom-preview .pmark {
+    width: 22px; height: 22px; flex: none; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; line-height: 1;
+  }
+  .dom-preview b { font-size: 14px; font-weight: 600; }
+  .dom-preview em { font-style: normal; font-size: 11.5px; color: var(--ink-3); font-family: "IBM Plex Mono", monospace; }
+
+  /* 마우스로 잡아끄는 동안 — 글자가 잡히지 않게 하고, 스냅이 도로 당기지 않게 끈다 */
+  .rail.dragging { cursor: grabbing; user-select: none; scroll-snap-type: none; scroll-behavior: auto; }
+  @media (hover: hover) and (pointer: fine) { .rail { cursor: grab; } }
+
+  /* 좌우로 화면 끝까지 흘려보내면 더 밀 수 있다는 게 읽힌다 */
+  .rail {
+    display: flex; gap: 12px; overflow-x: auto; overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    margin: 0 -16px; padding: 0 16px 6px;
+    /* 스냅은 padding 을 모르고 컨테이너 끝에 카드를 붙인다 — 그러면 첫 카드가
+       화면 왼쪽 끝에 딱 붙어 여백이 사라진다. 스냅에도 같은 여백을 알려 준다. */
+    scroll-padding-left: 16px;
+  }
+  .rail .work { flex: none; width: 106px; scroll-snap-align: start; }
+  .rail::-webkit-scrollbar { height: 6px; }
+  .rail::-webkit-scrollbar-track { background: transparent; }
+  .rail::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 99px; }
+  .rail::-webkit-scrollbar-thumb:hover { background: var(--ink-3); }
+  .rail { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+
+  /* ── Folders ───────────────────────── */
+  .folders { display: flex; flex-direction: column; gap: 7px; }
+  /* 폴더 수와 "선택" — 고르는 중에는 이 자리를 .bulk 가 대신 차지한다 */
+  .fbar {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin-bottom: 9px; padding: 0 2px; font-size: 12.5px; color: var(--ink-3);
+  }
+  .folder {
+    display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px;
+    padding: 9px 12px 9px 9px; cursor: pointer; color: inherit;
+  }
+  .folder:hover { border-color: var(--line-2); background: var(--surface-3); }
+  .folder .mini {
+    width: 42px; height: 42px; flex: none; border-radius: 8px; overflow: hidden;
+    display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 1.5px;
+    background: var(--line);
+  }
+  .folder .mini i { display: block; }
+  .folder .mini.solo {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 19px; background: var(--surface); border: 1px solid var(--line);
+  }
+  .folder .txt { min-width: 0; flex: 1; }
+  .folder .txt b { display: block; font-size: 13.5px; font-weight: 600; line-height: 1.35;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .folder .txt span { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .folder .chev { color: var(--ink-3); font-size: 15px; flex: none; }
+  .folder.ghost {
+    background: transparent; border-style: dashed; color: var(--ink-3);
+    justify-content: center; font-size: 13px; font-weight: 600; padding: 11px;
+  }
+  /* 폴더 줄 — 본체와 설정 버튼이 나란히 */
+  /* 비추는 폴더임을 폴더 이름 옆에 작게 단다 — 줄 모양은 그대로 두고 딱지만 붙인다 */
+  .mtag {
+    font-style: normal; font-size: 10px; font-weight: 600; vertical-align: 1px;
+    color: var(--accent-ink); background: var(--accent-soft);
+    border-radius: 99px; padding: 1px 6px; margin-left: 4px;
+  }
+  .folder-row { display: flex; align-items: stretch; gap: 6px; }
+  .folder-row .folder { flex: 1; min-width: 0; }
+  .folder-more {
+    flex: none; width: 38px; border-radius: 12px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink-3);
+    font-size: 16px; line-height: 1;
+  }
+  .folder-more:hover { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
+
+  .folder.ghost:hover { color: var(--accent-ink); border-color: var(--accent); background: var(--accent-soft); }
+
+  /* 머리줄은 스크롤해도 붙어 있는다. 저장 버튼이 늘 같은 자리에 있어서 길게 내려간 뒤에도
+     찾을 필요가 없고, 손잡이 대신 여기를 잡아 끌어도 되니 닫기가 쉬워진다. */
+  /* 제목줄. 머리 영역 안에 있으므로 저 혼자 붙을 필요가 없다 — 통째로 따라간다.
+     아래 선은 시트의 좌우 여백(18px) 밖으로 빼내 화면 끝까지 긋는다. */
+  .crumb {
+    display: flex; align-items: center; gap: 8px;
+    margin: 0 -18px; padding: 8px 18px 7px;
+    border-bottom: 1px solid var(--line);
+  }
+  /* 전체 화면 시트의 본문은 좌우 여백이 16px 다 */
+  /* 전체 화면 시트는 머리와 본문이 세로로 나뉜 통이라, 머리는 애초에 구르지 않는다 */
+  .sheet.full .sheet-top { padding: 0; }
+  .sheet.full .handle-zone { padding: 9px 0 7px; }
+  /* 본문 안의 제목줄(날짜 미지정의 묶음 제목 같은 것)은 본문 통 안에서 따로 붙는다 */
+  .sheet.full .sheet-body .crumb {
+    position: sticky; top: 0; z-index: 2; background: var(--surface);
+    margin: 0 -16px 12px; padding: 8px 16px 7px;
+  }
+  .crumb button {
+    border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-2);
+    width: 28px; height: 28px; border-radius: 8px; cursor: pointer; flex: none;
+    font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center;
+  }
+  .crumb button:hover { border-color: var(--ink-3); color: var(--ink); }
+  .crumb h3 { margin: 0; font-family: "Hahmlet", serif; font-size: 16px; font-weight: 600;
+    flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .crumb .count { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; flex: none; }
+
+  /* ── Calendar ───────────────────────── */
+  .today-strip {
+    display: flex; align-items: baseline; gap: 8px; margin-bottom: 14px;
+    padding: 11px 14px; border-radius: 11px;
+    background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  }
+  .today-strip b { font-family: "Hahmlet", serif; font-size: 17px; color: var(--accent-ink); }
+  .today-strip span { font-size: 12.5px; color: var(--ink-2); }
+
+  /* 전환 줄 — 왼쪽에 주간/월간, 오른쪽 끝에 일정 없는 작품 */
+  .cal-top { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .cal-top .cal-switch { margin-bottom: 0; }
+  .cal-idle {
+    margin-left: auto; flex: none; display: flex; align-items: center; gap: 5px;
+    padding: 12px 11px; border-radius: 10px; cursor: pointer; font-size: 13px; line-height: 1;
+    border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-2);
+  }
+  .cal-idle:hover { border-color: var(--accent); background: var(--accent-soft); }
+  .cal-idle span {
+    font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+    background: var(--accent); color: #fff; border-radius: 99px; padding: 1px 6px;
+  }
+
+  /* 주간 ↔ 월간 전환 */
+  .cal-switch {
+    display: flex; gap: 3px; width: fit-content; padding: 3px; margin-bottom: 12px;
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px;
+  }
+  .cal-switch button {
+    padding: 6px 18px; border: 0; border-radius: 7px; background: none; cursor: pointer;
+    font-size: 12.5px; font-weight: 600; color: var(--ink-3); font-family: inherit;
+  }
+  .cal-switch button[aria-selected="true"] {
+    background: var(--surface); color: var(--accent-ink); box-shadow: var(--shadow);
+  }
+
+  /* 월간 */
+  .cal-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+  .cal-nav b {
+    font-family: "Hahmlet", serif; font-size: 16px; font-variant-numeric: tabular-nums;
+    min-width: 104px; text-align: center;
+  }
+  .cal-nav button {
+    width: 28px; height: 28px; flex: none; border: 1px solid var(--line-2); border-radius: 8px;
+    background: var(--surface); color: var(--ink-2); font-size: 15px; line-height: 1; cursor: pointer;
+  }
+  .cal-nav button:hover { background: var(--surface-2); }
+  .cal-nav .today-btn {
+    width: auto; padding: 0 11px; margin-left: 2px; font-size: 11.5px; font-weight: 600;
+    font-family: inherit; color: var(--accent-ink);
+  }
+
+  .mon-grid {
+    display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 1px; background: var(--line);
+    border: 1px solid var(--line); border-radius: 11px; overflow: hidden;
+  }
+  .mon-dow {
+    background: var(--surface-2); padding: 7px 0; text-align: center;
+    font-size: 11px; font-weight: 700; color: var(--ink-3);
+  }
+  .mon-dow.sun { color: var(--sun); }
+  .mon-dow.sat { color: var(--sat); }
+
+  .mon-cell {
+    background: var(--surface); border: 0; padding: 5px 3px 6px; min-height: 60px;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    cursor: pointer; color: inherit; font-family: inherit;
+  }
+  .mon-cell.out { background: var(--surface-2); cursor: default; }
+  .mon-cell:not(.out):hover { background: var(--surface-2); }
+  .mon-cell.sel { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
+  .mon-cell .dn {
+    font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums;
+    width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
+  }
+  .mon-cell.today .dn {
+    background: var(--accent); color: #fff; border-radius: 99px; font-weight: 700;
+  }
+  /* 칸이 좁아 제목을 못 넣는다 — 플랫폼 색 점으로 "무엇이 몇 개"만 알린다 */
+  .mon-cell .dots {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 2px;
+  }
+  .mon-cell .dots i { width: 5px; height: 5px; border-radius: 99px; }
+  .mon-cell .dots em {
+    font-size: 9px; font-style: normal; color: var(--ink-3); font-variant-numeric: tabular-nums;
+  }
+
+  @media (max-width: 700px) {
+    .mon-cell { min-height: 50px; padding: 4px 1px 5px; gap: 3px; }
+    .mon-cell .dn { font-size: 11px; width: 18px; height: 18px; }
+    .cal-nav b { font-size: 15px; min-width: 96px; }
+  }
+
+  /* 날짜를 눌러야 열리는 그 날의 목록 */
+  .day-panel {
+    margin-top: 10px; padding: 10px 12px 8px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 11px; box-shadow: var(--shadow);
+  }
+  .day-h { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .day-h h4 {
+    flex: 1; margin: 0; font-family: "Hahmlet", serif; font-size: 14px; font-weight: 600;
+    color: var(--ink); letter-spacing: 0; text-transform: none;
+  }
+  .day-h > span { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .day-h button {
+    width: 24px; height: 24px; flex: none; border: 0; border-radius: 7px; cursor: pointer;
+    background: var(--surface-2); color: var(--ink-2); font-size: 12px; line-height: 1;
+  }
+  .day-h button:hover { background: var(--surface-3); }
+
+  /* 요일을 열로 놓는 표. 같은 마크업이 좁은 화면에서는 세로로 쌓인다. */
+  .cal-grid {
+    display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 1px; background: var(--line);
+    border: 1px solid var(--line); border-radius: 11px; overflow: hidden;
+  }
+  .col { background: var(--surface); display: flex; flex-direction: column; min-width: 0; }
+  .col[data-today] { background: var(--accent-soft); }
+  .colh {
+    padding: 8px 6px 7px; text-align: center; border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+  }
+  .col[data-today] .colh { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .colh b { font-size: 12.5px; font-weight: 700; }
+  .col[data-today] .colh b { color: var(--accent-ink); }
+  .colh span {
+    display: block; font-size: 10px; color: var(--ink-3);
+    font-variant-numeric: tabular-nums; margin-top: 1px;
+  }
+  .colb { padding: 6px 5px 8px; display: flex; flex-direction: column; gap: 1px; flex: 1; }
+  .rest { font-size: 11px; color: var(--ink-3); padding: 4px 3px; text-align: center; }
+
+  .row {
+    display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+    background: none; border: 0; padding: 6px 4px; border-radius: 8px; cursor: pointer; color: inherit;
+  }
+  .row:hover { background: var(--surface-2); }
+  .row .thumb {
+    width: 27px; height: 36px; border-radius: 5px; flex: none; position: relative;
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Hahmlet", serif; font-size: 13px; font-weight: 700; color: #fff;
+    text-shadow: 0 1px 4px rgba(0,0,0,.4);
+  }
+  .row .rt { min-width: 0; flex: 1; }
+  .row .rt b { display: block; font-size: 13px; font-weight: 600; line-height: 1.35;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .rt span { font-size: 11px; color: var(--ink-3); }
+  .row .pdot { width: 7px; height: 7px; border-radius: 99px; flex: none; }
+  /* 내려둔 작품 — 기록으로만 남은 것이라 지금 볼 것과 구분한다 */
+  .row.done { opacity: .55; }
+  .row.done .rt b { text-decoration: line-through; text-decoration-thickness: 1px; }
+  .row.done .st { font-style: normal; text-decoration: none; display: inline-block; }
+
+  /* 표 안의 칸은 좁으므로 더 조밀하게 */
+  .row.mini { padding: 4px 3px; gap: 6px; }
+  .row.mini .thumb { width: 20px; height: 27px; font-size: 10px; border-radius: 3px; }
+  .row.mini .rt b {
+    font-size: 11px; line-height: 1.3; white-space: normal;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .row.mini .rt span, .row.mini .pdot { display: none; }
+
+  @media (max-width: 700px) {
+    /* iOS 는 글자가 16px 보다 작은 입력칸을 누르면 화면을 확대해 버린다.
+       그래서 좁은 화면에서만 16px 로 올린다 — 확대의 진짜 원인이 이것이다. */
+    input, select, textarea { font-size: 16px !important; }
+
+    .cal-grid { grid-template-columns: 1fr; }
+    .colh { display: flex; align-items: baseline; gap: 9px; text-align: left; }
+    .colh span { display: inline; margin: 0; }
+    .row.mini { padding: 6px 4px; gap: 9px; }
+    .row.mini .thumb { width: 27px; height: 36px; font-size: 13px; border-radius: 5px; }
+    .row.mini .rt b { font-size: 12.5px; -webkit-line-clamp: 1; }
+    .row.mini .rt span { display: block; }
+    .rest { text-align: left; }
+  }
+
+  /* 별점 고르기 */
+  .stars { display: flex; gap: 2px; justify-content: center; padding: 4px 0 2px; }
+  .stars button {
+    border: 0; background: none; cursor: pointer; padding: 5px 6px;   /* 44px 터치 영역 */
+    font-size: 34px; line-height: 1; color: var(--line-2); transition: color .1s;
+  }
+  .stars button.on { color: var(--star); }
+
+  /* 별점 글자는 어디에 놓이든 같은 색으로 읽힌다 */
+  .stars-h { color: var(--star); letter-spacing: .06em; font-style: normal; }
+
+  /* 보관함 검색 */
+  .arch-q {
+    width: 100%; margin-bottom: 12px; padding: 9px 12px; font-size: 13.5px;
+    background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 9px;
+    color: inherit; font-family: inherit;
+  }
+  .arch-q::placeholder { color: var(--ink-3); }
+
+  /* 입력칸 하나 + 버튼 한 개 */
+  .name-row { display: flex; gap: 7px; align-items: stretch; }
+  .name-row input {
+    flex: 1; min-width: 0; background: var(--surface-2); border: 1px solid var(--line-2);
+    border-radius: 9px; padding: 9px 11px; font-size: 13.5px; color: inherit; font-family: inherit;
+  }
+  .name-row input::placeholder { color: var(--ink-3); }
+  .name-row .btn { flex: none; padding: 9px 15px; }
+
+  /* 문장 안에 섞여 들어가는 작은 동작 */
+  .linky {
+    border: 0; background: none; padding: 0 2px; cursor: pointer; font: inherit;
+    color: var(--accent-ink); text-decoration: underline; text-underline-offset: 2px;
+  }
+  /* 같은 이름을 쓰는 구간이 있을 때 뜨는 제안 */
+  .twin {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px 9px;
+    margin-bottom: 12px; padding: 10px 12px; font-size: 12.5px;
+    background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+    border-radius: 10px;
+  }
+  .twin { flex-direction: column; align-items: stretch; }
+  .twin b { color: var(--accent-ink); }
+  .twin-top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; }
+  .twin-top span { color: var(--ink-3); font-size: 11.5px; margin-left: auto; }
+  .twin-wide { display: flex; align-items: center; gap: 7px; font-size: 12px; cursor: pointer; }
+  .twin-wide input { width: 15px; height: 15px; accent-color: var(--accent); flex: none; }
+  .twin .btn { padding: 8px 12px; font-size: 12.5px; }
+
+  /* 구간에 담긴 주소들 — 떼어내기 */
+  .hosts { display: flex; flex-direction: column; gap: 3px; }
+  .host-row {
+    display: flex; align-items: center; gap: 8px; padding: 8px 11px;
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px;
+    font-size: 12.5px;
+  }
+  .host-row > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .host-row em { font-size: 11px; color: var(--ink-3); font-style: normal; }
+
+  /* 이름을 치는 동안 뜨는 후보들 */
+  .twin-list { display: flex; flex-direction: column; gap: 3px; margin-bottom: 12px; }
+  .twin-h {
+    font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--ink-3);
+    padding: 0 2px 3px;
+  }
+  .twin-list button {
+    display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left;
+    padding: 11px; border: 1px solid var(--line); border-radius: 9px;   /* 44px 터치 영역 */
+    background: var(--surface-2); cursor: pointer; color: inherit; font: inherit;
+  }
+  .twin-list button:hover { background: var(--accent-soft); border-color: var(--accent); }
+  .twin-list button b { font-size: 13px; }
+  .twin-list button span { font-size: 11px; color: var(--ink-3); margin-left: auto; }
+
+  .linky[disabled] { color: var(--ink-3); text-decoration: none; cursor: default; }
+
+  .cal-note { margin-top: 14px; font-size: 11.5px; color: var(--ink-3); line-height: 1.5; }
+  .cal-sec { margin-top: 18px; }
+  .cal-sec > h4 {
+    margin: 0 0 4px; font-size: 11.5px; font-weight: 600; letter-spacing: .09em;
+    text-transform: uppercase; color: var(--ink-3);
+  }
+
+  .dows { display: flex; gap: 4px; }
+  .dows button {
+    flex: 1; padding: 7px 0; border-radius: 8px; cursor: pointer; font-size: 12.5px; font-weight: 600;
+    border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-3);
+  }
+  .dows button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* 매월 — 1~31일. 요일 줄과 같은 폭으로 일곱 칸씩 놓아 달력처럼 읽힌다. */
+  .doms { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+  .doms button {
+    padding: 7px 0; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 600;
+    border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-3);
+    font-family: inherit; font-variant-numeric: tabular-nums;
+  }
+  .doms button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* 매월 — 몇째 주 무슨 요일. 주차가 행, 요일이 열이라 달력처럼 읽힌다. */
+  .ndows { display: grid; grid-template-columns: auto repeat(7, minmax(0, 1fr)); gap: 4px; align-items: center; }
+  .ndows > span { font-size: 10.5px; color: var(--ink-3); text-align: center; }
+  .ndows > .nl { text-align: right; padding-right: 4px; white-space: nowrap; }
+  .ndows button {
+    height: 30px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--line-2); background: var(--surface-2);
+  }
+  .ndows button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); }
+
+  /* 격주 — 어느 주부터 세는지 */
+  .anchor { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .anchor > span { font-size: 11.5px; color: var(--ink-3); }
+  .anchor button {
+    padding: 5px 13px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 600;
+    border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-3);
+    font-family: inherit;
+  }
+  .anchor button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .pickers { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+  .pick {
+    border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-2);
+    font-size: 12.5px; padding: 5px 11px; border-radius: 99px; cursor: pointer;
+  }
+  .pick[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .pick.add { border-style: dashed; }
+  .emoji-row { display: flex; flex-wrap: wrap; gap: 5px; }
+  .emoji-row button {
+    width: 34px; height: 34px; border-radius: 8px; font-size: 17px; cursor: pointer;
+    border: 1px solid var(--line-2); background: var(--surface-2); line-height: 1;
+  }
+  .emoji-row button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+
+  /* 하루에 여러 편이 몰려도 칸이 끝없이 길어지지 않게 — 나머지는 팝업으로 */
+  .colb .more {
+    width: 100%; margin-top: 5px; padding: 7px 8px; border-radius: 9px;
+    border: 1px dashed var(--line-2); background: none; color: var(--ink-3);
+    font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  .colb .more:hover { background: var(--surface-2); color: var(--ink-2); border-style: solid; }
+
+  /* ── 추가함 버튼 ───────────────────────── */
+  .fab {
+    /* 화면 맨 아래는 홈 인디케이터와 브라우저 바에 가린다 —
+       기기가 알려주는 여백만큼 더 띄운다. 데스크톱에서는 0이라 그대로다. */
+    position: absolute; left: 14px; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); z-index: 4;
+    width: 40px; height: 40px; border-radius: 12px; cursor: pointer;
+    border: 0; background: var(--accent); color: #fff;
+    font-size: 18px; line-height: 1; display: flex; align-items: center; justify-content: center;
+    /* 테마 색을 따라가야 한다 — 값을 박아 두면 색을 바꿔도 분홍 그림자가 남는다 */
+    box-shadow: 0 3px 10px -2px color-mix(in srgb, var(--accent) 50%, transparent),
+                0 1px 3px rgba(0, 0, 0, .18);
+    transition: transform .22s cubic-bezier(.4, 0, .2, 1), opacity .18s ease, background .12s ease;
+  }
+  .fab:hover { background: var(--accent-ink); transform: translateY(-1px); }
+  .fab:active { transform: none; }
+  /* 좁은 화면은 앱이 화면 전체를 써서 버튼이 맨 끝에 붙는다 — 조금 더 올린다.
+     같은 특이성이라 .fab 정의보다 뒤에 있어야 이긴다. */
+  @media (max-width: 700px) {
+    .fab { bottom: calc(26px + env(safe-area-inset-bottom, 0px)); }
+  }
+  /* 내려 읽을 땐 비켜준다 */
+  .fab.tucked { transform: translateY(62px); opacity: 0; pointer-events: none; }
+  .fab-badge {
+    position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px;
+    padding: 0 4px; border-radius: 99px; background: var(--ink); color: var(--surface);
+    font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
+    border: 2px solid var(--surface); font-variant-numeric: tabular-nums;
+  }
+  .fab-badge[hidden] { display: none; }
+
+  /* 새 콘텐츠 목록 */
+  .mt-count {
+    display: inline-block; margin-left: 6px; min-width: 18px; padding: 0 5px;
+    border-radius: 99px; background: var(--accent); color: #fff;
+    font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
+    font-variant-numeric: tabular-nums; vertical-align: 1px;
+  }
+  .uf-item {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    background: none; border: 0; border-bottom: 1px solid var(--line);
+    padding: 9px 4px; cursor: pointer; color: inherit; border-radius: 8px;
+  }
+  .uf-item:hover { background: var(--surface-2); }
+  .uf-item:last-child { border-bottom: 0; }
+  .uf-item .ub { min-width: 0; flex: 1; }
+  .uf-item .ub b {
+    display: block; font-size: 13px; font-weight: 600; line-height: 1.35;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .uf-item .ub span { font-size: 11px; color: var(--ink-3); }
+  .uf-item .chev { color: var(--ink-3); font-size: 15px; flex: none; }
+
+  /* 별을 끼우려면 줄 하나를 통으로 쓸 수 없다 — 버튼 안에 버튼을 넣을 수 없어서
+     폴더 줄(.folder-row)처럼 바깥을 한 겹 두르고 밑줄을 그쪽으로 옮긴다. */
+  .uf-row { display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--line); }
+  .uf-row:last-child { border-bottom: 0; }
+  .uf-row .uf-item { flex: 1; min-width: 0; border-bottom: 0; }
+  .star {
+    flex: none; width: 36px; height: 36px; border: 0; border-radius: 9px; cursor: pointer;
+    background: none; color: var(--line-2); font-size: 17px; line-height: 1;
+  }
+  .star:hover { background: var(--surface-2); color: var(--ink-3); }
+  .star[aria-pressed="true"] { color: var(--star); }
+  .star[aria-pressed="true"]:hover { color: var(--star); }
+  /* 다른 화면에서는 켜져 있음을 보여 주기만 한다 — 켜고 끄는 곳은 친구 목록 하나다 */
+  .star-on { color: var(--star); font-style: normal; }
+
+  /* 찾기 칸과 즐겨찾기 단추가 한 줄에 선다. 찾기 칸이 없을 때는 단추만 오른쪽에 남는다. */
+  .fr-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .fr-bar .arch-q { flex: 1; min-width: 0; margin: 0; }
+  .fr-bar .mini-btn { flex: none; margin-left: auto; }
+
+  /* ── Side menu ───────────────────────── */
+  .drawer-back { position: absolute; inset: 0; background: rgba(20, 12, 16, .42); display: flex; z-index: 6; }
+  .drawer-back[hidden] { display: none; }
+  .drawer {
+    width: min(272px, 78%); background: var(--surface); border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; padding: 15px 11px 12px;
+    animation: slidein .2s ease-out;
+  }
+  @keyframes slidein { from { transform: translateX(-16px); opacity: .4 } to { transform: none; opacity: 1 } }
+  .drawer-head {
+    font-family: "Hahmlet", serif; font-weight: 700; font-size: 18px;
+    padding: 3px 9px 15px; letter-spacing: -.01em;
+  }
+  .drawer-head span { color: var(--accent); }
+  .menu-item {
+    display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
+    background: none; border: 0; padding: 10px 9px; border-radius: 10px;
+    cursor: pointer; color: inherit;
+  }
+  .menu-item:hover { background: var(--surface-2); }
+  .menu-item .mi {
+    width: 30px; height: 30px; flex: none; border-radius: 9px; background: var(--surface-2);
+    display: flex; align-items: center; justify-content: center; font-size: 14px; color: var(--ink-2);
+  }
+  .menu-item:hover .mi { background: var(--accent-soft); color: var(--accent-ink); }
+  .menu-item .mt { min-width: 0; font-size: 14px; font-weight: 600; }
+  .menu-item .mt small {
+    display: block; font-weight: 400; font-size: 11.5px; color: var(--ink-3); margin-top: 1px;
+  }
+  .drawer-foot {
+    margin-top: auto; padding: 10px 4px 0 9px; border-top: 1px solid var(--line);
+    font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  }
+
+  .btn {
+    border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink);
+    font-size: 13px; font-weight: 600; padding: 9px 12px; border-radius: 9px; cursor: pointer; flex: 1;
+  }
+  .btn:hover { border-color: var(--ink-3); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: var(--accent-ink); border-color: var(--accent-ink); }
+  .btn.bad { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .btn.bad:hover { background: var(--bad-ink); border-color: var(--bad-ink); }
+
+  /* ── Sheet ───────────────────────── */
+  .sheet-back {
+    position: absolute; inset: 0; background: rgba(20,12,16,.42);
+    display: flex; align-items: flex-end; z-index: 5;
+  }
+  .sheet-back[hidden] { display: none; }
+  /* 시트는 **머리와 본문으로 나뉜 통**이다. 낮은 시트든 전체 화면이든 모양이 같다 —
+     머리는 제자리에 있고 본문만 구른다. 시트 자체는 구르지 않으므로 안여백도 갖지 않는다. */
+  .sheet {
+    background: var(--surface); border-radius: 18px 18px 0 0; width: 100%;
+    display: flex; flex-direction: column;
+    /* 아무리 긴 시트라도 상단바 자리는 남긴다 — 뒤에 무엇이 있었는지 보이고,
+       그 자리를 눌러 닫을 수도 있다 */
+    max-height: calc(100% - var(--bar-h, 62px));
+    overflow: hidden;                     /* 둥근 모서리 밖으로 내용이 삐져나오지 않게 */
+    animation: rise .22s ease-out;
+  }
+  /* 내용만큼만 커지다가 max-height 에 닿을 때 구른다. flex: 1 로 두면 짧은 시트가
+     억지로 늘어난다. */
+  .sheet-body {
+    flex: 0 1 auto; min-height: 0;
+    padding: 12px 18px 18px;
+    /* overflow-y 만 auto 로 두면 overflow-x 도 auto 가 되어, 안쪽 것이 조금만 넘쳐도
+       좌우로 흔들린다. 가로로 흐르는 것(가로 슬라이드)은 저마다 제 통을 갖고 있다. */
+    overflow-x: hidden; overflow-y: auto;
+    /* 맨 위에서 더 당겼을 때 뒤 화면이 딸려 오거나 당겨서-새로고침이 뜨면
+       끌어 닫기가 도중에 끊긴다 — 스크롤을 이 안에 가둔다 */
+    overscroll-behavior: contain;
+  }
+  /* 끄는 동안은 글자가 선택되지 않아야 한다 — 끌다 보면 본문이 파랗게 잡힌다 */
+  .sheet.dragging { user-select: none; -webkit-user-select: none; }
+  @keyframes rise { from { transform: translateY(14px); opacity: .4 } to { transform: none; opacity: 1 } }
+
+  /* 목록이 긴 화면 — 전체를 덮고, 제목줄은 고정한 채 본문만 스크롤된다 */
+  /* 전체 화면은 늘 가득 찬다는 것만 다르다 */
+  .sheet.full { height: calc(100% - var(--bar-h, 62px)); }
+  .sheet.full .sheet-body { flex: 1; padding: 16px 16px 22px; }
+  .sheet.full .sheet-head {
+    flex: none; display: flex; align-items: flex-start; gap: 10px;
+    padding: 2px 16px 11px; border-bottom: 1px solid var(--line);
+  }
+  /* 손잡이는 전체 화면에서도 맨 위 — 어느 창이든 같은 자리를 잡는다 */
+  .sheet.full > .handle-zone { flex: none; padding: 9px 0 7px; }
+  .sheet.full .sh-t { flex: 1; min-width: 0; }
+  .sheet.full .sheet-head h3 { margin: 0; }
+  .sheet.full .sheet-head .sub { margin: 2px 0 0; }
+  /* 제목줄 오른쪽에 붙는 버튼(폴더의 ⋯ 같은 것) */
+  .sheet.full .sheet-head .icon-btn { width: 38px; height: 38px; font-size: 15px; margin-left: auto; }
+  /* 손잡이 — 보이는 건 작은 막대지만 잡는 자리는 넓게 둔다 */
+  /* 시트 맨 위의 붙어 있는 영역 — 손잡이 · 닫기 버튼 · 제목줄이 함께 들어 있다.
+     하나로 묶었으므로 바탕색도 테두리도 여기 한 곳에만 준다. 좌우 여백 밖으로 빼내야
+     옆으로 내용이 비쳐 보이지 않는다. */
+  /* 시트가 세로로 나뉜 통이라 머리는 애초에 구르지 않는다 — 붙여 둘 필요가 없다.
+     닫기 버튼이 이 안에 있으므로 자리를 잡아 주는 기준(relative)만 남긴다. */
+  .sheet-top { position: relative; z-index: 4; flex: none; background: var(--surface); padding: 0 18px; }
+  .handle-zone { padding: 8px 0 12px; cursor: grab; touch-action: none; }
+  .handle-zone:active { cursor: grabbing; }
+  .handle { width: 34px; height: 4px; border-radius: 99px; background: var(--line-2); margin: 0 auto; }
+
+  /* 끌어 내려 닫는 것은 손가락의 방식이다. 마우스로는 어색해서, **마우스가 있는 기기에만**
+     닫기 버튼을 보여 준다. 너비가 아니라 포인터 종류로 가른다 — 큰 태블릿에서 마우스도 없는데
+     나오거나, 창을 줄인 데스크톱에서 사라지는 일이 없게. */
+  .sheet-x, .drawer-x { display: none; }
+  @media (hover: hover) and (pointer: fine) {
+    .sheet, .sheet.full { position: relative; }
+    .sheet-x, .drawer-x {
+      position: absolute; right: 10px; z-index: 1;
+      width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      border: 1px solid var(--line-2); background: var(--surface); color: var(--ink-3);
+      font-size: 13px; line-height: 1;
+    }
+    .sheet-x:hover, .drawer-x:hover { border-color: var(--ink-3); color: var(--ink); }
+    /* 머리 영역(.sheet-top)을 기준으로 세로 한가운데. 머리에 제목줄이 있고 없고에 따라
+       높이가 달라지므로, 숫자로 맞추면 창마다 어긋난다. */
+    .sheet-x { top: 50%; transform: translateY(-50%); }
+    /* 제목줄 오른쪽 끝에 붙는 버튼(폴더의 ⋯)은 닫기 버튼 자리를 비켜 준다.
+       닫기는 자리를 차지하지 않는 absolute 라, 비켜 주지 않으면 그 밑에 깔린다. */
+    .sheet.full .sheet-head .icon-btn { margin-right: 34px; }
+    /* 사이드 메뉴는 머리 영역이 따로 없다 — 오른쪽 가장자리의 손잡이만큼 안쪽에 둔다 */
+    .drawer-x { right: 26px; top: 10px; }
+  }
+  /* 사이드 메뉴는 옆으로 밀어 닫으므로 손잡이도 세로 막대다 — 오른쪽 가장자리에 둔다 */
+  .drawer { position: relative; }
+  .handle-zone.vert {
+    position: absolute; top: 0; right: 0; bottom: 0; width: 22px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .handle-zone.vert .handle { width: 4px; height: 34px; margin: 0; }
+  .drawer.dragging { user-select: none; -webkit-user-select: none; }
+  .sheet h3 { font-family: "Hahmlet", serif; font-size: 19px; margin: 0 0 4px; }
+  .sheet .sub { font-size: 12.5px; color: var(--ink-3); margin: 0 0 14px; }
+
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 5px; }
+  .field input, .field select, .field textarea {
+    width: 100%; background: var(--surface-2); border: 1px solid var(--line-2);
+    border-radius: 9px; padding: 9px 11px; font-size: 13.5px;
+  }
+  .field textarea { font-family: "IBM Plex Mono", monospace; font-size: 12px; resize: vertical; min-height: 66px; line-height: 1.55; }
+
+  /* 보관함 항목 */
+  /* 여러 개 고르기 */
+  .arch-pick { display: flex; align-items: center; flex: none; padding: 0 2px; cursor: pointer; }
+  .arch-pick input { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
+  .bulk {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+    margin-bottom: 10px; padding: 9px 12px; font-size: 12.5px;
+    background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+    border-radius: 10px;
+  }
+  .bulk b { color: var(--accent-ink); }
+  .bulk .bulk-act { display: flex; gap: 6px; margin-left: auto; }
+
+  .arch {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 4px; border-bottom: 1px solid var(--line);
+  }
+  .arch:last-child { border-bottom: 0; }
+  .arch .rt { min-width: 0; flex: 1; }
+  .arch .rt b { display: block; font-size: 13px; font-weight: 600; line-height: 1.35;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .arch .rt span { font-size: 11px; color: var(--ink-3); }
+  .arch-act { display: flex; align-items: center; gap: 5px; flex: none; }
+  .arch-act em { font-style: normal; font-size: 11.5px; font-weight: 600; color: var(--accent-ink); }
+  .mini-btn {
+    border: 1px solid var(--line-2); background: var(--surface); color: var(--ink-2);
+    font-size: 11.5px; font-weight: 600; padding: 4px 9px; border-radius: 7px; cursor: pointer;
+  }
+  .mini-btn:hover { border-color: var(--ink-3); color: var(--ink); }
+  /* 지금 누구의 폴더를 보고 있는지 — 폴더 탭 맨 위 */
+  /* 제목줄 오른쪽에 붙는 버튼들(작품 설정의 취소·저장). 손이 닿기 쉬운 자리라
+     좁은 화면에서는 여기가 주 버튼이고, 아래 버튼줄은 넓은 화면에서 쓰인다. */
+  /* 표지 주소를 치는 칸 — 왼쪽에 지금 모습을 띄워 둔다.
+     주소만 보고는 그림이 맞는지 알 수 없어서, 눈으로 확인할 자리가 있어야 한다. */
+  /* 미리보기는 오른쪽 두 칸(사진 고르기 · 주소)만큼 키운다. 46px 짜리로는 무엇이 담겼는지
+     알아보기 어려웠다. 높이는 옆 칸을 따라가고(stretch), 너비는 표지 비율 3:4 로 따라온다 —
+     숫자를 박아 두면 버튼이나 글꼴이 바뀔 때마다 어긋난다. */
+  .cover-edit { display: flex; gap: 10px; align-items: stretch; }
+  /* 너비를 정하고 비율로 높이를 얻는다. 반대로는 안 된다 — 가로 배치에서 늘어난 높이(stretch)는
+     너비가 정해진 **뒤에** 계산되므로, aspect-ratio 가 거꾸로 너비를 구해 주지 못한다.
+     그래서 그림이 높이를 이끌고, 오른쪽 두 칸이 그 높이에 맞춰 벌어진다. */
+  .cover-edit .thumb {
+    flex: none; width: 70px; height: auto; aspect-ratio: 3 / 4;
+    border-radius: 9px; font-size: 22px;
+  }
+  .cover-edit .cover-in {
+    flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .field .cover-edit input { width: 100%; }
+
+  .crumb-act { display: flex; gap: 6px; margin-left: auto; flex: none; }
+  /* .crumb button 이 28px 정사각형이라 그대로 두면 글자가 눌린다 */
+  .crumb-act button { width: auto; height: auto; padding: 7px 12px; font-size: 12px; }
+  /* .link-row 가 display: flex 를 들고 있어 같은 무게로는 밀린다 — 둘 다 짚어 이긴다 */
+  .link-row.wide-only { display: none; }
+  /* 둘 중 하나만 보인다 — 마우스가 있으면 아래 버튼줄, 손가락이면 제목줄 오른쪽.
+     한 잣대로 함께 갈라야 어느 쪽에서도 버튼이 둘 다 보이거나 하나도 없는 일이 없다. */
+  @media (hover: hover) and (pointer: fine) {
+    .crumb-act { display: none; }
+    .link-row.wide-only { display: flex; }
+  }
+
+  .whose {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin: 2px 0 12px; padding: 9px 11px; border-radius: 11px;
+    background: var(--surface); border: 1px solid var(--line);
+  }
+  .whose .wt { font-size: 12.5px; color: var(--ink-2); min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .whose .wt b { color: var(--ink); font-weight: 600; }
+  .whose .wa { display: flex; gap: 6px; flex: none; }
+  .mini-btn.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+  /* 지금 보고 있는 줄임을 알린다 — 화살표 자리에 대신 놓는다 */
+  .wnow { flex: none; font-size: 11px; font-weight: 600; color: var(--accent-ink);
+    background: var(--accent-soft); border-radius: 99px; padding: 3px 8px; }
+
+  .mini-btn.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .mini-btn.danger:hover { background: var(--bad-ink); border-color: var(--bad-ink); }
+  .mini-btn[disabled] { opacity: .45; cursor: default; }
+
+  .opts { display: flex; flex-direction: column; gap: 8px; }
+  .opt {
+    display: flex; gap: 11px; align-items: flex-start; width: 100%; text-align: left;
+    background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 11px;
+    padding: 12px 14px; cursor: pointer; color: inherit;
+  }
+  .opt:hover { border-color: var(--ink-3); }
+  .opt[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+  .opt .mark {
+    width: 17px; height: 17px; border-radius: 99px; flex: none; margin-top: 2px;
+    border: 2px solid var(--line-2); background: var(--surface);
+  }
+  .opt[aria-pressed="true"] .mark { border-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 3px var(--surface); }
+  .opt .ot { min-width: 0; }
+  .opt .ot b { display: block; font-size: 13.5px; font-weight: 600; margin-bottom: 2px; }
+  .opt[aria-pressed="true"] .ot b { color: var(--accent-ink); }
+  .opt .ot span { font-size: 12px; color: var(--ink-2); line-height: 1.55; }
+
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12.5px; margin: 0 0 14px; }
+  .kv dt { color: var(--ink-3); white-space: nowrap; }
+  .kv dd { margin: 0; word-break: break-all; }
+  .url { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-2); }
+
+  .link-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  /* 되묻는 창은 버튼 둘뿐이라 여백을 조금 더 준다 — 급히 누르다 잘못 짚지 않게 */
+  .link-row.sure { gap: 10px; margin: 14px 0 4px; }
+  .link-row.sure .btn { padding: 11px 12px; }
+  .link-btn {
+    flex: 1; display: block; text-align: center; text-decoration: none;
+    padding: 11px 10px; border-radius: 10px; font-size: 13.5px; font-weight: 600;
+    border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink);
+  }
+  .link-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .link-btn small { display: block; font-weight: 400; font-size: 10.5px; opacity: .78; margin-top: 1px; font-family: "IBM Plex Mono", monospace; }
+
+  .note {
+    background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
+    border-radius: 8px; padding: 9px 12px; font-size: 12.5px; color: var(--ink-2); margin-bottom: 12px;
+  }
+  .note.ok { background: var(--good-soft); border-color: color-mix(in srgb, var(--good) 30%, transparent); }
+
+  /* 설정 화면의 목록 */
+
+  /* 오류·결과 알림 */
+  .toast {
+    position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+    z-index: 8; max-width: min(92%, 460px);
+    background: var(--ink); color: var(--surface);
+    font-size: 13px; line-height: 1.5; padding: 10px 15px; border-radius: 10px;
+    box-shadow: 0 6px 20px -6px rgba(0,0,0,.5);
+    animation: toast-in .18s ease-out;
+  }
+  @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px) } to { opacity: 1; transform: translate(-50%, 0) } }
+
+
+  /* ── 로그인 ───────────────────────── */
+  .login {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px; padding: 32px 24px; text-align: center;
+  }
+  .login-brand { font-family: "Hahmlet", serif; font-weight: 700; font-size: 30px; letter-spacing: -.01em; }
+  .login-brand span { color: var(--accent); }
+  .login-lead { margin: 6px 0 26px; font-size: 14px; color: var(--ink-2); line-height: 1.7; }
+  .login-btns { display: flex; flex-direction: column; gap: 9px; width: min(320px, 100%); }
+  .login-btn {
+    display: block; text-align: center; text-decoration: none;
+    padding: 13px 16px; border-radius: 11px; font-size: 14.5px; font-weight: 600;
+    border: 1px solid rgba(0, 0, 0, .12);
+  }
+  .login-btn:hover { filter: brightness(.96); }
+  /* 아이디·비밀번호로 들어오는 자리 */
+  .login-form { display: flex; flex-direction: column; gap: 8px; width: min(320px, 100%); }
+  .login-form input {
+    padding: 11px 12px; border: 1px solid var(--line-2); border-radius: 11px;
+    background: var(--surface); color: var(--ink); width: 100%;
+  }
+  .login-form input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .login-form #pw-mode { justify-content: center; margin-bottom: 2px; }
+  .login-btn.solid { background: var(--accent); color: #fff; border: 0; }
+  /* 두 갈래(아이디 · 제공자) 사이를 가르는 줄 */
+  .login-or {
+    width: min(320px, 100%); display: flex; align-items: center; gap: 10px;
+    color: var(--ink-3); font-size: 12px; margin: 16px 0 12px;
+  }
+  .login-or::before, .login-or::after {
+    content: ""; flex: 1; height: 1px; background: var(--line);
+  }
+  /* 로그인 버튼들 아래에 놓이는 곁가지 — 색을 빼서 먼저 눈에 들지 않게 한다 */
+  .login-btn.ghost {
+    background: none; color: var(--ink-2); border: 1px solid var(--line-2);
+  }
+  .login-btn.ghost:hover { background: var(--surface-2); color: var(--ink); }
+  .login-foot { margin: 24px 0 0; font-size: 12px; color: var(--ink-3); }
+
+  /* ── 계정 ─────────────────────────── */
+  .acct { display: flex; align-items: center; gap: 11px; }
+  .acct-av { width: 38px; height: 38px; border-radius: 50%; flex: none; object-fit: cover; }
+  .acct-av.ph {
+    background: var(--surface-3); color: var(--ink-2);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 15px;
+  }
+  .acct-t { min-width: 0; }
+  .acct-t b { display: block; font-size: 14px; font-weight: 600; }
+  .acct-t span { font-size: 11.5px; color: var(--ink-3); }
+
+  /* ── 친구 ─────────────────────────── */
+  .fr-list { display: flex; flex-direction: column; }
+  .thumb.ph {
+    background: var(--surface-3); color: var(--ink-2);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px;
+  }
+
+  /* ── 모바일: 문서가 구르는 배치 ─────────────────────────
+     사파리는 **문서**가 아래로 구를 때만 주소창을 접는다. 앱을 화면 높이에 못 박고
+     안쪽 .screen 만 굴리면 문서는 한 번도 움직이지 않아, 주소창이 끝까지 펼쳐진 채
+     남고 그만큼 화면이 좁다.
+
+     그래서 좁은 화면에서는 앱의 높이를 풀어 문서가 구르게 두고, 상단바만 붙여 둔다.
+     이 규칙들은 앞의 정의를 덮어야 하므로 파일 맨 끝에 모아 둔다 — 미디어 쿼리는
+     특이성을 올려 주지 않아서, 앞에 두면 뒤의 규칙에 밀린다. */
+  @media (max-width: 700px) {
+    .app {
+      height: auto; min-height: 100vh; min-height: 100dvh;
+      max-height: none; overflow: visible;
+    }
+    /* 탭은 어디까지 내려가도 닿을 수 있어야 한다 */
+    /* 붙어 있는 상단바가 시트·사이드 메뉴보다 위에 오면 안 된다 — 7 로 두었더니
+       덮개(5·6) 위에 그려져서, 시트 제목줄이 상단바 뒤에 가려 잘려 보였다.
+       내용 위, 덮개 아래인 3 이 제자리다. */
+    .app-bar { position: sticky; top: 0; z-index: 3; background: var(--surface); }
+    .screen { flex: none; overflow: visible; }
+
+    /* 문서가 구르므로 덮개와 버튼은 화면에 붙어 있어야 한다 —
+       .app 안에 매어 두면 문서 끝까지 늘어나 버린다 */
+    .fab { position: fixed; }
+    /* inset: 0 으로 두면 bottom 이 **주소창이 접혔을 때의** 큰 높이에 맞춰져서, 시트가
+       그만큼 아래로 밀리고 위쪽(제목줄)이 화면 밖으로 나간다. dvh 는 지금 보이는 높이를
+       브라우저가 직접 알려 주는 단위다 — 주소창이 접히고 펴질 때 알아서 따라가고,
+       키보드에는 반응하지 않아 입력칸에 커서가 가도 시트가 흔들리지 않는다. */
+    .sheet-back, .drawer-back {
+      position: fixed; top: 0; left: 0; right: 0; bottom: auto; height: 100dvh;
+    }
+
+    /* 사이드 메뉴만은 **화면 맨 끝까지** 흰 바탕이 이어지게 둔다. 시트는 아래에 붙는
+       물건이라 보이는 높이(dvh)에 맞춰야 하지만, 메뉴는 옆에서 나오는 판이라 주소창 자리에서
+       끊기면 잘려 보인다. lvh 는 주소창이 접혔을 때의 큰 높이다.
+
+       대신 맨 아래 줄(설정 · 작품 수)은 주소창에 가리지 않게 그만큼 띄운다.
+       lvh − svh 는 주소창 높이이고 **늘 같은 값**이라, 주소창이 접히든 펴지든 그 줄의
+       자리가 움직이지 않는다. */
+    .drawer-back { height: 100lvh; }
+    .drawer { padding-bottom: calc(12px + 100lvh - 100svh); }
+
+    /* 시트를 열면 뒷장이 따라 구르지 않게 문서를 있던 자리에 붙들어 둔다.
+       아이폰은 overflow: hidden 만으로는 손가락 스크롤을 막지 못한다.
+       한때 이 고정이 화면을 깨뜨린다고 보고 걷어냈는데, 진짜 원인은 시트가 열리자마자
+       입력칸에 커서를 넣던 쪽이었다 (app.js 의 softFocus 참고). */
+    html.locked, html.locked body { overflow: hidden; }
+    html.locked body { position: fixed; left: 0; right: 0; width: 100%; }
+    /* 문서를 고정하는 동안에는 sticky 가 붙을 곳이 없어진다 — 상단바가 제 문서 자리
+       (스크롤한 만큼 위)로 돌아가 화면 밖으로 나가고, 시트 위에 남겨 둔 자리에는
+       상단바 대신 페이지 내용이 비쳤다. 그동안만 화면에 직접 붙여 둔다. */
+    html.locked .app-bar { position: fixed; top: 0; left: 0; right: 0; }
+
+    /* 시트는 화면 맨 아래에 붙는다 — 홈 인디케이터에 마지막 줄이 가리지 않게 띄운다 */
+    .sheet-body { padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+    .sheet.full .sheet-body { padding-bottom: calc(22px + env(safe-area-inset-bottom, 0px)); }
+  }

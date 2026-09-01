@@ -176,16 +176,23 @@ export async function fetchSiteName(host: string): Promise<{ read: boolean; name
     똑같은 대문용 태그를 내놓는다 — 제목은 사이트 이름, og:url 은 대문, 그림은 공용 로고다.
     그걸 그대로 담으면 작품마다 같은 로고가 표지로 붙는다.
 
-    가리는 잣대는 둘이고, 어느 쪽도 사이트 이름을 적어 두지 않는다.
+    가리는 잣대는 셋이고, 어느 쪽도 사이트 이름을 적어 두지 않는다.
 
     ① 제목이 플랫폼·도메인 이름과 똑같다 — 작품 이야기가 아니다.
-    ② **깊은 주소를 물었는데** og:url 이 대문(/)을 가리키고, **제목마저 사이트 이름**이다.
+    ② **이름 없이 그림만** 있다 — 제 이야기를 하는 페이지는 이름부터 밝힌다.
+    ③ **깊은 주소를 물었는데** og:url 이 대문(/)을 가리키고, **제목마저 사이트 이름**이다.
 
     ②는 두 신호가 겹칠 때만 본다. og:url 하나만으로 버리면, 그 태그를 대충 적어 두었을 뿐
     제목과 그림은 멀쩡한 곳까지 잃는다. 대문을 물은 경우(블로그 홈처럼 제목이 곧 사이트
     이름인 곳)는 깊은 주소가 아니라 애초에 걸리지 않는다. */
 function pageIsGeneric(og: Og, askedUrl: string, plat: Platform, title: string): boolean {
   if (title && (title === plat.name || title === plat.id.replace("domain:", ""))) return true;
+  /* 이름은 없는데 그림만 있다 — 제 이야기를 하는 페이지는 이름부터 밝힌다. 이름 없이
+     그림만 내놓는 곳은 대개 서비스 공용 로고를 준다. 네이버 지도가 그렇다: 가게 페이지를
+     브라우저에서 그려서 서버 HTML 에는 상호가 아예 없고, og:image 로는 지도 서비스
+     로고(og-map-400x200.png) 하나만 준다. 그걸 담으면 어느 가게를 담아도 같은 회색
+     지도가 표지로 붙는다. */
+  if (!title && og.image) return true;
   if (!og.url) return false;
   if (title && og.siteName && title !== og.siteName) return false;   // 제목은 제 이야기를 한다
   try {

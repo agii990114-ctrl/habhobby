@@ -649,11 +649,29 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     }
   }
 
+  /* 공개 대상과 퍼가기 권한을 받아 담는다. 만들 때와 고칠 때가 같은 값을 받으므로
+     받아들이는 잣대도 한 곳에 둔다.
+
+     공개 대상은 **실제 친구만** 받는다. 친구가 아닌 사람의 아이디를 끼워 넣어도 저장되지
+     않게 여기서 거른다 — 지우는 쪽이 아니라 담는 쪽에서 막는 것이 안전하다. */
+  const applyShare = (id: string, b: any) => {
+    if (b.share && ["none", "all", "some"].includes(b.share.mode) && !isGuest(user)) {
+      const want: string[] = Array.isArray(b.share.with)
+        ? b.share.with.filter((x: any) => typeof x === "string") : [];
+      setFolderShare(id, b.share.mode as ShareMode, want.filter(v => areFriends(user.id, v)));
+    }
+    /* 퍼가기 권한 — 공개하지 않은 폴더에는 뜻이 없지만, 껐다 켰다 할 때마다 값이
+       날아가면 다시 정해야 하므로 공개 여부와 상관없이 그대로 담아 둔다. */
+    if (["none", "copy", "mirror", "both"].includes(b.take)) setFolderTake(id, b.take as TakeMode);
+  };
+
   if (p === "/api/folders" && m === "POST") {
     const b = await readJson(req);
     const name = String(b.name ?? "").trim();
     if (!name) { json(res, 400, { ok: false, reason: "폴더 이름이 필요합니다." }); return true; }
-    json(res, 201, { ok: true, folder: createFolder(user.id, { name, emoji: String(b.emoji ?? "") }) });
+    const { id } = createFolder(user.id, { name, emoji: String(b.emoji ?? "") });
+    applyShare(id, b);
+    json(res, 201, { ok: true, folder: getFolder(user.id, id) });
     return true;
   }
 
@@ -705,17 +723,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       db.prepare("UPDATE folder SET name = COALESCE(?, name), emoji = COALESCE(?, emoji) WHERE id = ?")
         .run(b.name?.trim() || null, b.emoji || null, id);
 
-      /* 공개 대상은 **실제 친구만** 받는다. 친구가 아닌 사람의 아이디를 끼워 넣어도
-         저장되지 않게 여기서 거른다 — 지우는 쪽이 아니라 담는 쪽에서 막는 것이 안전하다. */
-      if (b.share && ["none", "all", "some"].includes(b.share.mode) && !isGuest(user)) {
-        const want: string[] = Array.isArray(b.share.with) ? b.share.with.filter((x: any) => typeof x === "string") : [];
-        setFolderShare(id, b.share.mode as ShareMode, want.filter(v => areFriends(user.id, v)));
-      }
-      /* 퍼가기 권한 — 공개하지 않은 폴더에는 뜻이 없지만, 껐다 켰다 할 때마다 값이
-         날아가면 다시 정해야 하므로 공개 여부와 상관없이 그대로 담아 둔다. */
-      if (["none", "copy", "mirror", "both"].includes(b.take))
-        setFolderTake(id, b.take as TakeMode);
-
+      applyShare(id, b);
       json(res, 200, { ok: true, folders: listFolders(user.id) });
       return true;
     }

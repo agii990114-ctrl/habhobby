@@ -59,6 +59,46 @@ async function loadFriends() {
 const sortFriends = () => friends.sort((a, b) =>
   (b.starred ? 1 : 0) - (a.starred ? 1 : 0) || b.since - a.since);
 
+/* 이름을 첫소리로 가른다. 한글 열넷에 로마자와 숫자를 뒤에 붙인다 —
+   표시 이름은 사람이 직접 정하는 것이라 무엇이든 올 수 있다. */
+const CHO = ["ㄱ", "ㄲ", "ㄴ", "ㄷ", "ㄸ", "ㄹ", "ㅁ", "ㅂ", "ㅃ", "ㅅ", "ㅆ",
+             "ㅇ", "ㅈ", "ㅉ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"];
+/* 쌍자음은 제 홑자음 칸에 함께 넣는다 — ㄲ 만 있는 목록에서 ㄱ 을 눌렀는데 아무 데도
+   안 가면 고장으로 보인다. 사람이 찾을 때 떠올리는 것은 ㄱ 이다. */
+const CHO_FOLD = { "ㄲ": "ㄱ", "ㄸ": "ㄷ", "ㅃ": "ㅂ", "ㅆ": "ㅅ", "ㅉ": "ㅈ" };
+const INDEX_KEYS = ["ㄱ", "ㄴ", "ㄷ", "ㄹ", "ㅁ", "ㅂ", "ㅅ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ", "A", "#"];
+
+/** 그 이름이 어느 칸에 드는지 */
+function initialOf(name) {
+  const c = (name ?? "").trim().charCodeAt(0);
+  if (Number.isNaN(c)) return "#";
+  if (c >= 0xac00 && c <= 0xd7a3) {                 // 한글 음절
+    const k = CHO[Math.floor((c - 0xac00) / 588)];
+    return CHO_FOLD[k] ?? k;
+  }
+  if (c >= 0x3131 && c <= 0x314e) {                 // 홀자음만 쓴 이름
+    const k = String.fromCharCode(c);
+    return CHO.includes(k) ? (CHO_FOLD[k] ?? k) : "#";
+  }
+  const ch = String.fromCharCode(c).toUpperCase();
+  return ch >= "A" && ch <= "Z" ? "A" : "#";        // 로마자는 한 칸에 모은다
+}
+
+/** 첫소리 차례로 묶는다. 한글 → 로마자 → 그 밖. */
+function byInitial(list) {
+  const rank = k => { const i = INDEX_KEYS.indexOf(k); return i < 0 ? 99 : i; };
+  const sorted = [...list].sort((a, b) =>
+    rank(initialOf(a.displayName)) - rank(initialOf(b.displayName))
+    || a.displayName.localeCompare(b.displayName, "ko"));
+  const out = [];
+  for (const f of sorted) {
+    const k = initialOf(f.displayName);
+    if (!out.length || out.at(-1).key !== k) out.push({ key: k, items: [] });
+    out.at(-1).items.push(f);
+  }
+  return out;
+}
+
 /** 별 하나 — 켜고 끄는 것은 친구 목록에서만 한다 (README 「즐겨찾기」) */
 const starHtml = f => `<button class="star" data-star="${esc(f.id)}"
   aria-pressed="${!!f.starred}" title="즐겨찾기"
@@ -301,6 +341,14 @@ function ago(ts) {
 }
 
 const midnight = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
+
+/** 공개일까지 며칠 남았는지. 날짜끼리 재므로 시각은 보지 않는다 —
+    오늘 밤 11시와 내일 새벽 1시는 두 시간 차이지만 "오늘" 과 "내일" 이다. */
+function daysLeft(t) {
+  const d = new Date(t); d.setHours(0, 0, 0, 0);
+  const n = Math.round((d - midnight()) / 864e5);
+  return n <= 0 ? "오늘" : n === 1 ? "내일" : `${n}일 뒤`;
+}
 const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
 
 /** 그 날이 속한 주의 월요일 자정. 격주의 기준점을 주 단위로 맞추는 데 쓴다. */
@@ -384,6 +432,7 @@ function schedText(w) {
 /* ── 화면 ────────────────────────────────────────────────── */
 const screenEl = document.getElementById("screen");
 const fabEl = document.getElementById("btn-inbox");
+const idleEl = document.getElementById("btn-idle");
 /* 좁은 화면에서는 문서가, 넓은 화면에서는 .screen 이 구른다 (styles.css 끝 참고).
    어느 쪽이든 같은 값을 읽을 수 있게 한 곳에 묶어 둔다. */
 const narrow = () => matchMedia("(max-width: 700px)").matches;
@@ -396,6 +445,7 @@ const narrow = () => matchMedia("(max-width: 700px)").matches;
     .setProperty("--bar-h", `${Math.round(bar.getBoundingClientRect().height)}px`); };
   sync();
   addEventListener("resize", sync);
+  addEventListener("resize", fitWeek);
   if (document.fonts?.ready) document.fonts.ready.then(sync);
 }
 
@@ -417,7 +467,9 @@ const onScroll = () => {
   if (y < 0 || y > scrollMax()) return;      // 튕기는 중 — 사람이 민 것이 아니다
   const d = y - lastScrollY;
   if (Math.abs(d) < 8) return;
-  fabEl.classList.toggle("tucked", d > 0 && y > 28);
+  const tuck = d > 0 && y > 28;
+  fabEl.classList.toggle("tucked", tuck);
+  idleEl.classList.toggle("tucked", tuck);
   lastScrollY = y;
 };
 // 둘 중 하나만 실제로 구르므로 양쪽에 걸어 두어도 겹치지 않는다
@@ -460,12 +512,13 @@ function lockScroll(on) {
 }
 
 
-function workCard(w) {
+/** when 을 주면 "언제 봤는지" 대신 그 글을 적는다 — 공개 예정은 남은 날을 보여 준다 */
+function workCard(w, when) {
   return `<button class="work" data-id="${w.id}">
     <div class="cover" style="${coverStyle(w)}">${coverChar(w)}
       ${w.episode ? `<span class="ep">${esc(w.episode)}</span>` : ""}
     </div>
-    <h4>${esc(w.title)}</h4><time>${ago(w.lastAt)}</time>
+    <h4>${esc(w.title)}</h4><time>${esc(when ?? ago(w.lastAt))}</time>
   </button>`;
 }
 
@@ -571,15 +624,11 @@ function calTail() {
   const dated = m => activeWorks().filter(w =>
     w.schedule.mode === "dated" && w.schedule.next && m(w.schedule.next));
 
-  const later = dated(t => t >= t0).sort((a, b) => a.schedule.next - b.schedule.next);
-  if (later.length)
-    html += `<div class="cal-sec"><h4>공개 예정</h4>${later.map(w => rowHtml(w, schedText(w))).join("")}</div>`;
+  /* 공개 예정도, 날짜에 놓이지 않는 작품(상시·완결·일정 미정)도 여기 늘어놓지 않는다 —
+     캘린더를 밀어내기만 한다. 오른쪽 아래 📋 아이콘의 곁창에서 단락별로 본다. */
 
   // 이미 지난 공개는 앞으로 할 일이 아니고 시간이 갈수록 쌓이기만 한다 — 목록에서 뺀다.
   const past = dated(t => t < t0);
-
-  // 날짜에 놓이지 않는 작품(상시·완결·일정 미정)은 여기 늘어놓지 않는다 —
-  // 캘린더를 밀어내기만 한다. 위쪽 📋 버튼에서 폴더별로 본다.
 
   // 조용히 사라지면 "내 작품 어디 갔지"가 된다. 한 줄로만 알린다 — 늘어나지 않는다.
   if (past.length)
@@ -594,22 +643,39 @@ const idleWorks = () => byRecent(activeWorks().filter(undated));
 const undatedReason = w => ["always", "done"].includes(w.schedule.mode)
   ? SCHED_LABEL[w.schedule.mode] : idleReason(w);
 
-const calSwitch = () => {
-  const n = idleWorks().length;
-  return `<div class="cal-top">
+const calSwitch = () => `<div class="cal-top">
     <div class="cal-switch">${[["week", "주간"], ["month", "월간"]]
       .map(([v, label]) => `<button data-calview="${v}" aria-selected="${calView === v}">${label}</button>`)
       .join("")}</div>
-    ${n ? `<button class="cal-idle" data-idle title="날짜 미지정 작품">📋<span>${n}</span></button>` : ""}
   </div>`;
-};
 
-/* 일정을 안 정한 작품들. 폴더별로 묶어 보여 준다 — 어디에 넣어 둔 것인지가
-   "왜 아직 안 정했나" 를 떠올리게 해서, 한 번에 몰아 정리하기 쉽다. */
-let idleFolder = null;
+/* 달력 칸에서 눈에 안 띄는 것들을 오른쪽 아래 아이콘 하나로 모은다.
+
+   두 종류다 — **공개 예정**(날짜는 있지만 아직 안 왔다)과 **날짜 미지정**(놓일 근거가 없다).
+   앞엣것은 달력 어딘가에 있긴 하지만 달을 넘겨야 보이고, 뒤엣것은 아예 안 놓인다.
+   둘 다 "지금 화면에는 없지만 알고 있어야 하는 것" 이라 한 창에 둔다.
+
+   null 이면 단락들을 가로 목록으로 훑는 화면, 값이 있으면 그 단락의 전체 목록이다.
+   전체 목록은 **창을 새로 띄우지 않고 같은 창 안에서** 갈아 끼운다 — 곁창 위에 또
+   곁창이 쌓이면 어디까지 돌아가야 하는지 알 수 없다. 대신 머리줄에 ‹ 를 둔다. */
+let idleSec = null;
+
+/** 날짜는 정해졌지만 아직 안 온 것 — 가까운 날 먼저 */
+const upcoming = () => activeWorks()
+  .filter(w => w.schedule.mode === "dated" && w.schedule.next && w.schedule.next >= midnight().getTime())
+  .sort((a, b) => a.schedule.next - b.schedule.next);
+
+/** 곁창의 단락들. 공개 예정이 맨 앞이고, 그다음이 날짜 미지정 묶음들이다. */
+function idleSections() {
+  const soon = upcoming();
+  return (soon.length ? [{ key: "_soon", label: "공개 예정", color: "var(--accent)", items: soon }] : [])
+    .concat(idleGroups());
+}
+
+const idleTotal = () => idleSections().reduce((n, g) => n + g.items.length, 0);
 
 function openIdle() {
-  idleFolder = null;
+  idleSec = null;
   drawIdle();
 }
 
@@ -642,43 +708,67 @@ function idleGroups() {
 }
 
 function drawIdle() {
-  const groups = idleGroups();
-  const total = idleWorks().length;
-  // 묶음 제목이 곧 이유라, 줄에는 폴더와 플랫폼을 보여 준다
+  const secs = idleSections();
+  const total = secs.reduce((n, g) => n + g.items.length, 0);
+  const sec = idleSec === null ? null : secs.find(g => g.key === idleSec);
+  if (idleSec !== null && !sec) idleSec = null;        // 다 정리해 그 단락이 비었다
+
+  // 단락 제목이 곧 이유라, 줄에는 폴더와 플랫폼을 보여 준다
   const row = w => rowHtml(w, [
+    w.schedule.mode === "dated" && w.schedule.next
+      ? `${daysLeft(w.schedule.next)} · ${schedText(w)}` : null,
     w.folders.map(id => folders.find(f => f.id === id)?.name).filter(Boolean).join(", ") || null,
     platformOf(w.platformId).name,
   ].filter(Boolean).join(" · "));
 
+  const head = (title, back) => `<div class="crumb">
+      ${back ? `<button data-idle-back aria-label="돌아가기">‹</button>` : ""}
+      <h3>${title}</h3></div>`;
+
   let body;
-  if (!total) body = `<div class="empty">날짜를 정하지 않은 작품이 없습니다.</div>`;
-  else if (idleFolder === null)
-    body = `<div class="folders">${groups.map(g => `<button class="folder" data-idle-grp="${esc(g.key)}">
-      <div class="mini">${g.items.slice(0, 4).map(w => `<i style="${coverStyle(w)}"></i>`).join("")}</div>
-      <span class="txt"><b><i class="idot" style="background:${g.color}"></i>${
-        esc(g.label)}</b><span>${g.items.length}편</span></span>
-      <span class="chev">›</span></button>`).join("")}</div>`;
-  else {
-    const g = groups.find(x => x.key === idleFolder);
-    if (!g) { idleFolder = null; return drawIdle(); }   // 다 정리해 비었다
-    body = `<div class="crumb"><button data-idle-back aria-label="묶음 목록으로">‹</button>
-        <h3><i class="idot" style="background:${g.color}"></i>${esc(g.label)}</h3>
-        <span class="count">${g.items.length}편</span></div>
-      ${g.items.map(row).join("")}`;
+  if (!total) {
+    body = head("추가 목록", false)
+      + `<div class="empty">모두 달력에 놓여 있습니다.</div>`;
+  } else if (!sec) {
+    /* 페이지 탭과 같은 모양 — 단락마다 가로로 밀어 보고, ☰ 로 그 단락 전부를 편다.
+       훑는 것과 다루는 것은 다른 일이라 화면을 나눈다. */
+    body = head("추가 목록", false)
+      + `<p class="sub">${total}편 · 달력 칸에 없거나 아직 오지 않은 것들입니다.</p>`
+      + secs.map(g => `<section class="plat">
+        <div class="plat-h">
+          <i class="idot" style="background:${g.color}"></i>
+          <b>${esc(g.label)}</b><span>${g.items.length}편</span>
+          <span class="plat-act">
+            <button class="edit-dom" data-idle-all="${esc(g.key)}"
+              title="전체 목록" aria-label="${esc(g.label)} 전체 목록">☰</button>
+          </span>
+        </div>
+        ${/* 공개 예정은 "언제 봤는지" 가 뜻이 없다 — 아직 안 나온 것이라 본 적이 없다.
+             그 자리에 며칠 남았는지를 적는다. */""}
+        <div class="rail">${g.items.map(w => workCard(w,
+          g.key === "_soon" ? daysLeft(w.schedule.next) : undefined)).join("")}</div>
+      </section>`).join("");
+  } else {
+    body = head(`<i class="idot" style="background:${sec.color}"></i>${esc(sec.label)}`, true)
+      + `<p class="sub">${sec.items.length}편</p>`
+      + sec.items.map(row).join("");
   }
 
-  openSheet(body, { full: true, title: "📋 날짜 미지정",
-    sub: total ? `${total}편 · 상태별로 묶었습니다` : "모두 날짜가 있습니다" });
+  openSheet(body);
 
-  sheet.querySelector(".sheet-body").addEventListener("click", e => {
-    const g = e.target.closest("[data-idle-grp]");
-    if (g) { idleFolder = g.dataset.idleGrp; return drawIdle(); }
-    if (e.target.closest("[data-idle-back]")) { idleFolder = null; return drawIdle(); }
-    const r = e.target.closest(".row[data-id]");
+  /* 리스너는 openSheet 이 매번 새로 만드는 자식에 붙인다 — sheet 자체에 붙이면
+     다시 그릴 때마다 쌓인다. ‹ 는 머리로 옮겨지고 ☰ 와 카드는 본문에 남는다. */
+  const onClick = e => {
+    const a = e.target.closest("[data-idle-all]");
+    if (a) { idleSec = a.dataset.idleAll; return drawIdle(); }
+    if (e.target.closest("[data-idle-back]")) { idleSec = null; return drawIdle(); }
+    const r = e.target.closest("[data-id]");
     // 다른 목록과 똑같이 작품 화면부터 — 보러갈 수도 있어야 한다.
-    // 목록을 닫지 않고 그 위에 겹친다 — 닫으면 보던 자리로 돌아온다.
+    // 곁창을 닫지 않고 그 위에 겹친다 — 닫으면 보던 자리로 돌아온다.
     if (r) openWork(r.dataset.id, drawIdle);
-  });
+  };
+  sheet.querySelector(".sheet-top").addEventListener("click", onClick);
+  sheet.querySelector(".sheet-body").addEventListener("click", onClick);
 }
 
 /* 하루에 여러 편이 몰리면 칸이 끝없이 길어져 달력 구실을 못 한다.
@@ -767,9 +857,12 @@ function renderCalendar() {
 function renderWeek() {
   const t0 = midnight(), todayDow = t0.getDay();
   const todayList = updatesOn(t0);
+  /* 요일 목록을 제 통(.week-scroll)에 담는다. 좁은 화면에서는 일곱 요일이 세로로 쌓이는데,
+     문서 전체가 굴러가면 오늘이 어디쯤인지 매번 찾아야 했다. 통이 따로 있으면 그 안에서만
+     굴리면 되고, 열 때 오늘을 맨 위로 올려 둘 수 있다 (fitWeek 참고). */
   let html = `<div class="today-strip"><b>${DOW[todayDow]}요일</b>
     <span>${todayList.length ? `${todayList.length}편 업데이트` : "오늘은 쉬어가는 날"}</span></div>
-    <div class="cal-grid">`;
+    <div class="week-scroll"><div class="cal-grid">`;
 
   for (let i = 1; i <= 7; i++) {
     const dow = i % 7;                                   // 월(1) … 토(6) … 일(0)
@@ -790,12 +883,58 @@ function renderWeek() {
         : `<div class="rest">—</div>`}</div>
     </div>`;
   }
-  html += `</div>`;
+  /* 어느 요일이 오늘이든 맨 위까지 올라올 수 있게 뒤에 빈 자리를 둔다. 얼마나 둘지는
+     화면 크기에 달렸으므로 fitWeek 이 재서 정한다 — 여기서는 자리만 잡아 둔다. */
+  html += `</div><div class="week-pad"></div></div>`;
   return html + calTail();
+}
+
+/* 통 안에서 무엇이 어디에 있는지 재는 법. 주간 달력과 친구 목록이 같은 것을 묻는다 —
+   "이것을 맨 위로 올리려면 얼마나 굴러야 하나". 한 자리에 둔다. */
+
+/** 통 맨 위에서 el 까지의 거리. 화면 좌표끼리 빼고 지금 굴러온 만큼을 더한다 —
+    offsetTop 은 어느 조상이 기준인지에 따라 달라져서, 통이 어디에 담기든 같은 값이
+    나오는 이 방법을 쓴다. */
+const posIn = (box, el) =>
+  el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+
+/** at 자리가 맨 위까지 올라올 수 있도록 pad 를 **모자란 만큼만** 늘리고 그 자리를 돌려준다.
+    넉넉히 두면 어디서나 허공이 딸려 온다. */
+function padToReach(box, at, pad) {
+  pad.style.height = "0px";
+  pad.style.height = `${Math.max(0, at + box.clientHeight - box.scrollHeight)}px`;
+  return at;
+}
+
+/** 주간의 요일 통 — 남은 자리를 재서 채우고, 오늘을 맨 위로 올린다.
+
+    높이를 숫자로 박아 두면 글꼴·기기·주소창에 따라 매번 어긋난다. 통이 화면에서 시작하는
+    자리를 재서 아래까지 채운다. 넓은 화면은 일곱 요일이 나란히 서므로 굴릴 것이 없다. */
+function fitWeek() {
+  const box = screenEl.querySelector(".week-scroll");
+  if (!box) return;
+  if (!narrow()) { box.style.maxHeight = ""; return; }
+  box.style.maxHeight = `${Math.max(240, innerHeight - box.getBoundingClientRect().top - 14)}px`;
+
+  const today = box.querySelector("[data-today]");
+  const pad = box.querySelector(".week-pad");
+  if (!today || !pad) return;
+  // 요일은 늘 월→일 차례라 오늘이 앞쪽이면 아래에 남은 것이 모자라 끝까지 못 올라간다
+  box.scrollTop = padToReach(box, posIn(box, today), pad);
 }
 
 /* 월간 — 한 달을 한눈에. 칸에는 작품을 다 못 넣으니 플랫폼 색 점으로 요약하고,
    고른 날의 목록을 격자 아래에 펼친다. */
+/** 달을 넘긴다. 화살표든 손가락이든 같은 길로 온다 — 넘어온 쪽에서 미끄러져 들어온다. */
+function moveMonth(n) {
+  const t0 = midnight();
+  const b = calMonth ? new Date(calMonth) : new Date(t0.getFullYear(), t0.getMonth(), 1);
+  calMonth = new Date(b.getFullYear(), b.getMonth() + n, 1).getTime();
+  render();
+  const g = screenEl.querySelector(".mon-grid");
+  if (g && !reduceMotion()) g.classList.add(n > 0 ? "from-right" : "from-left");
+}
+
 function renderMonth() {
   const t0 = midnight();
   const base = calMonth ? new Date(calMonth) : new Date(t0.getFullYear(), t0.getMonth(), 1);
@@ -1151,9 +1290,18 @@ function render() {
   badge.textContent = n > 99 ? "99+" : n;
   badge.hidden = n === 0;
   fabEl.classList.remove("tucked");
+  /* 곁창 아이콘은 캘린더에서만, 그리고 담을 것이 있을 때만 나온다 —
+     빈 창을 여는 버튼은 눌러 볼 이유가 없다. */
+  const idleN = tab === "cal" ? idleTotal() : 0;
+  idleEl.hidden = !idleN;
+  idleEl.classList.remove("tucked");
+  const ib = document.getElementById("idle-badge");
+  ib.textContent = idleN > 99 ? "99+" : idleN;
+  ib.hidden = !idleN;
   // 안쪽이 구를 때는 내용을 갈아 끼우면 저절로 맨 위가 됐다 — 문서가 구를 땐 직접 올린다
   toTop();
   lastScrollY = 0;
+  fitWeek();
   measureUnknownCovers();
 }
 
@@ -1190,6 +1338,8 @@ let sheetBack = [];
 
 /** 창을 화면에서 걷는다 — 아래에 쌓아 둔 것은 보지 않는다.
     되묻는 창처럼 "이 창만 치우고 다음은 부른 쪽이 정한다" 는 자리에서 쓴다. */
+const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 function hideSheet() {
   // 커서가 남아 있으면 창이 사라진 뒤에도 키보드가 떠 있다
   document.activeElement?.blur?.();
@@ -1324,7 +1474,8 @@ function openSheet(html, opts = {}) {
     // 그다음에 진짜로 누른 것이 대신 먹힌다
     dragged = false;
     if (e.button !== 0) return;
-    if (e.target.closest("input, textarea, select, [contenteditable]")) return;
+    // 가로로 미는 목록 위에서는 시작하지 않는다 — 옆으로 밀다 창이 닫히면 곤란하다
+    if (e.target.closest("input, textarea, select, [contenteditable], .rail")) return;
     scroller = scrollerOf();
     // 머리 영역(손잡이 · 닫기 · 제목줄)은 목록을 내려 본 뒤에도 잡힌다 — 닫으라고 있는 자리다
     onGrip = !!e.target.closest(".sheet-top");
@@ -1359,12 +1510,9 @@ function openSheet(html, opts = {}) {
     const far = dy > CLOSE_AT;
     sheet.classList.remove("dragging");
     sheet.style.transition = "transform .18s ease-out";
-    if (far) {
-      sheet.style.transform = `translateY(${sheet.offsetHeight}px)`;
-      setTimeout(closeSheet, 170);
-    } else {
-      sheet.style.transform = "";
-    }
+    if (!far) { sheet.style.transform = ""; return; }
+    sheet.style.transform = `translateY(${sheet.offsetHeight}px)`;
+    setTimeout(closeSheet, 170);
   };
   sheet.addEventListener("pointerup", end);
   sheet.addEventListener("pointercancel", end);
@@ -1415,6 +1563,68 @@ function openSheet(html, opts = {}) {
     if (!dragged) return;
     dragged = false;
     if (e.target.closest(".rail")) { e.stopPropagation(); e.preventDefault(); }
+  }, true);
+}
+
+/* 월간 달력은 **옆으로 밀어** 달을 넘긴다. 화살표는 그대로 두되, 달력을 넘기는 일은
+   손으로 종이를 넘기는 일에 가깝다.
+
+   세로로 읽는 것과 겹치지 않게 가른다 — 10px 넘게 움직였을 때 **가로가 세로보다 크면**
+   그때만 가져온다. CSS 의 touch-action: pan-y 가 짝을 이룬다: 세로 굴리기는 브라우저에
+   맡기고 가로만 우리가 받는다. 둘 다 우리가 하면 손맛이 무거워진다.
+
+   손을 절반만 따라간다. 끝까지 따라오면 다음 달이 벌써 온 것처럼 보이는데, 놓으면
+   제자리로 돌아오므로 거짓말이 된다. */
+{
+  const COMMIT = 60;              // 이만큼 밀어야 넘어간다
+  const SLOP = 10;                // 여기까지는 '누른 것'
+  let grid = null, x0 = 0, y0 = 0, dx = 0, on = false, swiped = false;
+
+  screenEl.addEventListener("pointerdown", e => {
+    swiped = false;
+    if (e.button !== 0) return;
+    const g = e.target.closest(".mon-grid");
+    if (!g) return;
+    grid = g; x0 = e.clientX; y0 = e.clientY; dx = 0; on = false;
+  });
+
+  screenEl.addEventListener("pointermove", e => {
+    if (!grid) return;
+    const mx = e.clientX - x0, my = e.clientY - y0;
+    if (!on) {
+      if (Math.abs(mx) < SLOP) return;
+      if (Math.abs(my) > Math.abs(mx)) { grid = null; return; }   // 세로로 읽는 중이다
+      on = true; swiped = true;
+      grid.classList.add("swiping");
+      // 손가락이 달력 밖으로 나가도 계속 따라오게 붙잡는다
+      try { grid.setPointerCapture(e.pointerId); } catch {}
+    }
+    dx = mx;
+    grid.style.transform = `translateX(${dx * 0.45}px)`;
+    grid.style.opacity = String(1 - Math.min(0.45, Math.abs(dx) / 520));
+  });
+
+  const end = () => {
+    const g = grid;
+    grid = null;
+    if (!g || !on) return;
+    on = false;
+    g.classList.remove("swiping");
+    if (Math.abs(dx) < COMMIT) {           // 덜 밀었다 — 제자리로 (전이가 되돌린다)
+      g.style.transform = ""; g.style.opacity = "";
+      return;
+    }
+    // 왼쪽으로 밀면 다음 달. 넘어가면 화면을 새로 그리므로 이 요소는 사라진다.
+    moveMonth(dx < 0 ? 1 : -1);
+  };
+  screenEl.addEventListener("pointerup", end);
+  screenEl.addEventListener("pointercancel", end);
+
+  // 밀고 나서 손을 뗀 자리의 날짜가 눌린 것으로 처리된다 — 그 한 번만 막는다
+  screenEl.addEventListener("click", e => {
+    if (!swiped) return;
+    swiped = false;
+    if (e.target.closest(".mon-grid")) { e.stopPropagation(); e.preventDefault(); }
   }, true);
 }
 
@@ -1793,7 +2003,7 @@ function wireOpts(root, key, onPick) {
     숨어 있어도 DOM 에는 남는다 — 머리줄의 저장은 이 버튼을 눌러 주는 방식이라
     (wireHead) 지워 버리면 손가락으로는 담을 수 없게 된다. */
 const actionRow = (id, label) =>
-  `<div class="link-row wide-only"><button class="btn primary" id="${id}">${label}</button></div>`;
+  `<div class="link-row wide-only sep"><button class="btn primary" id="${id}">${label}</button></div>`;
 
 /* ── 일정·폴더 편집기 (등록 시트와 작품 시트가 공유) ───────── */
 function schedSummary(s) {
@@ -1841,7 +2051,9 @@ const placedOnDays = m => ["weekly", "biweekly", "monthly", "monthly-dow", "date
 function schedHtml(s, note, color) {
   const nextVal = s.next
     ? new Date(s.next - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10) : "";
-  return `${color && placedOnDays(s.mode)
+  /* 색과 일정은 **한 단락**이다 — 둘 다 달력에서 이 작품이 어떻게 보이는지를 정한다.
+     그래서 구분선은 둘을 감싼 바깥에 한 번만 긋는다. */
+  return `<div class="sep">${color && placedOnDays(s.mode)
       ? colorPickerHtml(color.value, color.fallback,
           `캘린더 점 색 <span style="text-transform:none;letter-spacing:0">— 달력에서 이 작품을 나타내는 색</span>`)
       : ""}
@@ -1881,7 +2093,7 @@ function schedHtml(s, note, color) {
       : s.mode === "dated"
         ? `<input type="date" data-next value="${nextVal}">`
         : `<div class="rest" style="padding:2px">${SCHED_HINT[s.mode] ?? ""}</div>`}
-  </div>`;
+  </div></div>`;
 }
 
 /* 색 고르개 배선. 사각형을 집으면 채도·명도, 슬라이더가 색상, 값 칸은 직접 입력이다.
@@ -1972,7 +2184,7 @@ function wireSched(root, s, onChange) {
 }
 
 function pickerHtml(selected) {
-  return `<div class="field"><label>폴더</label>
+  return `<div class="field sep"><label>폴더</label>
     <div class="pickers" data-picker>
       ${folders.filter(f => !f.mirror).map(f =>
         `<button class="pick" data-fid="${f.id}" aria-pressed="${selected.includes(f.id)}">${f.emoji} ${esc(f.name)}</button>`).join("")}
@@ -2104,10 +2316,10 @@ function openFolderForm(existing, after) {
       </div></div>
     <div class="field"><label for="fname">이름</label>
       <input id="fname" value="${esc(existing?.name ?? "")}" placeholder="예: 주말에 몰아볼 것" maxlength="24"></div>
-    ${existing && guestMode() ? `<div class="field"><label>친구에게 공개</label>
+    ${guestMode() ? `<div class="field"><label>친구에게 공개</label>
       <div class="rest" style="text-align:left;padding:2px">
         둘러보기로는 폴더를 공개할 수 없습니다. 로그인하면 쓸 수 있어요.</div></div>` : ""}
-    ${existing && !guestMode() ? `<div class="field"><label>친구에게 공개</label>
+    ${!guestMode() ? `<div class="field"><label>친구에게 공개</label>
       ${optsHtml(SHARE_MODES, share.mode, "share")}
       <div data-share-who${share.mode === "some" ? "" : " hidden"}>
         <div class="rest" style="text-align:left;padding:8px 2px 0">친구를 불러오는 중…</div>
@@ -2154,34 +2366,39 @@ function openFolderForm(existing, after) {
   });
   const whoBox = sheet.querySelector("[data-share-who]");
   if (whoBox) {
-    let query = "", drawn = false;
+    let drawn = false;
 
-    /* 이름 칩은 "고른 친구에게만" 을 골랐을 때 처음 한 번만 그린다 — 친구 목록을
-       그때 불러오기 때문이다. 200명이면 한 화면에 다 깔리므로 찾기 칸을 함께 둔다. */
-    const chips = () => {
-      const q = query.trim().toLowerCase();
-      const list = q ? friends.filter(f => f.displayName.toLowerCase().includes(q)) : friends;
-      if (!list.length)
-        return `<div class="rest" style="text-align:left;padding:8px 2px 0">${
-          q ? "찾는 이름이 없습니다." : "아직 친구가 없습니다."}</div>`;
-      return `<div class="pickers">${list.map(fr =>
-        `<button class="pick" data-w="${esc(fr.id)}" aria-pressed="${share.with.includes(fr.id)}"
-          >${fr.starred ? "★ " : ""}${esc(fr.displayName)}</button>`).join("")}</div>`;
+    /* 친구를 **고르개(select)로 하나씩** 담는다. 한때 모든 친구를 이름 칩으로 깔아 두고
+       눌러서 켜고 껐는데, 수십 명이 되면 그것만으로 화면이 가득 차서 정작 아래에 있는
+       퍼가기 설정이 안 보였다. 지금은 담은 사람만 보이므로 목록 길이가 고른 수만큼이다.
+
+       고르개에는 **아직 안 담은 사람만** 올린다. 이미 담은 이름이 남아 있으면 골랐을 때
+       아무 일도 안 일어나는 것처럼 보인다. 담긴 이름을 누르면 빠진다. */
+    const paintWho = () => {
+      const left = friends.filter(f => !share.with.includes(f.id));
+      const got = share.with
+        .map(id => friends.find(f => f.id === id))
+        .filter(Boolean);
+      whoBox.innerHTML = `
+        ${friends.length ? `<select data-who-add aria-label="공개할 친구 고르기">
+            <option value="">${left.length ? "친구 고르기…" : "모두 골랐습니다"}</option>
+            ${left.map(f => `<option value="${esc(f.id)}">${
+              f.starred ? "★ " : ""}${esc(f.displayName)}</option>`).join("")}
+          </select>`
+          : `<div class="rest" style="text-align:left;padding:8px 2px 0">아직 친구가 없습니다.</div>`}
+        ${got.length ? `<div class="pickers" style="margin-top:8px">${got.map(f =>
+            `<button class="pick on" data-w="${esc(f.id)}" title="빼기"
+              >${esc(f.displayName)} <i>✕</i></button>`).join("")}</div>`
+          : friends.length ? `<div class="rest" style="text-align:left;padding:8px 2px 0">
+              고른 사람이 없어 아무에게도 보이지 않습니다.</div>` : ""}`;
     };
 
+    // "고른 친구에게만" 을 골랐을 때 처음 한 번만 불러온다 — 그 전에는 쓸 일이 없다
     const drawWho = async () => {
       if (drawn) return;
       drawn = true;
       await loadFriends();
-      whoBox.innerHTML = `${friends.length > 8
-        ? searchHtml("이름으로 찾기", "", "margin:10px 0 8px")
-        : `<div style="height:10px"></div>`}
-        <div data-who-chips>${chips()}</div>`;
-      const qEl = whoBox.querySelector(".arch-q");
-      if (qEl) qEl.addEventListener("input", () => {
-        query = qEl.value;                   // 칩만 갈아 끼워 치던 자리를 지킨다
-        whoBox.querySelector("[data-who-chips]").innerHTML = chips();
-      });
+      paintWho();
     };
     if (share.mode === "some") drawWho();
 
@@ -2193,11 +2410,16 @@ function openFolderForm(existing, after) {
       sheet.querySelector("[data-take-box]").hidden = v === "none";
     });
     wireOpts(sheet, "take", v => { take = v; });
+
+    whoBox.addEventListener("change", e => {
+      const sel = e.target.closest("[data-who-add]"); if (!sel?.value) return;
+      share.with = [...share.with, sel.value];
+      paintWho();                            // 고르개에서 빠지고 아래에 이름이 붙는다
+    });
     whoBox.addEventListener("click", e => {
       const b = e.target.closest("[data-w]"); if (!b) return;
-      const on = b.getAttribute("aria-pressed") !== "true";
-      b.setAttribute("aria-pressed", on);
-      share.with = on ? [...share.with, b.dataset.w] : share.with.filter(x => x !== b.dataset.w);
+      share.with = share.with.filter(x => x !== b.dataset.w);
+      paintWho();
     });
   }
   wireHead({
@@ -2209,7 +2431,7 @@ function openFolderForm(existing, after) {
         await api("PATCH", `/api/folders/${existing.id}`, { name, emoji, share, take });
         folder = { ...existing, name, emoji };
       } else {
-        ({ folder } = await api("POST", "/api/folders", { name, emoji }));
+        ({ folder } = await api("POST", "/api/folders", { name, emoji, share, take }));
       }
       await reload(); render(); after(folder);
     }),
@@ -2625,13 +2847,14 @@ function openAdd(prefill, fromShare) {
     if (!resolved.ok) { preview.innerHTML = `<div class="note">${esc(resolved.reason)}</div>`; return; }
     const auto = resolved.origin === "og";
     preview.innerHTML = `
-      ${resolved.note ? `<div class="note">${esc(resolved.note)}</div>` : ""}
+      ${resolved.note ? `<div class="note sep">${esc(resolved.note)}</div>` : ""}
+      <div class="sep">
       <dl class="kv"><dt>플랫폼</dt><dd>${esc(resolved.platform.name)} · ${MEDIA[resolved.mediaType] ?? "링크"}</dd></dl>
-      <div class="field">
+      <div class="field" style="margin-bottom:0">
         <label for="in-title">제목
           <span style="text-transform:none;letter-spacing:0">— <span style="color:var(--${auto ? "good" : "warn"})">${auto ? "자동" : "직접 입력"}</span> · ${esc(resolved.originLabel)}</span>
         </label>
-        <input id="in-title" value="${esc(resolved.title)}" placeholder="작품 제목을 입력하세요"></div>
+        <input id="in-title" value="${esc(resolved.title)}" placeholder="작품 제목을 입력하세요"></div></div>
       ${schedHtml(draft.schedule, "어느 플랫폼도 공개하지 않아 직접 고릅니다. 한 번만 정하면 됩니다",
         { value: draft.color, fallback: resolved.platform.color })}
       ${pickerHtml(draft.folders)}
@@ -2902,6 +3125,16 @@ async function openFriends() {
   try { await loadFriends(); } catch (e) { toast(e.message); return; }
   let query = "", onlyStar = false;
 
+  const row = f => `<div class="uf-row">
+    <button class="uf-item" data-friend="${esc(f.id)}">
+      <span class="thumb ph">${esc(f.displayName.slice(0, 1))}</span>
+      <span class="ub"><b>${esc(f.displayName)}</b>
+        <span>${f.sharedFolders ? `나에게 공개한 폴더 ${f.sharedFolders}개` : "나에게 공개한 폴더 없음"}</span></span>
+      <span class="chev">›</span></button>
+    ${starHtml(f)}</div>`;
+
+  /* 목록은 **첫소리 차례**다. 오른쪽 ㄱㄴㄷ 띠를 짚어 뛰려면 차례가 그 띠와 같아야 한다 —
+     별 켠 사람을 위로 올리던 것은 여기서 놓는다. 자주 보는 사람만 보려면 ★ 단추가 있다. */
   const rows = () => {
     const q = query.trim().toLowerCase();
     let list = onlyStar ? friends.filter(f => f.starred) : friends;
@@ -2911,31 +3144,99 @@ async function openFriends() {
         q ? "찾는 이름이 없습니다."
           : onlyStar ? "즐겨찾기에 넣은 친구가 없습니다.<br>목록에서 별을 눌러 보세요."
             : "아직 친구가 없습니다.<br>초대 링크를 보내보세요."}</div>`;
-    return list.map(f => `<div class="uf-row">
-      <button class="uf-item" data-friend="${esc(f.id)}">
-        <span class="thumb ph">${esc(f.displayName.slice(0, 1))}</span>
-        <span class="ub"><b>${esc(f.displayName)}</b>
-          <span>${f.sharedFolders ? `나에게 공개한 폴더 ${f.sharedFolders}개` : "나에게 공개한 폴더 없음"}</span></span>
-        <span class="chev">›</span></button>
-      ${starHtml(f)}</div>`).join("");
+    // 찾는 중이거나 즐겨찾기만 볼 때는 묶지 않는다 — 몇 줄뿐이라 머리글이 짐이 된다
+    if (q || onlyStar) return list.map(row).join("");
+    return byInitial(list).map(g => `<div class="cho-h" data-cho="${g.key}">${g.key}</div>`
+      + g.items.map(row).join("")).join("");
+  };
+
+  /* 오른쪽 가장자리의 첫소리 띠. 짚어서 그대로 끌면 목록이 따라 움직인다.
+     그 칸에 아무도 없으면 흐리게 두되 자리는 지킨다 — 띠가 짧아졌다 길어졌다 하면
+     같은 자리를 짚어도 매번 다른 데로 간다. */
+  const railHtml = () => {
+    const have = new Set(byInitial(friends).map(g => g.key));
+    return `<div class="cho-rail" data-cho-rail aria-hidden="true">${INDEX_KEYS
+      .map(k => `<i data-k="${k}"${have.has(k) ? "" : ' class="off"'}>${k}</i>`).join("")}</div>`;
   };
 
   const starred = () => friends.filter(f => f.starred).length;
 
+  /* 초대 링크는 맨 위에 둔다. 아래에 있으면 친구가 쌓일수록 손이 멀어지는데,
+     이 화면에서 새로 하는 일은 그것 하나뿐이다. */
   openSheet(`
     ${headHtml("친구", { back: false, actions: false,
       sub: `폴더마다 누구에게 보일지 정할 수 있습니다 · ${friends.length}명` })}
+    <button class="btn primary" style="width:100%" data-invite>초대 링크 만들기</button>
+    <div class="rest" style="text-align:left;padding:7px 2px 12px">
+      링크를 받은 사람만 친구가 될 수 있습니다. 아이디로 검색해 아무나 추가하는 방식이 아닙니다.</div>
     ${friends.length ? `<div class="fr-bar">
       ${friends.length > 6 ? searchHtml("이름으로 찾기") : ""}
       <button class="mini-btn" data-only-star aria-pressed="false">★ 즐겨찾기</button>
     </div>` : ""}
-    <div class="fr-list" data-fr-list>${rows()}</div>
-    <button class="btn primary" style="width:100%;margin-top:14px" data-invite>초대 링크 만들기</button>
-    <div class="rest" style="text-align:left;padding:8px 2px 0">
-      링크를 받은 사람만 친구가 될 수 있습니다. 아이디로 검색해 아무나 추가하는 방식이 아닙니다.</div>`);
+    <div class="fr-wrap">
+      <div class="fr-list" data-fr-list>${rows()}</div>
+      ${friends.length > 12 ? railHtml() : ""}
+    </div>
+    ${/* 마지막 칸도 맨 위까지 올라올 수 있게 뒤에 빈 자리를 둔다 — 얼마나 둘지는
+         화면 크기에 달렸으므로 아래에서 재서 정한다 */""}
+    <div class="fr-pad"></div>`);
 
   const list = sheet.querySelector("[data-fr-list]");
-  const repaint = () => { list.innerHTML = rows(); };
+
+  /* 그 칸의 머리글이 통 맨 위에 서려면 얼마나 굴러야 하는지.
+
+     머리글(.cho-h)은 **붙어 있어서**(sticky) 제 자리를 알려 주지 못한다 — 이미 지나온
+     칸은 모두 통 꼭대기에 겹쳐 서 있고, 그때 재면 어느 칸이든 같은 값이 나온다.
+     붙어 있지 않은 **다음 줄**로 재고 머리글 높이만큼 물린다. */
+  const headAt = (body, head) =>
+    posIn(body, head.nextElementSibling ?? head) - head.offsetHeight;
+
+  /* 마지막 칸도 맨 위까지 올라오려면 그 아래에 통 하나만큼이 남아 있어야 한다.
+     :last-of-type 은 **태그**로 세므로 쓰지 않는다 — 머리글도 줄도 div 라 마지막 div 는
+     늘 줄이었고 아무것도 안 잡혔다. */
+  const fitPad = () => {
+    const pad = sheet.querySelector(".fr-pad"), body = sheet.querySelector(".sheet-body");
+    const heads = list.querySelectorAll(".cho-h");
+    const last = heads[heads.length - 1];
+    if (!pad) return;
+    if (!last) { pad.style.height = "0px"; return; }
+    padToReach(body, headAt(body, last), pad);
+  };
+
+  const repaint = () => { list.innerHTML = rows(); fitPad(); };
+  fitPad();
+
+  /* 띠를 짚거나 끌면 그 첫소리의 머리글로 뛴다. 누르는 것과 끄는 것을 가르지 않는다 —
+     짚은 자리가 곧 가려는 곳이라 손가락이 지나가는 대로 따라가면 된다. */
+  const rail = sheet.querySelector("[data-cho-rail]");
+  if (rail) {
+    const body = sheet.querySelector(".sheet-body");
+    const jump = y => {
+      // 짚은 자리의 글자를 좌표로 찾는다 — 끌 때는 elementFromPoint 가 띠를 벗어난다
+      const hit = [...rail.children].find(el => { const r = el.getBoundingClientRect();
+        return y >= r.top && y <= r.bottom; });
+      const k = hit?.dataset.k;
+      if (!k) return;
+      const head = list.querySelector(`[data-cho="${k}"]`);
+      if (!head) return;                    // 그 칸에 아무도 없다
+      body.scrollTop = headAt(body, head);
+    };
+    /* 짚고 있는지는 **우리가 적어 둔다.** hasPointerCapture 로 물으면 붙잡기에 실패한
+       경우(브라우저나 기기에 따라 있다)에 손짓이 통째로 죽는다 — 붙잡기는 손가락이 띠를
+       벗어나도 계속 받으려는 덤이지, 짚었는지를 가리는 근거가 아니다. */
+    let held = false;
+    rail.addEventListener("pointerdown", e => {
+      held = true;
+      try { rail.setPointerCapture(e.pointerId); } catch { /* 못 잡아도 짚는 데는 지장 없다 */ }
+      rail.classList.add("on");
+      jump(e.clientY);
+      e.preventDefault();                   // 띠 위에서는 글자가 잡히지 않게
+    });
+    rail.addEventListener("pointermove", e => { if (held) jump(e.clientY); });
+    const off = () => { held = false; rail.classList.remove("on"); };
+    rail.addEventListener("pointerup", off);
+    rail.addEventListener("pointercancel", off);
+  }
   const qEl = sheet.querySelector(".arch-q");
   if (qEl) qEl.addEventListener("input", () => { query = qEl.value; repaint(); });
 
@@ -2954,8 +3255,11 @@ async function openFriends() {
       const f = friends.find(x => x.id === st.dataset.star);
       f.starred = !f.starred;
       st.setAttribute("aria-pressed", f.starred);   // 서버를 기다리지 않고 먼저 보여 준다
-      sortFriends();                                // 자리는 다시 그릴 때 옮긴다 —
-      if (onlyStar) repaint();                      // 손가락 밑에서 줄이 뛰지 않게
+      /* 이 목록은 첫소리 차례라 별을 켜도 자리가 바뀌지 않는다. 그래도 다시 세워 두는
+         것은 **다른 화면** 때문이다 — 폴더 바꾸기와 공개 대상 고르개는 별 켠 사람을
+         위에 놓으므로, 여기서 켠 것이 그쪽에도 곧바로 반영되어야 한다. */
+      sortFriends();
+      if (onlyStar) repaint();                      // 즐겨찾기만 볼 때는 그 줄이 빠져야 한다
       try { await api("PATCH", `/api/friends/${f.id}`, { starred: f.starred }); }
       catch (err) { f.starred = !f.starred; st.setAttribute("aria-pressed", f.starred); throw err; }
       return;
@@ -3169,6 +3473,7 @@ document.getElementById("btn-menu").onclick = () => {
   drawerBack.hidden = false;
 };
 drawerBack.addEventListener("click", e => { if (e.target === drawerBack) closeDrawer(); });
+idleEl.onclick = openIdle;
 document.getElementById("menu-close").onclick = closeDrawer;   // 마우스가 있는 기기에만 보인다
 
 /* 사이드 메뉴도 끌어 닫는다. 시트는 아래로, 이쪽은 **왼쪽으로** — 그래서 손잡이도
@@ -3272,12 +3577,7 @@ screenEl.addEventListener("click", e => {
     return render();
   }
   const mv = e.target.closest("[data-cal-move]");
-  if (mv) {
-    const t0 = midnight();
-    const b = calMonth ? new Date(calMonth) : new Date(t0.getFullYear(), t0.getMonth(), 1);
-    calMonth = new Date(b.getFullYear(), b.getMonth() + Number(mv.dataset.calMove), 1).getTime();
-    return render();
-  }
+  if (mv) return moveMonth(Number(mv.dataset.calMove));
   if (e.target.closest("[data-cal-today]")) { calMonth = null; calDay = null; return render(); }
   if (e.target.closest("[data-cal-close]")) { calDay = null; return render(); }
   const cd = e.target.closest("[data-cal-day]");

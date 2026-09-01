@@ -299,14 +299,23 @@ const TAKE_MODES = [
   ["copy", "담아가기만", "한 벌 떠 갑니다. 그 뒤로는 내가 고쳐도 그쪽엔 안 갑니다."],
   ["mirror", "미러링만", "내 폴더를 그대로 비춥니다. 내가 고치면 그쪽에도 바뀝니다."],
   ["both", "둘 다", "담아가든 비추든 친구가 고릅니다."],
+  ["edit", "함께 고치기", "공개한 친구들도 이 폴더에 넣고 뺄 수 있습니다. 작품 자체는 넣은 사람만 고칩니다."],
 ];
-const canCopy = t => t === "copy" || t === "both";
-const canMirror = t => t === "mirror" || t === "both";
+// 함께 고치는 사이라면 담아가는 것도 된다 — 가장 너그러운 갈래다
+const canCopy = t => t === "copy" || t === "both" || t === "edit";
+/* 함께 고치는 폴더도 상대 쪽에서는 비추는 폴더로 선다 — 내 목록에 들어오는 길이
+   하나뿐이어야 하고, 그 길은 이미 미러링이 내고 있다. */
+const canMirror = t => t === "mirror" || t === "both" || t === "edit";
 
 const FALLBACK_PLATFORM = { name: "링크", color: "#655A61", fg: "#fff", initial: "?", isDomain: true };
 const platformOf = id => platforms[id] ?? { ...FALLBACK_PLATFORM, id };
 
-const activeWorks = () => works.filter(w => w.state === "active");
+/* 함께 고치는 폴더에서 **남이 넣은 작품**은 그 폴더 안에서만 보인다(folderOnly).
+   그 사람이 정한 일정이 내 캘린더를 채우면 내가 보기로 한 것과 뒤섞인다 —
+   마음에 들면 「내 목록에 담기」로 한 번 눌러 내 것으로 만든다. */
+const activeWorks = () => works.filter(w => w.state === "active" && !w.folderOnly);
+/** 폴더 안을 볼 때만 쓰는 목록 — 남이 넣어 둔 것까지 포함한다 */
+const filedWorks = () => works.filter(w => w.state === "active");
 const worksInState = s => byRecent(works.filter(w => w.state === s));
 const unfiled = () => byRecent(activeWorks().filter(w => !w.filed && !w.folders.length));
 const byRecent = list => [...list].sort((a, b) => b.lastAt - a.lastAt);
@@ -1060,10 +1069,10 @@ function renderMonth() {
 }
 
 function worksIn(fid) {
-  const list = activeWorks();
-  if (fid === "_all") return list;
-  if (fid === "_none") return list.filter(w => !w.folders.length);
-  return list.filter(w => w.folders.includes(fid));
+  // 전체·미분류는 **내가 보기로 한 것**만 — 남이 넣어 둔 것까지 세면 숫자가 낯설어진다
+  if (fid === "_all") return activeWorks();
+  if (fid === "_none") return activeWorks().filter(w => !w.folders.length);
+  return filedWorks().filter(w => w.folders.includes(fid));
 }
 
 /** 폴더 탭 맨 위 — 지금 누구의 폴더를 보고 있는지와, 바꾸는 길 */
@@ -1270,7 +1279,8 @@ function folderRow(fid, emoji, name, f) {
       ${/* 딱지에 **누구를** 미러링하는지까지 적는다. 아래 작은 글씨를 읽지 않고 목록을
             훑는 것만으로 남의 폴더임을 알아야 한다 — 내 폴더와 한 줄로 섞여 있기 때문이다. */""}
       <span class="txt"><b>${emoji ? emoji + " " : ""}${esc(name)}${
-        f?.mirror ? ` <i class="mtag">미러링 · ${esc(f.mirrorOf)}</i>` : ""}</b><span>${
+        f?.mirror ? ` <i class="mtag">${f.canEdit ? "함께" : "미러링"} · ${esc(f.mirrorOf)}</i>`
+          : f?.take === "edit" ? ` <i class="mtag">함께</i>` : ""}</b><span>${
         f?.broken ? esc(f.broken) : `${worksIn(fid).length}개`}</span></span>
       ${real ? "" : `<span class="chev">›</span>`}</button>
     ${real && !folderSel ? `<button class="folder-more" data-folder-edit="${fid}"
@@ -2290,8 +2300,12 @@ function wireSched(root, s, onChange) {
 function pickerHtml(selected) {
   return `<div class="field sep"><label>폴더</label>
     <div class="pickers" data-picker>
-      ${folders.filter(f => !f.mirror).map(f =>
-        `<button class="pick" data-fid="${f.id}" aria-pressed="${selected.includes(f.id)}">${f.emoji} ${esc(f.name)}</button>`).join("")}
+      ${/* 비추기만 하는 폴더는 남의 것이라 넣을 수 없다. **함께 고치는** 폴더는 넣을 수
+           있으므로 함께 올린다 — 그때 이어지는 곳은 원본 폴더다 (서버의 setWorkFolders). */""}
+      ${folders.filter(f => !f.mirror || f.canEdit).map(f =>
+        `<button class="pick" data-fid="${f.mirror ? f.mirror.folder : f.id}"
+          aria-pressed="${selected.includes(f.mirror ? f.mirror.folder : f.id)}"
+          >${f.emoji} ${esc(f.name)}${f.mirror ? " (함께)" : ""}</button>`).join("")}
       <button class="pick add" data-picker-new>＋ 새 폴더</button>
     </div></div>`;
 }
@@ -2372,14 +2386,19 @@ function openMirrorInfo(f, after) {
   const n = worksIn(f.id).length;
   openSheet(`
     ${headHtml(`${f.emoji} ${esc(f.name)}`, { back: false, actions: false,
-      sub: `${esc(f.mirrorOf)}님의 폴더를 미러링 중` })}
+      sub: `${esc(f.mirrorOf)}님의 폴더${f.canEdit ? "를 함께 쓰는 중" : "를 미러링 중"}` })}
     <div class="rest" style="text-align:left;padding:2px 2px 10px">${f.broken
       ? `지금은 볼 수 없습니다 — ${esc(f.broken)}. 폴더는 남아 있지만 비어 있습니다.`
-      : `${esc(f.mirrorOf)}님의 폴더에서 지금 ${n}편이 비쳐 오고 있습니다. 그쪽에서 넣거나 빼면 여기도 바뀝니다.
-         이름·아이콘·공개 설정은 ${esc(f.mirrorOf)}님 것이라 내가 고칠 수 없고,
-         안의 작품도 마찬가지입니다.`}</div>
-    <button class="btn" style="width:100%" id="fdel">미러링 끊기</button>
-    <div class="note">끊어도 ${esc(f.mirrorOf)}님 폴더는 그대로입니다. 여기서 이 줄만 사라집니다.</div>`);
+      : f.canEdit
+        ? `지금 ${n}편이 담겨 있습니다. <b>내 작품을 넣고 뺄 수 있고</b>, 넣은 것은
+           ${esc(f.mirrorOf)}님에게도 보입니다. 폴더 이름과 공개 설정은 ${esc(f.mirrorOf)}님 것이고,
+           남이 넣은 작품은 그 사람만 고칩니다 — 내 캘린더에도 올라오지 않습니다.`
+        : `${esc(f.mirrorOf)}님의 폴더에서 지금 ${n}편이 비쳐 오고 있습니다. 그쪽에서 넣거나 빼면 여기도 바뀝니다.
+           이름·아이콘·공개 설정은 ${esc(f.mirrorOf)}님 것이라 내가 고칠 수 없고,
+           안의 작품도 마찬가지입니다.`}</div>
+    <button class="btn" style="width:100%" id="fdel">${f.canEdit ? "함께 쓰기 그만두기" : "미러링 끊기"}</button>
+    <div class="note">그만두어도 ${esc(f.mirrorOf)}님 폴더는 그대로입니다. 내가 넣어 둔 작품도
+      내 목록에 그대로 남고, 이 묶음에서만 빠집니다.</div>`);
 
   sheet.querySelector("#fdel").onclick = guard(async () => {
     const yes = await askSure({

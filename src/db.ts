@@ -519,18 +519,56 @@ export function getWork(userId: string, id: string): Work | null {
   return toWork(r, fs.map(f => f.folder_id));
 }
 
+/* 내 폴더에만 넣을 수 있는 것이 아니다 — **함께 고치는 폴더**에도 넣는다.
+   그때 이어지는 곳은 내 쪽 비추는 폴더가 아니라 **원본 폴더**다. 그래야 주인에게도,
+   함께 쓰는 다른 사람에게도 같은 한 곳에 담긴다. */
 export function setWorkFolders(userId: string, workId: string, folderIds: string[]): void {
   db.prepare("DELETE FROM work_folder WHERE work_id = ?").run(workId);
-  const own = db.prepare("SELECT id FROM folder WHERE id = ? AND user_id = ?");
   const ins = db.prepare("INSERT OR IGNORE INTO work_folder(work_id, folder_id) VALUES(?,?)");
-  for (const f of folderIds) if (own.get(f, userId)) ins.run(workId, f);
+  for (const f of folderIds) if (mayFile(userId, f)) ins.run(workId, f);
 }
 
 export type ShareMode = "none" | "all" | "some";
 /** 공개한 폴더를 친구가 가져갈 수 있는 방식 */
-export type TakeMode = "none" | "copy" | "mirror" | "both";
-export const canCopy = (t: TakeMode): boolean => t === "copy" || t === "both";
-export const canMirror = (t: TakeMode): boolean => t === "mirror" || t === "both";
+export type TakeMode = "none" | "copy" | "mirror" | "both" | "edit";
+/* 함께 고치는 사이라면 담아가는 것도 된다 — 가장 너그러운 갈래다.
+   같이 꾸린 폴더에서 마음에 드는 것을 내 것으로 만드는 일은 그 폴더의 쓰임 그대로다. */
+export const canCopy = (t: TakeMode): boolean =>
+  t === "copy" || t === "both" || t === "edit";
+/* 함께 고치는 폴더도 상대 쪽에서는 **비추는 폴더**로 선다 — 내 목록에 들어오는 길이
+   하나뿐이어야 하고, 그 길은 이미 미러링이 내고 있다. 다른 것은 고칠 수 있느냐뿐이다. */
+export const canMirror = (t: TakeMode): boolean =>
+  t === "mirror" || t === "both" || t === "edit";
+/** 이 폴더를 볼 수 있는 사람은 **넣고 뺄 수도** 있다 */
+export const canEdit = (t: TakeMode): boolean => t === "edit";
+
+/** 그 폴더를 함께 쓰는 사람들 — 주인과, 주인이 보여 주기로 한 친구들.
+
+    함께 고치기는 "볼 수 있는 사람 = 고칠 수 있는 사람" 이다. 볼 사람을 이미 골라 두었는데
+    고칠 사람을 또 고르게 하면 두 목록이 어긋날 자리가 생긴다. */
+export function folderMembers(folderId: string): { owner: string; all: string[] } | null {
+  const f = db.prepare(`SELECT user_id, share_mode, take_mode
+    FROM folder WHERE id = ?`).get(folderId) as any;
+  if (!f || !canEdit((f.take_mode ?? "copy") as TakeMode)) return null;
+  const owner = f.user_id as string;
+  if (f.share_mode === "all") {
+    const rows = db.prepare("SELECT friend_id FROM friend WHERE user_id = ?").all(owner) as any[];
+    return { owner, all: [owner, ...rows.map(r => r.friend_id)] };
+  }
+  if (f.share_mode === "some") {
+    const rows = db.prepare("SELECT viewer_id FROM folder_share WHERE folder_id = ?")
+      .all(folderId) as any[];
+    return { owner, all: [owner, ...rows.map(r => r.viewer_id)] };
+  }
+  return { owner, all: [owner] };          // 공개하지 않았으면 나뿐이다
+}
+
+/** 내가 이 폴더에 작품을 넣고 뺄 수 있는가 */
+export const mayFile = (userId: string, folderId: string): boolean => {
+  const own = db.prepare("SELECT 1 FROM folder WHERE id = ? AND user_id = ?").get(folderId, userId);
+  if (own) return true;
+  return !!folderMembers(folderId)?.all.includes(userId);
+};
 
 export type Folder = {
   id: string; name: string; emoji: string; ord: number;
@@ -660,11 +698,16 @@ export function sharedView(ownerId: string, viewerId: string): { folders: Folder
   if (!folders.length) return { folders: [], works: [] };
   const ids = folders.map(f => f.id);
   const marks = ids.map(() => "?").join(",");
+  /* 함께 고치는 폴더에는 **누가 넣었든** 다 담긴다. 그 폴더만 주인 말고 다른 사람의
+     작품까지 모으고, 나머지는 여느 때처럼 주인 것만 본다. */
+  const shared = folders.filter(f => canEdit(f.take)).map(f => f.id);
+  const sMarks = shared.map(() => "?").join(",");
   const rows = db.prepare(`
     SELECT DISTINCT w.* FROM work w
     JOIN work_folder wf ON wf.work_id = w.id
-    WHERE w.user_id = ? AND w.state = 'active' AND wf.folder_id IN (${marks})
-    ORDER BY w.last_at DESC`).all(ownerId, ...ids) as any[];
+    WHERE w.state = 'active' AND wf.folder_id IN (${marks})
+      AND (w.user_id = ?${shared.length ? ` OR wf.folder_id IN (${sMarks})` : ""})
+    ORDER BY w.last_at DESC`).all(...ids, ownerId, ...shared) as any[];
   const links = db.prepare(`SELECT work_id, folder_id FROM work_folder
     WHERE folder_id IN (${marks})`).all(...ids) as { work_id: string; folder_id: string }[];
   const byWork = new Map<string, string[]>();
@@ -672,7 +715,12 @@ export function sharedView(ownerId: string, viewerId: string): { folders: Folder
     if (!byWork.has(l.work_id)) byWork.set(l.work_id, []);
     byWork.get(l.work_id)!.push(l.folder_id);
   }
-  return { folders, works: rows.map(r => toWork(r, byWork.get(r.id) ?? [])) };
+  /* 누구 것인지 함께 넘긴다 — 받는 쪽은 남이 넣은 작품을 고칠 수 없고, 제 캘린더에도
+     올리지 않는다 (README 「함께 고치는 폴더」). */
+  return {
+    folders,
+    works: rows.map(r => ({ ...toWork(r, byWork.get(r.id) ?? []), owner: r.user_id })),
+  };
 }
 
 /* ── 초대 ────────────────────────────────────────────────── */

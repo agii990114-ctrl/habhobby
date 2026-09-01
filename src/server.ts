@@ -12,7 +12,7 @@ import {
   createGuest, linkGuest, isGuest,
   createPasswordUser, passwordUser, linkGuestPassword, markLogin,
   sharedView, createInvite, inviteOwner, getUser, setFolderShare, setFolderTake,
-  getFolder, createFolder, canCopy, canMirror,
+  getFolder, createFolder, canCopy, canMirror, canEdit,
   type Work, type User, type ShareMode, type TakeMode,
 } from "./db.ts";
 import {
@@ -171,6 +171,23 @@ function normSchedule(v: any) {
 function withMirrors(me: string): { folders: any[]; works: any[] } {
   const folders = listFolders(me);
   const works: any[] = listWorks(me);
+
+  /* 내가 주인인 **함께 고치는 폴더**에는 친구들이 넣은 작품도 들어 있다.
+     내 표에는 없으므로 따로 모아 온다 — 남의 것이라 고칠 수 없고 달력에도 올리지 않는다. */
+  for (const f of folders.filter(x => !x.mirror && canEdit(x.take))) {
+    const rows = db.prepare(`SELECT w.*, u.display_name AS who FROM work w
+      JOIN work_folder wf ON wf.work_id = w.id
+      JOIN user u ON u.id = w.user_id
+      WHERE wf.folder_id = ? AND w.user_id <> ? AND w.state = 'active'
+      ORDER BY w.added_at DESC`).all(f.id, me) as any[];
+    for (const r of rows) {
+      const w = getWork(r.user_id, r.id);
+      if (!w) continue;
+      works.push({ ...w, folders: [f.id], filed: true, visits: 0, lastAt: w.addedAt,
+        mirror: r.user_id, mirrorOf: r.who ?? "이름 없음", mirrorTake: f.take, folderOnly: true });
+    }
+  }
+
   if (!folders.some(f => f.mirror)) return { folders, works };
 
   /* 한 친구의 폴더를 여럿 비추고 있으면 그 사람 것은 **한 번만** 읽는다 —
@@ -201,7 +218,19 @@ function withMirrors(me: string): { folders: any[]; works: any[] } {
         : !canMirror(src.take) ? "미러링이 꺼졌습니다" : null;
     if (why) return { ...f, mirrorOf: who, broken: why, mirrorTake: "none" };
 
+    const edit = canEdit(src!.take);
+    /* 함께 고치는 폴더라면 **내가 넣은 작품**도 그 안에 있다. 내 작품은 원본 폴더 번호로
+       이어져 있으므로(setWorkFolders 참고), 내 쪽 폴더 번호를 하나 더 달아 준다 —
+       그래야 이 폴더를 열었을 때 남의 것과 내 것이 한자리에 보인다. */
+    if (edit) {
+      for (const w of works) {
+        if (w.mirror || !w.folders.includes(src!.id)) continue;
+        if (!w.folders.includes(f.id)) w.folders = [...w.folders, f.id];
+      }
+    }
     for (const w of view!.works) {
+      // 내가 넣은 것은 위에서 이미 제자리를 잡았다 — 남의 작품으로 다시 놓지 않는다
+      if (edit && (w as any).owner === me) continue;
       if (!w.folders.includes(src!.id)) continue;
       const had = seen.get(w.id);
       if (had) { had.folders.push(f.id); continue; }
@@ -210,12 +239,16 @@ function withMirrors(me: string): { folders: any[]; works: any[] } {
          마지막으로 연 때는 **내 것으로 바꾼다.** 그대로 두면 친구가 무엇을 열 때마다
          내 「최근 본 순」 맨 위로 튀어 오른다 — 나는 한 번도 안 본 작품인데. 대신 담긴
          때를 쓰면 "친구 목록에 새로 들어온 순" 이 되어 흔들리지 않는다. */
+      /* 함께 고치는 폴더에서 **남이 넣은 작품**은 폴더 안에서만 보인다. 그 사람이 정한
+         일정이 내 캘린더를 채우면, 내가 보기로 한 것과 남이 넣어 둔 것이 뒤섞인다.
+         마음에 들면 「내 목록에 담기」로 한 번 눌러 내 것으로 만든다. */
       const row = { ...w, folders: [f.id], filed: true, visits: 0, lastAt: w.addedAt,
-        mirror: f.mirror.owner, mirrorOf: who, mirrorTake: src!.take };
+        mirror: (w as any).owner ?? f.mirror.owner, mirrorOf: nameOf((w as any).owner ?? f.mirror.owner),
+        mirrorTake: src!.take, folderOnly: edit };
       seen.set(w.id, row);
       works.push(row);
     }
-    return { ...f, mirrorOf: who, broken: null, mirrorTake: src!.take };
+    return { ...f, mirrorOf: who, broken: null, mirrorTake: src!.take, canEdit: edit };
   });
   return { folders: out, works };
 }
@@ -304,6 +337,27 @@ async function copyCover(srcUrl: string | null, mineId: string): Promise<string 
   } catch {
     return null;                           // 파일이 없으면 표지 없이 담는다
   }
+}
+
+/** other 의 작품 가운데 내가 담아갈 수 있는 것.
+
+    두 갈래다.
+    ① 그 사람이 나에게 연 폴더에 있고, 그 폴더가 담아가기를 허락한 것.
+    ② **내가 주인인 함께 고치는 폴더**에 그 사람이 넣어 둔 것 — 그 폴더는 내 것이라
+       sharedView 에 잡히지 않는다. 같이 꾸린 목록에서 마음에 드는 것을 내 것으로
+       만드는 일이라 막을 이유가 없다. */
+function takable(me: string, other: string): Map<string, Work> {
+  const out = new Map<string, Work>();
+  const view = sharedView(other, me);
+  for (const w of view.works) {
+    if (view.folders.some(f => w.folders.includes(f.id) && canCopy(f.take))) out.set(w.id, w);
+  }
+  for (const f of listFolders(me).filter(x => !x.mirror && canEdit(x.take))) {
+    const rows = db.prepare(`SELECT w.id FROM work w JOIN work_folder wf ON wf.work_id = w.id
+      WHERE wf.folder_id = ? AND w.user_id = ? AND w.state = 'active'`).all(f.id, other) as any[];
+    for (const r of rows) { const w = getWork(other, r.id); if (w) out.set(w.id, w); }
+  }
+  return out;
 }
 
 /** 한 편을 담아 간다. 이미 있으면 새로 만들지 않고 폴더에만 넣는다. */
@@ -672,7 +726,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     }
     /* 퍼가기 권한 — 공개하지 않은 폴더에는 뜻이 없지만, 껐다 켰다 할 때마다 값이
        날아가면 다시 정해야 하므로 공개 여부와 상관없이 그대로 담아 둔다. */
-    if (["none", "copy", "mirror", "both"].includes(b.take)) setFolderTake(id, b.take as TakeMode);
+    if (["none", "copy", "mirror", "both", "edit"].includes(b.take)) setFolderTake(id, b.take as TakeMode);
   };
 
   if (p === "/api/folders" && m === "POST") {
@@ -738,6 +792,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       return true;
     }
     if (m === "DELETE") {
+      /* 함께 고치던 폴더를 주인이 지우면 친구들이 걸어 둔 이음줄도 함께 사라진다 —
+         ON DELETE CASCADE 가 work_folder 를 걷어 가므로 남의 작품은 제 주인에게 그대로
+         남고 이 묶음에서만 빠진다. 그게 폴더를 지우는 일의 뜻이다. */
       /* 폴더를 지워도 작품은 남는다 — 묶음만 사라진다.
          비추던 폴더면 지우는 것이 곧 미러링을 끊는 일이다. 남의 작품은 애초에 내 표에
          없었으므로 없어질 것도 없다. */
@@ -830,13 +887,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       const view = sharedView(other, user.id);
 
       if (b.work) {
-        const src = view.works.find(w => w.id === b.work);
-        if (!src) { json(res, 404, { ok: false, reason: "볼 수 없는 작품입니다." }); return true; }
-        /* 작품 한 편은 그것이 들어 있는 폴더 **아무 하나라도** 담아가기를 허락하면 담을 수
-           있다. 한 작품이 여러 폴더에 들어 있을 수 있고, 그중 하나라도 열어 뒀다면
-           주인이 그 작품을 가져가도 좋다고 한 것이다. */
-        const open = view.folders.some(f => src.folders.includes(f.id) && canCopy(f.take));
-        if (!open) { json(res, 403, { ok: false, reason: "담아갈 수 없는 작품입니다." }); return true; }
+        /* 한 작품이 여러 폴더에 들어 있을 수 있는데, 그중 **하나라도** 담아가기를
+           허락하면 담을 수 있다 — 주인이 그 작품을 가져가도 좋다고 한 것이다. */
+        const src = takable(user.id, other).get(b.work);
+        if (!src) { json(res, 403, { ok: false, reason: "담아갈 수 없는 작품입니다." }); return true; }
         const { already } = await takeWork(user.id, src, []);
         json(res, 200, { ok: true, already, title: src.title });
         return true;

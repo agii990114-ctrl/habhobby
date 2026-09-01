@@ -596,6 +596,16 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       json(res, 200, { ok: true, work: getWork(user.id, id) });
       return true;
     }
+    /* 눌러 봤다는 표시만 남긴다 — 목록의 붉은 점을 끄려는 것이다.
+
+       마지막으로 연 때(last_at)는 건드리지 않는다. 그건 **실제로 보러 간 때**이고
+       목록의 차례를 정하는 값이라, 열어만 봐도 앞으로 튀어 오르면 차례가 뜻을 잃는다. */
+    if (seg[3] === "seen" && m === "POST") {
+      db.prepare("UPDATE work SET visits = MAX(visits, 1) WHERE id = ? AND user_id = ?")
+        .run(id, user.id);
+      json(res, 200, { ok: true });
+      return true;
+    }
     if (m === "PATCH") {
       const b = await readJson(req);
       const w = getWork(user.id, id);

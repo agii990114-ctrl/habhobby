@@ -512,11 +512,17 @@ function lockScroll(on) {
 }
 
 
-/** when 을 주면 "언제 봤는지" 대신 그 글을 적는다 — 공개 예정은 남은 날을 보여 준다 */
+/** when 을 주면 "언제 봤는지" 대신 그 글을 적는다 — 공개 예정은 남은 날을 보여 준다.
+
+    **`.map(workCard)` 로 부르지 말 것.** map 은 둘째 자리에 번호를 넘기므로 카드마다
+    0·1·2… 가 시각 자리에 찍힌다. 부르는 쪽은 `.map(w => workCard(w))` 로 적는다. */
 function workCard(w, when) {
-  return `<button class="work" data-id="${w.id}">
+  return `<button class="work${w.visits ? "" : " unseen"}" data-id="${w.id}">
     <div class="cover" style="${coverStyle(w)}">${coverChar(w)}
       ${w.episode ? `<span class="ep">${esc(w.episode)}</span>` : ""}
+      ${/* 아직 한 번도 안 열어 본 것. 담자마자 목록 맨 앞에 서므로 눈에 띄는 표가
+           하나 있어야 "새로 온 것" 과 "늘 거기 있던 것" 이 갈린다. */""}
+      ${w.visits ? "" : `<span class="new-dot" aria-label="아직 안 본 작품"></span>`}
     </div>
     <h4>${esc(w.title)}</h4><time>${esc(when ?? ago(w.lastAt))}</time>
   </button>`;
@@ -524,7 +530,7 @@ function workCard(w, when) {
 
 function gridHtml(list, emptyMsg) {
   if (!list.length) return `<div class="empty">${emptyMsg}</div>`;
-  return `<div class="grid">${list.map(workCard).join("")}</div>`;
+  return `<div class="grid">${list.map(w => workCard(w)).join("")}</div>`;
 }
 
 /* 홈 — 플랫폼별 가로 슬라이드. 입력이 최근순이라 Map 삽입 순서가 곧 최근 플랫폼 순이다. */
@@ -548,7 +554,7 @@ function railsHtml(list) {
           <button class="edit-dom" data-plat-all="${esc(pid)}" title="전체 목록" aria-label="전체 목록">☰</button>
         </span>
       </div>
-      <div class="rail">${items.map(workCard).join("")}</div>
+      <div class="rail">${items.map(w => workCard(w)).join("")}</div>
     </section>`;
   }).join("");
 }
@@ -568,8 +574,9 @@ function rowHtml(w, sub, mini) {
 /* 격자에는 내려둔 작품도 놓는다 — "언제부터 언제까지 보던 작품"이 기록으로 남는다.
    격자 아래 단락들은 앞으로 볼 것을 위한 자리라 활성 작품만 다룬다. */
 function updatesOn(date) {
-  return works.filter(w => occursOn(w, date))
-    .sort((a, b) => b.visits - a.visits || b.lastAt - a.lastAt);  // 많이 본 순
+  /* **최근 실행 순.** 한때 많이 본 순이었는데, 그러면 새로 담은 작품이 늘 맨 뒤로 가서
+     정작 챙겨야 할 것이 안 보였다. 담을 때 lastAt 을 지금으로 두므로 새것이 맨 앞에 선다. */
+  return byRecent(works.filter(w => occursOn(w, date)));
 }
 
 /* 달력 한 칸에 매주·격주·매월·날짜 지정이 뒤섞여 있으면 무엇이 오늘만의 일인지 안 보인다.
@@ -628,8 +635,10 @@ function calTail() {
      이야기이고, 한 줄씩 늘어놓는 대신 가로로 훑으므로 자리를 많이 먹지 않는다.
      날짜에 놓이지 않는 작품(상시·완결·일정 미정)은 여기 두지 않는다 — 손봐야 할
      목록이라 성격이 다르고, 오른쪽 아래 📋 의 「추가 목록」에서 본다. */
+  /* 요일 통과 같은 테두리 박스에 담는다 — 나란히 놓인 두 덩이가 한 몸으로 보이면
+     어디까지가 이번 주이고 어디부터가 예정인지 갈리지 않는다. */
   const soon = soonSection();
-  if (soon.items.length) html += secHtml(soon, "data-soon-all");
+  if (soon.items.length) html += `<div class="cal-box">${secHtml(soon, "data-soon-all")}</div>`;
 
   // 이미 지난 공개는 앞으로 할 일이 아니고 시간이 갈수록 쌓이기만 한다 — 목록에서 뺀다.
   const past = dated(t => t < t0);
@@ -703,10 +712,12 @@ function openIdle() {
 }
 
 /** 공개 예정 전부 — 캘린더 아래 단락의 ☰ 가 연다. 추가 목록의 전체 목록과 같은 줄 모양이다. */
+/* 세부 목록은 **폴더 안과 같은 격자**다 (gridHtml). 한 줄씩 늘어놓던 때는 표지가 작아
+   무엇인지 알아보기 어려웠는데, 목록을 훑는 일은 결국 표지를 보는 일이다.
+   훑는 자리(가로 슬라이드)와 다루는 자리(격자)의 모양이 앱 전체에서 같아진다. */
 function openSoon() {
   const g = soonSection();
-  openSheet(g.items.map(w => rowHtml(w,
-    `${daysLeft(w.schedule.next)} · ${schedText(w)} · ${platformOf(w.platformId).name}`)).join(""),
+  openSheet(gridHtml(g.items, "공개 예정인 작품이 없습니다."),
     { full: true, title: "공개 예정", sub: `${g.items.length}편 · 가까운 날부터` });
   sheet.querySelector(".sheet-body").addEventListener("click", e => {
     const r = e.target.closest("[data-id]");
@@ -773,7 +784,7 @@ function drawIdle() {
   } else {
     body = head(`<i class="idot" style="background:${sec.color}"></i>${esc(sec.label)}`, true)
       + `<p class="sub">${sec.items.length}편</p>`
-      + sec.items.map(row).join("");
+      + gridHtml(sec.items, "비어 있습니다.");
   }
 
   openSheet(body);
@@ -797,25 +808,52 @@ function drawIdle() {
    다섯 편까지만 보이고 나머지는 팝업으로 넘긴다. */
 const WEEK_MAX = 5;
 
-function openDayList(t) {
+/* 하루의 목록도 추가 목록과 같은 두 겹이다 — 묶음(매주·격주·매월)을 가로로 훑다가
+   ☰ 로 그 묶음 전부를 편다. 세부로 들어가면 ‹ 로 되돌아온다.
+   창을 새로 쌓지 않고 **같은 창 안에서** 갈아 끼운다. */
+let dayGrp = null;
+
+function openDayList(t, grp = null) {
+  dayGrp = grp;
+  drawDayList(t);
+}
+
+function drawDayList(t) {
   const d = new Date(t);
-  const groups = updatesByMode(d);
+  const groups = updatesByMode(d).map(g => ({ ...g, items: byRecent(g.items) }));
   const total = groups.reduce((n, g) => n + g.items.length, 0);
   const same = midnight().getTime() === t;
+  const g = dayGrp === null ? null : groups.find(x => x.key === dayGrp);
+  if (dayGrp !== null && !g) dayGrp = null;      // 다 정리해 그 묶음이 비었다
 
-  /* 페이지 탭과 같은 모양 — 묶음 제목 아래로 가로 슬라이드다.
-     차례도 페이지 탭과 같이 **최근 본 순**으로 둔다. 같은 물건은 같게 보여야 한다. */
-  openSheet(groups.map(g => `<section class="plat">
-      <div class="plat-h"><b>${esc(g.label)}</b><span>${g.items.length}편</span></div>
-      <div class="rail">${byRecent(g.items).map(workCard).join("")}</div>
-    </section>`).join("") || `<div class="empty">이 날에는 놓인 작품이 없습니다.</div>`, {
+  const title = `${d.getMonth() + 1}월 ${d.getDate()}일 (${DOW[d.getDay()]})`;
+  const body = !total
+    ? `<div class="empty">이 날에는 놓인 작품이 없습니다.</div>`
+    : g
+      ? `<div class="crumb"><button data-day-back aria-label="돌아가기">‹</button>
+           <h3>${esc(g.label)}</h3><span class="count">${g.items.length}편</span></div>
+         ${gridHtml(g.items, "비어 있습니다.")}`
+      : groups.map(x => `<section class="plat">
+          <div class="plat-h"><b>${esc(x.label)}</b><span>${x.items.length}편</span>
+            <span class="plat-act">
+              <button class="edit-dom" data-day-grp="${esc(x.key)}"
+                title="전체 목록" aria-label="${esc(x.label)} 전체 목록">☰</button>
+            </span>
+          </div>
+          <div class="rail">${x.items.map(w => workCard(w)).join("")}</div>
+        </section>`).join("");
+
+  openSheet(body, {
     full: true,
-    title: `${d.getMonth() + 1}월 ${d.getDate()}일 (${DOW[d.getDay()]})`,
+    title: g ? `${title} · ${esc(g.label)}` : title,
     sub: `${total}편${same ? " · 오늘" : ""}`,
   });
   sheet.querySelector(".sheet-body").addEventListener("click", e => {
+    const b = e.target.closest("[data-day-grp]");
+    if (b) { dayGrp = b.dataset.dayGrp; return drawDayList(t); }
+    if (e.target.closest("[data-day-back]")) { dayGrp = null; return drawDayList(t); }
     const w = e.target.closest(".work[data-id]");
-    if (w) openWork(w.dataset.id, () => openDayList(t));
+    if (w) openWork(w.dataset.id, () => drawDayList(t));
   });
 }
 
@@ -891,7 +929,7 @@ function renderWeek() {
     const offset = (dow - todayDow + 7) % 7;
     const d = new Date(t0.getTime() + offset * 864e5);
     const list = updatesOn(d);
-    // 날짜 지정이 맨 위 — 그 안에서는 본래 차례(많이 본 순)를 그대로 지킨다
+    // 날짜 지정이 맨 위 — 그 안에서는 본래 차례(최근 실행 순)를 그대로 지킨다
     const shown = [...list].sort((a, b) => groupRank(a) - groupRank(b));
     html += `<div class="col"${offset === 0 ? " data-today" : ""}>
       <div class="colh"><b>${DOW[dow]}</b>
@@ -1001,7 +1039,7 @@ function renderMonth() {
 
   if (sel) {
     const list = updatesOn(sel);
-    // 주간과 같은 규칙 — 날짜 지정이 맨 위, 다섯 편까지만, 나머지는 더보기 팝업으로
+    // 주간과 같은 규칙 — 날짜 지정이 맨 위, 그 안에서는 최근 실행 순, 다섯 편까지만
     const shown = [...list].sort((a, b) => groupRank(a) - groupRank(b));
     html += `<div class="cal-sec day-panel">
       <div class="day-h">
@@ -1333,6 +1371,44 @@ function render() {
 /* 비율을 알려주지 않는 사이트가 많다. 브라우저는 어차피 이미지를 받으므로
    그때 크기를 재서 가로 이미지면 잘라내지 않게 바꾸고, 다음부터 안 재도록 서버에 남긴다. */
 const measured = new Set();
+/* 비율 재기는 **한 번에 넷씩**만 한다.
+
+   한때 화면에 있는 표지를 통째로 걸어 두었다. 그러면 그림 하나가 두 번씩 불린다 —
+   배경으로 한 번, 재려고 또 한 번 — 그런 요청이 수십 개가 한꺼번에 나간다. 브라우저는
+   한 서버에 여섯 줄쯤만 열어 두므로 나머지는 줄을 서고, 그동안 화면에 보여야 할 표지가
+   뒤로 밀려 **그리다 만 것처럼** 보였다.
+
+   재는 일은 급하지 않다 — 다음에 열 때까지 안 끝나도 그만이고, 한 번 재면 서버에 남아
+   두 번 재지 않는다. 그래서 그리기에 자리를 내주고 천천히 뒤따라간다. */
+const MEASURE_AT_ONCE = 4;
+let measuring = 0;
+const toMeasure = [];
+
+function measureNext() {
+  while (measuring < MEASURE_AT_ONCE && toMeasure.length) {
+    const id = toMeasure.shift();
+    const w = works.find(x => x.id === id);
+    if (!w?.coverUrl || w.coverAspect) continue;
+    measuring++;
+    const img = new Image();
+    const done = () => { measuring--; measureNext(); };
+    img.onload = () => {
+      const a = img.naturalWidth / img.naturalHeight;
+      if (Number.isFinite(a) && a > 0) {
+        w.coverAspect = a;
+        if (a > WIDE)
+          for (const e of document.querySelectorAll(`[data-id="${id}"] .cover, [data-id="${id}"] .thumb`))
+            e.style.backgroundSize = "contain";
+        api("PATCH", `/api/works/${id}`, { coverAspect: a }).catch(() => {});
+      }
+      done();
+    };
+    // 못 읽어도 줄은 계속 흘러야 한다 — 하나가 막혔다고 나머지가 멈추면 안 된다
+    img.onerror = done;
+    img.src = w.coverUrl;
+  }
+}
+
 function measureUnknownCovers() {
   for (const el of screenEl.querySelectorAll(".cover, .thumb")) {
     const id = el.closest("[data-id]")?.dataset.id;
@@ -1341,18 +1417,11 @@ function measureUnknownCovers() {
     if (!w?.coverUrl || w.coverAspect) continue;
     if (w.mirror) continue;               // 남의 작품이라 고쳐 둘 곳이 없다
     measured.add(id);
-    const img = new Image();
-    img.onload = () => {
-      const a = img.naturalWidth / img.naturalHeight;
-      if (!Number.isFinite(a) || a <= 0) return;
-      w.coverAspect = a;
-      if (a > WIDE)
-        for (const e of screenEl.querySelectorAll(`[data-id="${id}"] .cover, [data-id="${id}"] .thumb`))
-          e.style.backgroundSize = "contain";
-      api("PATCH", `/api/works/${id}`, { coverAspect: a }).catch(() => {});
-    };
-    img.src = w.coverUrl;
+    toMeasure.push(id);
   }
+  /* 화면이 먼저 그려지고 나서 시작한다 — 같은 그림을 배경으로 부르는 요청이 이미
+     줄에 서 있는데 그 앞에 끼어들면 바로 그 밀림이 생긴다. */
+  requestAnimationFrame(() => setTimeout(measureNext, 120));
 }
 
 /* ── 시트 ────────────────────────────────────────────────── */
@@ -1777,6 +1846,16 @@ function wireGo(w, count) {
 /* 작품 — 볼 것인가 설정할 것인가, 두 가지만 묻는다 */
 function openWork(id, over) {
   const w = works.find(x => x.id === id); if (!w) return;
+  /* 눌러 본 것은 더 이상 "새로 온 것" 이 아니다 — 붉은 점을 끈다.
+
+     마지막으로 연 때(lastAt)는 건드리지 않는다. 그건 **실제로 보러 간 때**이고 목록의
+     차례를 정하는 값이라, 열어만 봐도 앞으로 튀어 오르면 차례가 뜻을 잃는다.
+     화면에서 먼저 지우고 서버에는 조용히 알린다 — 실패해도 다음에 다시 알린다. */
+  if (!w.mirror && !w.visits) {
+    w.visits = 1;
+    for (const el of document.querySelectorAll(`.work[data-id="${id}"]`)) el.classList.remove("unseen");
+    api("POST", `/api/works/${id}/seen`).catch(() => {});
+  }
   // 비추는 폴더 안의 작품은 내 것이 아니다 — 남의 작품 창으로 보낸다
   if (w.mirror) return openOthersWork(w, {
     ownerId: w.mirror, ownerName: w.mirrorOf, take: w.mirrorTake, over,
@@ -2558,7 +2637,7 @@ function drawPlatformList(pid) {
       return `<div class="empty">${q ? "찾는 작품이 없습니다." : "비어 있습니다."}</div>`;
     return (q ? `<div class="rest" style="text-align:left;padding:0 2px 8px">
         &ldquo;${esc(platQuery.trim())}&rdquo; · ${hits.length}편</div>` : "")
-      + hits.map(w => rowHtml(w, `${MEDIA[w.mediaType] ?? "링크"} · ${schedText(w)} · ${ago(w.lastAt)}`)).join("");
+      + gridHtml(hits, "");
   };
 
   openSheet(`

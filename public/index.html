@@ -5,6 +5,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#C94F0D">
+<!-- 표지는 남의 CDN(네이버·카카오·인스타그램·넷플릭스…)에서 그대로 가져다 쓴다.
+     그런 곳은 대개 **다른 사이트에서 부르는 것**을 막는데, 그 판단을 Referer 로 한다.
+     아예 안 보내면 "어디서 왔는지 모르는 요청" 이 되어 통과하는 경우가 많다.
+     덤으로, 우리 주소를 CDN 마다 알리지 않는다. -->
+<meta name="referrer" content="no-referrer">
 <title>HabHobby</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">

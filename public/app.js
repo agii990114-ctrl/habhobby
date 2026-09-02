@@ -111,7 +111,29 @@ function byInitial(list) {
   return out;
 }
 
-/** 별 하나 — 켜고 끄는 것은 친구 목록에서만 한다 (README 「즐겨찾기」) */
+/** 켜고 끈 별을 다시 칠한다.
+
+    **두 가지를 함께 바꿔야 한다** — 눌린 표시(aria-pressed)는 색을 금색으로 바꾸고,
+    아이콘의 on 은 속을 채운다. 색만 바꾸면 금색 빈 별이라는 어중간한 것이 남아, 다시
+    그리기 전까지 켠 것인지 아닌지 알 수 없다. 실제로 친구 목록에서 그 탈이 났다.
+    칠하는 자리가 셋(친구 줄·폴더 줄·폴더 창)이라 한 곳으로 모은다. */
+const paintStar = (btn, on) => {
+  btn.setAttribute("aria-pressed", !!on);
+  btn.innerHTML = icon("star", on ? "on" : "");
+};
+
+/** 별을 뒤집는다 — 켜짐과 **켠 때**를 함께 바꾼다.
+
+    켠 때를 같이 안 바꾸면, 즐겨찾기 창이 켠 차례대로 세우는데 방금 켠 것만 차례가
+    없어 엉뚱한 자리에 선다. 서버가 답하기 전에 화면을 먼저 그리므로 여기서 미리 채운다.
+    되돌릴 때는 다시 이 함수를 부르면 된다. */
+const flipStar = f => {
+  f.starred = !f.starred;
+  f.starredAt = f.starred ? Date.now() : 0;
+  return f.starred;
+};
+
+/** 별 하나 — 친구 목록에서 쓴다 */
 const starHtml = f => `<button class="star" data-star="${esc(f.id)}"
   aria-pressed="${!!f.starred}" title="즐겨찾기"
   aria-label="${esc(f.displayName)} 즐겨찾기">${icon("star", f.starred ? "on" : "")}</button>`;
@@ -177,8 +199,11 @@ const ICONS = {
   list:    `<path d="M8.5 6.5h12M8.5 12h12M8.5 17.5h12"/><path d="M4 6.5h.01M4 12h.01M4 17.5h.01"/>`,
   search:  `<circle cx="11" cy="11" r="6.8"/><path d="M20 20l-4.2-4.2"/>`,
   bell:    `<path d="M18 8.5a6 6 0 1 0-12 0c0 6.5-2.6 8.5-2.6 8.5h17.2S18 15 18 8.5"/><path d="M13.8 20.5a2.2 2.2 0 0 1-3.6 0"/>`,
-  // 설정 — 톱니는 작게 그리면 뭉개진다. 손잡이 세 줄이 더 또렷하다.
-  sliders: `<path d="M3.5 7h4M11 7h9.5M3.5 12h9.5M17 12h3.5M3.5 17h5.5M13 17h7.5"/><circle cx="9.2" cy="7" r="2.1"/><circle cx="15" cy="12" r="2.1"/><circle cx="11.2" cy="17" r="2.1"/>`,
+  /* 설정 — 톱니바퀴. 한때 「톱니는 작게 그리면 뭉개진다」며 손잡이 세 줄을 썼는데,
+     그건 그리기 나름이었다. 이빨을 여덟 개만 두고 뿌리(7.0)와 끝(9.4)의 차를 크게
+     잡으면 1.25em 에서도 이빨이 하나씩 세어진다. 가운데 구멍은 3.1 — 더 줄이면
+     선 굵기에 먹혀 사라진다. */
+  cog:     `<path d="M10.01 5.29L10.21 2.77L13.79 2.77L13.99 5.29A7 7 0 0 1 15.34 5.85L17.26 4.21L19.79 6.74L18.15 8.66A7 7 0 0 1 18.71 10.01L21.23 10.21L21.23 13.79L18.71 13.99A7 7 0 0 1 18.15 15.34L19.79 17.26L17.26 19.79L15.34 18.15A7 7 0 0 1 13.99 18.71L13.79 21.23L10.21 21.23L10.01 18.71A7 7 0 0 1 8.66 18.15L6.74 19.79L4.21 17.26L5.85 15.34A7 7 0 0 1 5.29 13.99L2.77 13.79L2.77 10.21L5.29 10.01A7 7 0 0 1 5.85 8.66L4.21 6.74L6.74 4.21L8.66 5.85A7 7 0 0 1 10.01 5.29Z"/><circle cx="12" cy="12" r="3.1"/>`,
   plus:    `<path d="M12 5.2v13.6M5.2 12h13.6"/>`,
   // 추가 목록 — 집게 달린 판
   board:   `<path d="M9 4.5H7A2 2 0 0 0 5 6.5v12.6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6.5a2 2 0 0 0-2-2h-2"/><rect x="9" y="2.6" width="6" height="3.8" rx="1.3"/>`,
@@ -645,7 +670,7 @@ const workGridHtml = (list, emptyMsg) => workSel
 const workBarHtml = any => {
   if (!any || workSelKey === null) return "";
   if (!workSel)
-    return `<div class="fr-pick"><button class="mini-btn" data-wsel>선택</button></div>`;
+    return `<div class="fr-pick tight"><button class="mini-btn" data-wsel>선택</button></div>`;
   return `<div class="bulk">
     <b>${workSel.size}개 선택</b>
     ${workSel.size ? `<button class="mini-btn" data-wsel-all>전체 해제</button>` : ""}
@@ -1297,16 +1322,13 @@ function openFolderSheet(id) {
     fav.className = "star sheet-fav";
     fav.title = "즐겨찾기";
     fav.setAttribute("aria-label", "즐겨찾기");
-    const paintFav = () => {
-      fav.setAttribute("aria-pressed", !!f.starred);
-      fav.innerHTML = icon("star", f.starred ? "on" : "");
-    };
+    const paintFav = () => paintStar(fav, f.starred);
     paintFav();
     fav.onclick = () => {
-      f.starred = !f.starred;
+      flipStar(f);
       paintFav(); render();                  // 목록의 차례가 바로 바뀐다
       api("PUT", `/api/folders/${f.id}/star`, { starred: f.starred })
-        .catch(err => { f.starred = !f.starred; paintFav(); render(); toast(err.message); });
+        .catch(err => { flipStar(f); paintFav(); render(); toast(err.message); });
     };
     sheet.querySelector(".sheet-top").append(fav);
 
@@ -1326,7 +1348,7 @@ function openFolderSheet(id) {
     };
     if (!f.mirror || f.canEdit)
       fab("plus", "작품 넣기", "", () => openFolderAdd(f, () => openFolderSheet(id)));
-    fab("sliders", "폴더 설정", "right", () => openFolderForm(f, f2 => {
+    fab("cog", "폴더 설정", "right", () => openFolderForm(f, f2 => {
       closeSheet();
       render();
       if (f2) openFolderSheet(f2.id);        // 고치고 나면 보던 폴더로 돌아온다
@@ -1889,7 +1911,7 @@ function folderRow(fid, emoji, name, f) {
   return `<div class="folder-row">
     ${folderSel && real ? `<label class="arch-pick"><input type="checkbox" data-fpick="${fid}"
       ${folderSel.has(fid) ? "checked" : ""} aria-label="${esc(name)} 선택"></label>` : ""}
-    <button class="folder" data-folder="${fid}">${mini}
+    <button class="folder${real && !folderSel ? " joined" : ""}" data-folder="${fid}">${mini}
       ${/* 딱지에 **누구를** 미러링하는지까지 적는다. 아래 작은 글씨를 읽지 않고 목록을
             훑는 것만으로 남의 폴더임을 알아야 한다 — 내 폴더와 한 줄로 섞여 있기 때문이다. */""}
       ${/* 함께 고치는 폴더는 **내가 연 것인지 불려 간 것인지**가 먼저 보여야 한다 —
@@ -1900,8 +1922,14 @@ function folderRow(fid, emoji, name, f) {
           : f?.take === "edit" ? ` <i class="mtag">공유폴더 · 오너</i>` : ""}</b><span>${
         f?.broken ? esc(f.broken) : `${worksIn(fid).length}개`}</span></span>
       ${real ? "" : `<span class="chev">${icon("right")}</span>`}</button>
+    ${/* 별은 폴더 딱지의 **오른쪽 끝에 이어 붙인다**. 딱지 자체가 button 이라 그 안에
+         또 button 을 넣을 수는 없다(문법에도 어긋나고 누를 때 둘이 엉킨다). 형제로 두되
+         바탕과 테두리를 같게 하고 맞닿는 쪽 모서리를 지워, 눈에는 한 덩어리로 보이게 한다. */""}
+    ${real && !folderSel ? `<button class="star in-folder" data-fstar="${fid}"
+      aria-pressed="${!!f?.starred}" title="즐겨찾기"
+      aria-label="${esc(name)} 즐겨찾기">${icon("star", f?.starred ? "on" : "")}</button>` : ""}
     ${real && !folderSel ? `<button class="folder-more" data-folder-edit="${fid}"
-      title="폴더 설정" aria-label="${esc(name)} 설정">${icon("dots")}</button>` : ""}
+      title="폴더 설정" aria-label="${esc(name)} 설정">${icon("cog")}</button>` : ""}
   </div>`;
 }
 
@@ -3135,10 +3163,15 @@ const FOLDER_KINDS = [["all", "전체"], ["plain", "일반"], ["team", "공유"]
 let fkind = "all";                       // 화면 상태라 시트 밖에 둔다 — 다시 그려도 남는다
 /* 별 켠 폴더가 맨 위로 온다. 친구 목록은 첫소리 차례라 그러지 않았는데(ㄱㄴㄷ 띠를
    짚어 뛰려면 차례가 그 띠와 같아야 한다), 폴더는 짚을 띠가 없어 자주 여는 것을 위로
-   올리는 편이 낫다. 그 안에서는 원래 차례(ord)를 지킨다. */
+   올리는 편이 낫다.
+
+   **별 켠 것끼리는 켠 차례**다. 만든 차례로 두면 맨 위 무리가 목록 아래쪽 차례를 그대로
+   베껴 와, 방금 켠 폴더가 엉뚱한 데 끼어 있다 — 켠 사람은 맨 끝에서 찾게 된다.
+   별을 안 켠 것들끼리는 만든 차례(ord)를 지킨다. */
 const kindShown = () => folders
   .filter(f => fkind === "all" || folderKind(f) === fkind)
-  .slice().sort((a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0));
+  .slice().sort((a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0)
+    || (a.starred ? (a.starredAt || 0) - (b.starredAt || 0) : 0));
 
 /** 갈래 고르개. **두 갈래 넘게 있을 때만** 나온다 — 고를 것이 하나뿐인 고르개는 자리만 먹는다. */
 function kindChips() {
@@ -3159,7 +3192,10 @@ function folderBar() {
     const vis = kindShown().length;
     return `<div class="fbar"><span>폴더 ${
       fkind === "all" ? `${folders.length}개` : `${vis}개 · 전체 ${folders.length}개`}</span>
-      <button class="mini-btn" data-fsel>선택</button></div>`;
+      <span class="fbar-btns">
+        <button class="mini-btn" data-fav-list>${icon("star")} 즐겨찾기</button>
+        <button class="mini-btn" data-fsel>선택</button>
+      </span></div>`;
   }
 
   // 갈래로 좁혀 놓았으면 **보이는 것만** 집는다 — 안 보이는 폴더가 함께 지워지면 안 된다
@@ -3192,6 +3228,48 @@ const deleteFolders = guard(async () => {
   await reload(); render();
   toast(`폴더 ${ids.length}개를 삭제했습니다`);
 });
+
+/** 즐겨찾기에 넣은 폴더만 모아 보는 창.
+
+    목록에서도 별 켠 것이 맨 위에 서지만, 폴더가 스물을 넘어가면 「맨 위」가 곧 「한눈에」
+    는 아니다 — 갈래로 좁혀 놓았으면 별 켠 것이 걸러져 아예 안 보이기도 한다. 여기서는
+    갈래를 보지 않고 별 켠 것만 세운다.
+
+    이 창에서도 별을 끌 수 있다. 끄면 그 줄이 이 창에서 사라지는 것이 당연한 결과라,
+    「어디서 켰는지」 를 기억하지 않아도 된다. */
+function openFavFolders() {
+  const draw = () => {
+    /* 폴더 목록은 만든 차례인데, 여기서는 **별을 켠 차례**로 세운다. 즐겨찾기는 내가
+       하나씩 골라 쌓은 것이라, 쌓은 차례가 곧 내가 기억하는 차례다. */
+    const list = folders.filter(f => f.starred)
+      .slice().sort((a, b) => (a.starredAt || 0) - (b.starredAt || 0));
+    openSheet(`
+      ${headHtml("즐겨찾기", { back: false, actions: false, sub: `${list.length}개` })}
+      ${list.length
+        ? `<div class="folders">${list
+            .map(f => folderRow(f.id, f.emoji, f.name, f)).join("")}</div>`
+        : `<div class="empty">즐겨찾기에 넣은 폴더가 없습니다.<br>폴더 목록에서 별을 눌러 보세요.</div>`}`);
+
+    sheet.addEventListener("click", e => {
+      const st = e.target.closest("[data-fstar]");
+      if (st) {
+        const f = folders.find(x => x.id === st.dataset.fstar);
+        if (!f) return;
+        flipStar(f);
+        draw();                                  // 끈 줄은 이 창에서 빠진다
+        render();                                // 뒤에 선 목록의 차례도 함께 바뀐다
+        return api("PUT", `/api/folders/${f.id}/star`, { starred: f.starred })
+          .catch(err => { flipStar(f); draw(); render(); toast(err.message); });
+      }
+      const fe = e.target.closest("[data-folder-edit]");
+      if (fe) return openFolderForm(folders.find(x => x.id === fe.dataset.folderEdit),
+        () => { closeSheet(); render(); });
+      const fo = e.target.closest("[data-folder]");
+      if (fo) { closeSheet(); openFolderSheet(fo.dataset.folder); }
+    });
+  };
+  draw();
+}
 
 /** 비추는 폴더 — 내 것이 아니라 고칠 것이 없다. 끊는 길만 둔다. */
 function openMirrorInfo(f, after) {
@@ -4420,14 +4498,14 @@ async function openFriends() {
     if (st) {
       const f = friends.find(x => x.id === st.dataset.star);
       f.starred = !f.starred;
-      st.setAttribute("aria-pressed", f.starred);   // 서버를 기다리지 않고 먼저 보여 준다
+      paintStar(st, f.starred);                     // 서버를 기다리지 않고 먼저 보여 준다
       /* 이 목록은 첫소리 차례라 별을 켜도 자리가 바뀌지 않는다. 그래도 다시 세워 두는
          것은 **다른 화면** 때문이다 — 폴더 바꾸기와 공개 대상 고르개는 별 켠 사람을
          위에 놓으므로, 여기서 켠 것이 그쪽에도 곧바로 반영되어야 한다. */
       sortFriends();
       if (onlyStar) repaint();                      // 즐겨찾기만 볼 때는 그 줄이 빠져야 한다
       try { await api("PATCH", `/api/friends/${f.id}`, { starred: f.starred }); }
-      catch (err) { f.starred = !f.starred; st.setAttribute("aria-pressed", f.starred); throw err; }
+      catch (err) { f.starred = !f.starred; paintStar(st, f.starred); throw err; }
       return;
     }
     const b = e.target.closest("[data-friend]");
@@ -4802,6 +4880,18 @@ screenEl.addEventListener("click", e => {
   const k = e.target.closest("[data-fkind]");
   if (k) { fkind = k.dataset.fkind; return render(); }
   const c = e.target.closest("[data-filter]"); if (c) { filter = c.dataset.filter; return render(); }
+  /* 별을 켜면 그 폴더가 목록 맨 위로 온다(kindShown). 줄이 자리를 옮기므로 그 자리에서
+     칠하는 것으로는 모자라고 목록을 다시 세워야 한다 — 서버는 기다리지 않는다. */
+  const fs2 = e.target.closest("[data-fstar]");
+  if (fs2) {
+    const f = folders.find(x => x.id === fs2.dataset.fstar);
+    if (!f) return;
+    flipStar(f);
+    render();
+    return api("PUT", `/api/folders/${f.id}/star`, { starred: f.starred })
+      .catch(err => { flipStar(f); render(); toast(err.message); });
+  }
+  if (e.target.closest("[data-fav-list]")) return openFavFolders();
   const fe = e.target.closest("[data-folder-edit]");
   if (fe) return openFolderForm(folders.find(x => x.id === fe.dataset.folderEdit),
     () => { closeSheet(); render(); });

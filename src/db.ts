@@ -748,6 +748,8 @@ export type Folder = {
   id: string; name: string; emoji: string; ord: number;
   /** 자주 여는 폴더 — 내 목록에서 위로 온다. 남에게는 보이지 않는다. */
   starred: boolean;
+  /** 별을 **켠 때**. 꺼져 있으면 0. 즐겨찾기 창이 켠 차례대로 세울 때 쓴다. */
+  starredAt: number;
   share: { mode: ShareMode; with: string[] };
   take: TakeMode;
   /** 함께 고치는 폴더에 이름이 오른 사람들과 그 상태 (pending · ok) */
@@ -777,7 +779,8 @@ function folderRows(where: string, ...args: unknown[]): Folder[] {
     /* 함께 고치는 폴더의 참여자와 그 상태. 주인이 「공유자」 창에서 보는 값이다. */
     const people = st.get(r.id) ?? [];
     return {
-      id: r.id, name: r.name, emoji: r.emoji, ord: r.ord, starred: !!r.starred,
+      id: r.id, name: r.name, emoji: r.emoji, ord: r.ord,
+      starred: !!r.starred, starredAt: r.starred || 0,
       share: { mode: (r.share_mode ?? "none") as ShareMode, with: people.map(p => p.id) },
       take: (r.take_mode ?? "copy") as TakeMode,
       people,
@@ -791,10 +794,15 @@ export const listFolders = (userId: string): Folder[] => folderRows("user_id = ?
 export const getFolder = (userId: string, id: string): Folder | null =>
   folderRows("user_id = ? AND id = ?", userId, id)[0] ?? null;
 
-/** 별을 켜고 끈다. 내 폴더에만 켤 수 있다 — 남의 폴더 줄은 애초에 내 표에 없다. */
+/** 별을 켜고 끈다. 내 폴더에만 켤 수 있다 — 남의 폴더 줄은 애초에 내 표에 없다.
+
+    켜진 표시로 **1 이 아니라 켠 시각**을 담는다. 0 이 아니면 켜진 것이라는 규칙은
+    그대로여서(`!!starred`) 읽는 쪽은 하나도 바뀌지 않고, 즐겨찾기 창은 이 값으로
+    켠 차례를 세운다. 컬럼을 새로 만들지 않으니 옮겨 심을 것도 없다 — 예전에 1 로
+    켜 둔 줄은 가장 이른 시각이 되어 자연히 맨 앞에 선다. */
 export const starFolder = (userId: string, folderId: string, on: boolean): boolean =>
   !!db.prepare("UPDATE folder SET starred = ? WHERE id = ? AND user_id = ?")
-    .run(on ? 1 : 0, folderId, userId).changes;
+    .run(on ? Date.now() : 0, folderId, userId).changes;
 
 /** 폴더 한 줄 만들기 — 새 폴더 · 담아가기 · 미러링이 모두 이 길로 온다 */
 export function createFolder(userId: string, p: {

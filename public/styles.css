@@ -354,6 +354,7 @@
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     margin-bottom: 9px; padding: 0 2px; font-size: 12.5px; color: var(--ink-3);
   }
+  .fbar-btns { display: flex; align-items: center; gap: 6px; flex: none; }
   .folder {
     display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
     background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px;
@@ -390,6 +391,20 @@
   }
   .folder-row { display: flex; align-items: stretch; gap: 6px; }
   .folder-row .folder { flex: 1; min-width: 0; }
+
+  /* 별을 딱지 **오른쪽 끝에 이어 붙인다**. 딱지가 button 이라 그 안에 넣을 수 없어
+     형제로 두되, 바탕·테두리를 같게 하고 맞닿는 쪽 모서리와 테두리를 지워 한 덩어리로
+     보이게 한다. 사이 틈(gap)도 여기서만 없앤다. */
+  .folder-row .folder.joined { border-radius: 12px 0 0 12px; border-right: 0; margin-right: -6px; }
+  .star.in-folder {
+    align-self: stretch;               /* 딱지 높이를 그대로 따라야 이어 붙은 것으로 보인다 */
+    width: 40px; height: auto;
+    background: var(--surface-2); border: 1px solid var(--line); border-left: 0;
+    border-radius: 0 12px 12px 0;
+  }
+  /* 딱지에 손이 올라가면 별도 함께 밝아진다 — 한 덩어리인데 반쪽만 반응하면 갈라져 보인다 */
+  .folder.joined:hover + .star.in-folder { background: var(--surface-3); border-color: var(--line-2); }
+  .star.in-folder:hover { background: var(--surface-3); }
   .folder-more {
     flex: none; width: 38px; border-radius: 12px; cursor: pointer;
     border: 1px solid var(--line); background: var(--surface); color: var(--ink-3);
@@ -944,7 +959,10 @@
   }
   /* 고르는 줄. 「선택」은 오른쪽 끝 — 위의 즐겨찾기 단추와 같은 세로줄에 선다.
      찾는 줄과 넉넉히 띄운다: 붙여 두면 찾기 칸에 딸린 단추처럼 읽힌다. */
-  .fr-pick { display: flex; justify-content: flex-end; margin: 30px 0 4px; }
+  .fr-pick { display: flex; justify-content: flex-end; margin: 30px 0 20px; }
+  /* 팝업 안의 작품 고르기는 바로 위가 제목줄이라 위 여백이 필요 없다 — 친구 목록은
+     위에 찾기 칸이 서므로 30px 를 그대로 둔다. */
+  .fr-pick.tight { margin-top: 0; }
   [data-fr-bulk] .bulk { margin-top: 30px; }
   /* 꾹 눌러 고르는 자리라 **글자가 잡히면 안 된다** — 손가락으로 누르고 있으면 이름이
      파랗게 잡히고 복사 메뉴가 뜨는데, 그건 지금 하려는 일이 아니다. */

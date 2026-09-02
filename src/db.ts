@@ -590,7 +590,7 @@ export function cleanName(s: string): string {
 function foldName(s: string): string { return cleanName(s).toLowerCase(); }
 
 /** 그 이름을 이미 쓰는 사람이 있는가. `except` 는 자기 자신(이름을 그대로 두는 경우). */
-export function nameTaken(name: string, except?: string): boolean {
+function nameTaken(name: string, except?: string): boolean {
   const k = foldName(name);
   if (!k) return false;
   const r = db.prepare(`SELECT id FROM user
@@ -954,9 +954,14 @@ export const readNotices = (userId: string): number =>
   db.prepare("UPDATE folder_notice SET read_at = ? WHERE user_id = ? AND read_at IS NULL")
     .run(Date.now(), userId).changes;
 
-/** 한 줄 치운다 */
-export const dropNotice = (userId: string, id: string): boolean =>
-  !!db.prepare("DELETE FROM folder_notice WHERE id = ? AND user_id = ?").run(id, userId).changes;
+/** 이미 읽은 소식을 걷어 낸다 — 앱을 새로 열 때 한 번 부른다.
+
+    소식은 **한 번 읽으면 할 일이 끝난다.** 읽고 나서 또 「치우기」를 누르게 하면 같은
+    일을 두 번 시키는 셈이라, 목록을 열어 본 것으로 처리를 갈음하고 다음에 열 때 걷는다.
+    바로 지우지 않는 이유는 **보고 있는 목록이 눈앞에서 사라지면 안 되기** 때문이다. */
+export const sweepNotices = (userId: string): number =>
+  db.prepare("DELETE FROM folder_notice WHERE user_id = ? AND read_at IS NOT NULL")
+    .run(userId).changes;
 
 /** 내가 받은 폴더 초대 — 아직 수락도 거절도 안 한 것들 */
 export function folderInvites(userId: string): {

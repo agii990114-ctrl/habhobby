@@ -14,8 +14,8 @@ import {
   sharedView, createInvite, inviteOwner, getUser, setFolderShare, setFolderTake,
   getFolder, createFolder, canCopy, canMirror, canEdit, seenByMe, markSeen,
   folderInvites, acceptFolder, declineFolder, leaveFolder,
-  noticeBreak, folderNotices, readNotices, dropNotice, inviteToFolder, unlinkFromFolder,
-  cleanName, nameTaken, setDisplayName,
+  noticeBreak, folderNotices, readNotices, sweepNotices, inviteToFolder, unlinkFromFolder,
+  cleanName, setDisplayName,
   type Work, type User, type ShareMode, type TakeMode,
 } from "./db.ts";
 import {
@@ -494,7 +494,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
   }
 
 
-  if (p === "/api/state" && m === "GET") { json(res, 200, stateSnapshot(user)); return true; }
+  if (p === "/api/state" && m === "GET") {
+    /* `?fresh=1` 은 **앱을 새로 열 때**만 붙는다 — 지난번에 읽어 둔 소식을 걷고 값을 준다.
+       화면을 다시 그릴 때마다 걷으면, 목록을 보는 사이에 다시 그려질 때 눈앞에서 줄이
+       사라진다. 걷는 것과 값을 주는 것을 한 왕복에 묶는 이유는 순서 때문이다:
+       나중에 걷으면 방금 내보낸 목록에 걷힌 것이 그대로 남는다. */
+    if (url.searchParams.get("fresh") === "1") sweepNotices(user.id);
+    json(res, 200, stateSnapshot(user));
+    return true;
+  }
 
   if (p === "/api/resolve" && m === "POST") {
     const { url: target } = await readJson(req);
@@ -928,14 +936,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     return true;
   }
 
-  /* 이름을 치는 동안 물어보는 자리. 저장을 눌러야 알 수 있으면, 스무 자를 채우고
-     나서야 다시 시작하게 된다. */
-  if (p === "/api/me/name-free" && m === "GET") {
-    const want = cleanName(url.searchParams.get("q") ?? "");
-    json(res, 200, { ok: true, name: want, free: !!want && !nameTaken(want, user.id) });
-    return true;
-  }
-
   /* ── 초대 ── */
   if (p === "/api/invites" && m === "POST") {
     if (!user.displayName) {
@@ -1004,11 +1004,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
   if (p === "/api/folder-notices" && m === "POST") {
     readNotices(user.id);
     json(res, 200, { ok: true });
-    return true;
-  }
-  if (seg[0] === "api" && seg[1] === "folder-notices" && seg[2] && m === "DELETE") {
-    const gone = dropNotice(user.id, seg[2]);
-    json(res, gone ? 200 : 404, gone ? { ok: true } : { ok: false, reason: "이미 치운 소식입니다." });
     return true;
   }
 

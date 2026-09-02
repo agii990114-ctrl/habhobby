@@ -42,8 +42,13 @@ let calDay = null;         // 월간에서 고른 날. null이면 오늘 또는 
 
 let siteNamesPending = 0;
 
-async function reload() {
-  const s = await api("GET", "/api/state");
+/** `fresh` 는 **앱을 새로 열 때 한 번**이다 — 지난번에 읽어 둔 소식을 걷고 나서 값을 준다.
+
+    걷는 일을 따로 부르지 않고 이 길에 얹는 이유가 둘 있다. 하나는 왕복이 하나 더 늘면
+    첫 화면이 그만큼 늦어지고, 다른 하나는 순서다 — 나중에 걷으면 방금 받아 온 목록에는
+    걷힌 것이 그대로 남아, 새로 고쳤는데 안 없어진 것처럼 보인다. */
+async function reload(fresh = false) {
+  const s = await api("GET", "/api/state" + (fresh ? "?fresh=1" : ""));
   works = s.works; folders = s.folders; settings = s.settings;
   platforms = s.platforms; me = s.me;
   friendCount = s.friendCount ?? 0;
@@ -1348,34 +1353,23 @@ function openFolderInvites(back) {
 
 /** 끊겼다는 소식. 여는 순간 읽음으로 둔다 — 붉은 숫자는 "봤나" 를 세는 것이다. */
 function openBreakNotices(back) {
-  const draw = () => {
-    openSheet(`
-      ${headHtml("알림", { back: !!back, actions: false,
-        sub: "폴더 연결이 끊겼을 때 여기에 남습니다." })}
-      ${folderNotices.length ? `<div class="fr-list">${folderNotices.map(n => `
-        <div class="inv${n.read ? "" : " new"}">
-          <span class="thumb ph">${esc(n.emoji)}</span>
-          <span class="ub"><b>${esc(n.name)}</b>
-            <span>${esc(n.ownerName)}님의 폴더 · ${esc(n.reason)} · ${ago(n.at)}</span></span>
-          <span class="inv-act">
-            <button class="mini-btn" data-drop="${esc(n.id)}">치우기</button>
-          </span>
-        </div>`).join("")}</div>`
-        : `<div class="empty">새 소식이 없습니다.</div>`}
-      <div class="rest" style="text-align:left;padding:10px 2px 0">
-        끊긴 폴더는 내 폴더 목록에 줄만 남고 안이 빕니다. 필요 없으면 그 줄을 지우세요 —
-        담아 뒀던 작품은 원래 그쪽 것이라 내 목록에는 없었습니다.</div>`);
-    if (back) sheet.querySelector("[data-head-back]").onclick = back;
-
-    sheet.querySelector(".sheet-body").addEventListener("click", guard(async e => {
-      const d = e.target.closest("[data-drop]"); if (!d) return;
-      await api("DELETE", `/api/folder-notices/${d.dataset.drop}`);
-      await reload(); render();
-      if (!folderNotices.length) { if (back) back(); else closeSheet(); }
-      else draw();
-    }));
-  };
-  draw();
+  openSheet(`
+    ${headHtml("알림", { back: !!back, actions: false,
+      sub: "폴더 연결이 끊겼을 때 여기에 남습니다." })}
+    ${folderNotices.length ? `<div class="fr-list">${folderNotices.map(n => `
+      <div class="inv${n.read ? "" : " new"}">
+        <span class="thumb ph">${esc(n.emoji)}</span>
+        <span class="ub"><b>${esc(n.name)}</b>
+          <span>${esc(n.ownerName)}님의 폴더 · ${esc(n.reason)} · ${ago(n.at)}</span></span>
+      </div>`).join("")}</div>`
+      : `<div class="empty">새 소식이 없습니다.</div>`}
+    <div class="rest" style="text-align:left;padding:10px 2px 0">
+      끊긴 폴더는 내 폴더 목록에 줄만 남고 안이 빕니다. 필요 없으면 그 줄을 지우세요 —
+      담아 뒀던 작품은 원래 그쪽 것이라 내 목록에는 없었습니다.<br>
+      ${/* 치우는 버튼을 두지 않는다. 소식은 한 번 읽으면 할 일이 끝나는 것이라, 읽고
+           나서 또 "치우기" 를 누르게 하면 같은 일을 두 번 시키는 셈이다. */""}
+      <b>여기까지 본 소식은 다음에 앱을 열 때 사라집니다.</b></div>`);
+  if (back) sheet.querySelector("[data-head-back]").onclick = back;
   // 본 것으로 친다. 실패해도 다음에 다시 알린다 — 붉은 숫자가 하루 더 남을 뿐이다.
   if (unreadNotices()) api("POST", "/api/folder-notices").then(reload).then(render).catch(() => {});
 }
@@ -3805,8 +3799,9 @@ function openNameForm(after) {
     <div class="field"><label for="dname">표시 이름</label>
       <input id="dname" value="${esc(me.displayName ?? "")}" placeholder="예: 영수" maxlength="20"
         autocomplete="off" spellcheck="false"></div>
-    ${/* 이름은 겹칠 수 없다. 저장을 눌러야 알 수 있으면 스무 자를 채우고 나서야 다시
-         시작하게 되므로, **치는 동안** 알려 준다. */""}
+    ${/* 이름은 겹칠 수 없다. 그것을 **미리** 적어 두고, 겹쳤는지는 저장할 때 한 번 본다 —
+         치는 동안 물어보면 글자마다 서버를 두드리게 되고, 규칙을 알려 주는 일에 그만한
+         값을 치를 이유가 없다. */""}
     <div class="rest" style="text-align:left;padding:0 2px" data-nfree>
       친구에게 보이는 유일한 이름이라 다른 사람과 겹칠 수 없습니다.</div>
     <div class="link-row wide-only">
@@ -3814,29 +3809,12 @@ function openNameForm(after) {
       <button class="btn primary" data-done>저장</button></div>`);
   const el = sheet.querySelector("#dname");
   const note = sheet.querySelector("[data-nfree]");
-
-  /* 칠 때마다 묻지 않는다 — 손이 멈춘 뒤에 한 번만. 늦게 온 대답이 지금 친 글자를
-     덮지 않도록 물어본 값과 견줘 본다. */
-  let timer, asked = "";
-  const check = async () => {
-    const v = el.value.trim();
-    // 빈 칸이 먼저다 — 아직 이름을 안 정한 사람에게는 빈 칸이 "지금 쓰는 이름" 이 아니다
-    if (!v) { note.textContent = "친구에게 보이는 유일한 이름이라 다른 사람과 겹칠 수 없습니다.";
-      note.style.color = ""; return; }
-    if (v === me.displayName) {                   // 원래 내 이름 — 물어볼 것이 없다
-      note.textContent = "지금 쓰는 이름입니다.";
-      note.style.color = "";
-      return;
-    }
-    asked = v;
-    try {
-      const r = await api("GET", `/api/me/name-free?q=${encodeURIComponent(v)}`);
-      if (asked !== el.value.trim()) return;      // 그새 더 쳤다 — 옛 대답은 버린다
-      note.textContent = r.free ? `«${r.name}» 쓸 수 있습니다.` : `«${r.name}» 은 이미 쓰는 사람이 있습니다.`;
-      note.style.color = r.free ? "var(--good)" : "var(--bad-ink)";
-    } catch { /* 못 물어봐도 저장할 때 서버가 다시 본다 */ }
-  };
-  el.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(check, 350); });
+  // 고치기 시작하면 지난번에 걸렸던 말을 지운다 — 그건 그때 친 이름의 이야기다
+  el.addEventListener("input", () => {
+    if (!note.style.color) return;
+    note.textContent = "친구에게 보이는 유일한 이름이라 다른 사람과 겹칠 수 없습니다.";
+    note.style.color = "";
+  });
 
   wireHead({ save: () => saveName(), cancel: () => closeSheet() });
   const saveName = guard(async () => {
@@ -4116,6 +4094,9 @@ function openAppSettings() {
           ? "친구에게 이 이름으로 보입니다. 본명일 필요는 없습니다."
           : `<span style="color:var(--warn);font-weight:600">아직 정하지 않았습니다</span>` +
             " — 친구를 추가하려면 필요합니다."}
+        ${/* 겹치는지는 저장할 때 서버가 본다. 규칙만 미리 적어 둔다 — 치는 동안 물어보면
+             글자마다 서버를 두드리게 되고, 안내 한 줄에 그만한 값을 치를 이유가 없다. */""}
+        다른 사람과 겹칠 수 없습니다.
       </div>`}
       <div class="link-row" style="margin-top:12px">
         ${me.provider === "local" || guestMode()
@@ -4173,7 +4154,15 @@ function openAppSettings() {
     nameEl.addEventListener("input", dirty);
     nameEl.addEventListener("keydown", e => { if (e.key === "Enter" && !nameBtn.disabled) nameBtn.click(); });
     nameBtn.onclick = guard(async () => {
-      await api("PUT", "/api/me", { displayName: nameEl.value.trim() });
+      try {
+        await api("PUT", "/api/me", { displayName: nameEl.value.trim() });
+      } catch (e) {
+        /* 겹치는 이름은 저장되지 않는다. 창을 다시 그리면 방금 친 이름이 날아가므로
+           그대로 두고 알리기만 한다 — 한 글자만 고치면 되는 경우가 대부분이다. */
+        toast(e.message);
+        nameEl.focus(); nameEl.select();
+        return;
+      }
       await reload(); render();
       openAppSettings();                       // 안내 문구까지 새로 그린다
       toast("표시 이름을 바꿨습니다");
@@ -4477,7 +4466,7 @@ const takeInvite = () => {
   if (q0.get("invite")) keepInvite(q0.get("invite"));
 
   try {
-    await reload();
+    await reload(true);          // 앱을 새로 여는 길 — 읽어 둔 소식을 걷고 시작한다
   } catch (e) {
     // 로그인이 필요하면 제공자 목록을 받아 로그인 화면을 띄운다
     try {

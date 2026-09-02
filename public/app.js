@@ -2647,7 +2647,12 @@ function openFolderForm(existing, after) {
         .filter(f => !share.with.includes(f.id))
         .filter(f => !q || f.displayName.toLowerCase().includes(q));
       const got = share.with.map(id => friends.find(f => f.id === id)).filter(Boolean);
-      const none = q ? "찾는 이름이 없습니다" : left.length ? "친구 고르기…" : "모두 골랐습니다";
+      /* 안내말은 **찾은 결과를 보고** 정한다. 한때 "친 글자가 있으면 못 찾은 것" 으로
+         쳤는데, 그러면 이름을 제대로 쳐서 아래에 그 사람이 서 있는데도 고르개에는
+         "찾는 이름이 없습니다" 가 적혀 있었다. 접힌 고르개에서 사람이 보는 것은 이 한 줄뿐이라,
+         찾아 놓고도 못 찾은 줄 알았다. */
+      const none = left.length ? (q ? `찾은 ${left.length}명 중에 고르기…` : "친구 고르기…")
+        : q ? "찾는 이름이 없습니다" : "모두 골랐습니다";
       whoBox.querySelector("[data-who-body]").innerHTML = `
         <select data-who-add aria-label="공개할 친구 고르기">
           <option value="">${none}</option>
@@ -2719,9 +2724,19 @@ function openFolderForm(existing, after) {
      이름을 고치러 들어왔다가 옆 칸을 잘못 건드려 남의 폴더를 비워 버리면 되돌릴 길이 없다. */
   const revoking = () => {
     if (!existing) return null;
+    const was = existing.share;
     const wasTeam = existing.take === "edit";
     const stillTeam = take === "edit" && share.mode === "some";
-    const gone = wasTeam ? existing.share.with.filter(id => !share.with.includes(id)) : [];
+    /* 명단에서 떨어져 나가는 사람. **이름을 댈 수 있는 것은 「고른 친구에게만」끼리 견줄
+       때뿐이다** — 「모든 친구에게」였다면 애초에 명단이 없어 누가 빠지는지 알 수 없다. */
+    const gone = was.mode === "some" && share.mode === "some"
+      ? was.with.filter(id => !share.with.includes(id)) : [];
+    /* 볼 사람이 좁아지는가. 좁아지면 **비추던 사람이 떨어져 나갈 수 있다** —
+       담아간 사람은 이미 제 것을 한 벌 갖고 있으므로 이 셈에 들지 않는다. */
+    const narrowed = was.mode !== "none" &&
+      (share.mode === "none" || (was.mode === "all" && share.mode !== "all") || gone.length > 0);
+    const nameList = ids => ids.map(id => (friends ?? []).find(f => f.id === id)?.displayName)
+      .filter(Boolean);
     if (wasTeam && !stillTeam) {
       const n = works.filter(w => w.mirror && w.folders.includes(existing.id)).length;
       return { title: "함께 쓰기를 그만둘까요?",
@@ -2730,24 +2745,41 @@ function openFolderForm(existing, after) {
         ok: "그만두기" };
     }
     if (wasTeam && gone.length) {
-      const names = gone.map(id => (friends ?? []).find(f => f.id === id)?.displayName)
-        .filter(Boolean);
+      const names = nameList(gone);
       return { title: `${gone.length}명을 명단에서 뺄까요?`,
         body: `${esc(names.join(", ") || "고른 사람")}${names.length ? "님" : ""}이 이 폴더를 더 볼 수 없게 되고,
           넣어 둔 작품도 이 폴더에서 빠집니다 — 작품은 그 사람 목록에 남습니다.`,
         ok: "빼기" };
     }
-    /* 비추던 사람도 마찬가지다. 몇 명이 비추고 있는지는 여기서 알 수 없으므로 세지 않는다 —
-       "있을 수 있다" 는 것만 알려도 손이 멈춘다. */
-    if (canMirror(existing.take) && !canMirror(take) && existing.share.mode !== "none") {
-      return { title: "미러링을 끊을까요?",
-        body: "이 폴더를 비추고 있는 친구가 있다면 그 사람의 폴더가 비게 됩니다. 폴더 줄은 남고 왜인지가 적힙니다.",
-        ok: "끊기" };
-    }
-    if (existing.share.mode !== "none" && share.mode === "none") {
+    /* 넓은 것부터 묻는다 — 공개를 아예 거두면 보던 사람도 비추던 사람도 한꺼번에 잃는다. */
+    if (was.mode !== "none" && share.mode === "none") {
       return { title: "공개를 거둘까요?",
         body: "이 폴더를 보던 친구들이 더 볼 수 없게 됩니다. 비추고 있던 사람의 폴더도 비게 됩니다.",
         ok: "거두기" };
+    }
+    /* 비추던 사람도 마찬가지다. 몇 명이 비추고 있는지는 여기서 알 수 없으므로 세지 않는다 —
+       "있을 수 있다" 는 것만 알려도 손이 멈춘다. */
+    if (canMirror(existing.take) && !canMirror(take) && was.mode !== "none") {
+      return { title: "미러링을 끊을까요?",
+        body: `이 폴더를 비추고 있는 친구가 있다면 그 사람의 폴더가 비게 됩니다.
+          폴더 줄은 남고 왜인지가 적힙니다.`,
+        ok: "끊기" };
+    }
+    /* **미러링은 그대로인데 볼 사람이 줄어드는 경우.** 여기에 오래 구멍이 있었다 —
+       「둘 다」나 「미러링만」으로 열어 둔 채 공개 대상만 좁히면, 퍼가기 칸은 손대지 않았으니
+       아무 일도 없어 보이는데 명단에서 빠진 사람의 폴더는 그 자리에서 빈다.
+       끊는 것은 퍼가기 설정만이 아니라 **볼 수 있느냐** 이기도 하다. */
+    if (canMirror(take) && narrowed) {
+      const names = nameList(gone);
+      return gone.length
+        ? { title: `${gone.length}명을 명단에서 뺄까요?`,
+            body: `${esc(names.join(", ") || "고른 사람")}${names.length ? "님" : ""}이 이 폴더를
+              더 볼 수 없게 됩니다. 이 폴더를 비추고 있었다면 그 폴더도 비게 됩니다.`,
+            ok: "빼기" }
+        : { title: "볼 사람을 좁힐까요?",
+            body: `이제 고른 사람만 볼 수 있습니다. 명단에 없는 친구가 이 폴더를 비추고
+              있었다면 그 폴더가 비게 됩니다.`,
+            ok: "좁히기" };
     }
     return null;
   };

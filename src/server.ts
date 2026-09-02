@@ -834,6 +834,33 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       json(res, 200, { ok: true, folders: listFolders(user.id) });
       return true;
     }
+    /* 폴더에 **여럿을 한꺼번에** 넣는다. 한 편씩 PATCH 로 보내면 스무 편에 스무 번을
+       왕복하고, 중간에 하나가 어긋나면 절반만 들어간 채로 남는다.
+
+       넣기만 하고 빼지 않는다 — 빼는 것은 작품 쪽 「폴더 바꾸기」가 맡는 일이라
+       여기에 두면 같은 일을 하는 자리가 둘이 된다.
+
+       **넣을 곳은 원본 폴더다.** 함께 쓰는 폴더에 불려 간 쪽에서 넣으면 내 껍데기가
+       아니라 주인의 폴더에 걸려야 주인에게도, 함께 쓰는 다른 사람에게도 보인다.
+       mayFile 이 껍데기를 거절하므로 여기서 바꿔 준다. */
+    if (seg[3] === "works" && m === "POST") {
+      if (!mine) { json(res, 404, { ok: false, reason: "없는 폴더입니다." }); return true; }
+      const b = await readJson(req);
+      const want: string[] = Array.isArray(b.works)
+        ? b.works.filter((x: any) => typeof x === "string") : [];
+      const into = mine.mirror ? mine.mirror.folder : id;
+      let n = 0;
+      for (const wid of new Set(want)) {
+        const w = getWork(user.id, wid);          // 내 작품만 — 남의 것은 여기서 걸린다
+        if (!w || w.folders.includes(into)) continue;
+        setWorkFolders(user.id, wid, [...w.folders, into]);
+        // mayFile 이 막았으면 늘지 않는다 — 넣었다고 답하지 않으려고 다시 센다
+        if (getWork(user.id, wid)!.folders.includes(into)) n++;
+      }
+      json(res, 200, { ok: true, added: n });
+      return true;
+    }
+
     /* ── 공유자 명단 ──
        폴더 설정의 「친구에게 공개」는 명단을 **통째로 다시 쓰는** 자리다. 한 사람을 더
        부르거나 한 사람만 끊는 일은 거기서 하기에 손이 많이 가고, 잘못 건드리면 남은

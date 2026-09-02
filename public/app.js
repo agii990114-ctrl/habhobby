@@ -879,6 +879,126 @@ function drawDayList(t) {
   });
 }
 
+/* 이 폴더에 **아직 없는** 작품을 골라 한꺼번에 넣는다.
+
+   폴더 쪽에서 작품을 부르는 길이다. 반대 방향(작품 쪽에서 폴더를 고르는 길)은 작품
+   설정의 「폴더 바꾸기」가 이미 맡고 있는데, 한 폴더를 여러 편으로 채우려면 그 길로는
+   작품마다 창을 열었다 닫아야 한다.
+
+   **빼지는 않는다.** 빼는 것은 작품 쪽 일이라, 여기에 두면 같은 일을 하는 자리가 둘이
+   되고 "고르개에서 체크를 풀면 빠지나" 를 사람이 헷갈린다. 여기 서는 것은 넣을 수
+   있는 것들뿐이고, 고른 것은 더해지기만 한다. */
+function openFolderAdd(f, back) {
+  let picked = new Set(), q = "";
+
+  /* 넣을 수 있는 것 — **내 작품**이고, 아직 이 폴더에 없는 것. 비쳐 온 작품(w.mirror)은
+     내 것이 아니라 넣을 수 없다: 남의 목록에 있는 것을 내가 다른 데 걸 수는 없다. */
+  const pool = () => activeWorks().filter(w => !w.mirror && !w.folders.includes(f.id));
+
+  const shown = () => {
+    const s = q.trim().toLowerCase();
+    return s ? pool().filter(w => w.title.toLowerCase().includes(s)) : pool();
+  };
+
+  /* 구간(도메인)별로 묶는다. 폴더에 넣을 것을 고를 때 사람이 떠올리는 단위가 그것이라 —
+     "네이버웹툰 것들을 넣자" 이지 "제목이 ㄱ 인 것들" 이 아니다. */
+  const groups = () => {
+    const by = new Map();
+    for (const w of byRecent(shown())) {
+      if (!by.has(w.platformId)) by.set(w.platformId, []);
+      by.get(w.platformId).push(w);
+    }
+    return [...by];
+  };
+
+  const body = () => {
+    const gs = groups();
+    if (!gs.length)
+      return `<div class="empty">${q ? "찾는 작품이 없습니다."
+        : "넣을 수 있는 작품이 없습니다.<br>이 폴더에 이미 다 들어 있어요."}</div>`;
+    return gs.map(([pid, items]) => {
+      const p = platformOf(pid);
+      const all = items.every(w => picked.has(w.id));
+      return `<section class="plat">
+        <div class="plat-h">
+          <span class="pmark" style="background:${p.color};color:${p.fg}">${esc(p.initial)}</span>
+          <b>${esc(p.name)}</b><span class="rest">${items.length}개</span>
+          ${/* 구간마다 전체 고르기 — 도메인 단위로 담는 것이 이 창의 쓰임이다 */""}
+          <button class="mini-btn" data-gall="${esc(pid)}">${all ? "구간 해제" : "구간 선택"}</button>
+        </div>
+        ${items.map(w => `<label class="arch">
+          <span class="arch-pick"><input type="checkbox" data-add="${esc(w.id)}"
+            ${picked.has(w.id) ? "checked" : ""} aria-label="${esc(w.title)} 선택"></span>
+          <span class="thumb" style="${coverStyle(w)}">${coverChar(w)}</span>
+          <span class="rt"><b>${esc(w.title)}</b><span>${
+            w.folders.length ? `폴더 ${w.folders.length}곳` : "미분류"} · ${ago(w.lastAt)}</span></span>
+        </label>`).join("")}
+      </section>`;
+    }).join("");
+  };
+
+  const draw = (keepQuery = false) => {
+    if (!keepQuery) {
+      openSheet(`
+        ${headHtml("작품 넣기", { back: true, save: "넣기",
+          sub: `${f.emoji} ${esc(f.name)}` })}
+        ${searchHtml("제목으로 좁히기", "", "margin-bottom:10px")}
+        <div data-add-bulk></div>
+        <div data-add-body></div>`);
+      wireHead({ save: put, cancel: back, back });
+      const box = sheet.querySelector(".sheet-body");
+      // 치는 칸은 다시 그리지 않는다 — 한글이 조합 중에 깨진다
+      box.addEventListener("input", e => {
+        if (!e.target.closest(".arch-q")) return;
+        q = e.target.value;
+        paint();
+      });
+      box.addEventListener("click", e => {
+        const g = e.target.closest("[data-gall]");
+        if (g) {
+          const items = groups().find(([pid]) => pid === g.dataset.gall)?.[1] ?? [];
+          const all = items.every(w => picked.has(w.id));
+          for (const w of items) all ? picked.delete(w.id) : picked.add(w.id);
+          return paint();
+        }
+        const c = e.target.closest("[data-add]");
+        if (c) {
+          // 체크 상자 자체는 브라우저가 켜고 끈다 — 여기서는 셈만 맞춘다
+          c.checked ? picked.add(c.dataset.add) : picked.delete(c.dataset.add);
+          return paintBulk();
+        }
+      });
+    }
+    paint();
+  };
+
+  const paintBulk = () => {
+    const bar = sheet.querySelector("[data-add-bulk]");
+    if (!bar) return;
+    bar.innerHTML = picked.size
+      ? `<div class="bulk"><b>${picked.size}개 선택</b>
+          <span class="bulk-act"><button class="mini-btn" data-none>모두 해제</button></span></div>`
+      : "";
+    const off = bar.querySelector("[data-none]");
+    if (off) off.onclick = () => { picked = new Set(); paint(); };
+  };
+  const paint = () => { sheet.querySelector("[data-add-body]").innerHTML = body(); paintBulk(); };
+
+  const put = guard(async () => {
+    if (!picked.size) { toast("넣을 작품을 골라 주세요"); return; }
+    const { added } = await api("POST", `/api/folders/${f.id}/works`, { works: [...picked] });
+    await reload(); render();
+    /* 몇 편이 들었는지 그대로 말한다 — 골랏는데 일부만 들어가는 경우가 있다(함께 쓰는
+       폴더에서 수락을 물린 뒤라든가). "넣었습니다" 만 말하면 없는 편을 찾으러 다니게 된다. */
+    toast(added === picked.size ? `${added}편을 넣었습니다`
+      : added ? `${picked.size}편 중 ${added}편만 들어갔습니다`
+      : "넣지 못했습니다 — 이 폴더에 넣을 권한이 없습니다");
+    back();
+  });
+
+  draw();
+}
+
 /* 폴더 안은 팝업으로 연다. 목록을 떠나지 않으므로 여러 폴더를 훑어보기 쉽고,
    닫으면 보던 자리로 그대로 돌아온다.
 
@@ -903,39 +1023,50 @@ function openFolderSheet(id) {
     ${gridHtml(shown, id === "_none" ? "미분류 작품이 없습니다." : "이 폴더는 비어 있습니다.")}`, {
     full: true,
     title: esc(name),
-    sub: `${inFolder.length}개${f?.mirror ? ` · ${esc(f.mirrorOf)}님의 폴더를 미러링 중`
-      : f ? " · 오른쪽 위 ⋯ 로 폴더를 고칠 수 있습니다" : ""}`,
+    /* 버튼이 무엇을 하는지는 버튼이 말한다 — 안내말에 "오른쪽 위 ⋯ 로 고칠 수 있습니다"
+       를 적어 두었는데, 그건 아이콘이 알아볼 만하지 않다는 뜻이었다. 톱니로 바꾸면
+       설명이 필요 없다. */
+    sub: `${inFolder.length}개${f?.mirror ? ` · ${esc(f.mirrorOf)}님의 폴더를 미러링 중` : ""}`,
   });
 
   if (f) {
     // 전체·미분류는 진짜 폴더가 아니라 고칠 것이 없다
     const head = sheet.querySelector(".sheet-head");
-    /* 함께 고치는 폴더에는 **누가 들어와 있는지**가 제목 옆에 있어야 한다 —
-       초대해 놓고 아무도 안 왔는데 그것을 알 길이 없으면 기다리는 줄도 모른다. */
+    const mk = (glyph, label, cls, onclick) => {
+      const b = document.createElement("button");
+      b.className = "icon-btn" + (cls ? " " + cls : "");
+      b.textContent = glyph;
+      b.title = label;
+      b.setAttribute("aria-label", label);
+      b.onclick = onclick;
+      return b;
+    };
+
+    /* 함께 쓰는 폴더에는 **누가 들어와 있는지**가 제목 바로 옆에 붙는다 — 초대해 놓고
+       아무도 안 왔는데 그것을 알 길이 없으면 기다리는 줄도 모른다. 오른쪽 버튼 무리에
+       섞어 두었을 때는 「이 폴더를 어떻게 할까」 버튼들 사이에 「누가 있나」 가 끼어
+       무엇을 하는 자리인지 흐렸다. 제목에 딸린 것은 제목 옆에 둔다. */
     if (f.take === "edit" || f.canEdit) {
-      const who = document.createElement("button");
-      who.className = "icon-btn";
-      who.textContent = "🤝";
-      who.title = "공유자";
-      who.setAttribute("aria-label", "공유자");
-      who.onclick = guard(async () => {
+      const who = mk("👥", "공유자", "in-title", guard(async () => {
         // 이름을 보여 주려면 친구 목록이 있어야 한다 (「친구가 많아지면」)
         try { await loadFriends(); } catch { /* 못 불러와도 상태는 보여 준다 */ }
         openFolderPeople(f, () => openFolderSheet(id));
-      });
-      head.append(who);
+      }));
+      sheet.querySelector(".sh-t h3").append(" ", who);
     }
-    const more = document.createElement("button");
-    more.className = "icon-btn";
-    more.textContent = "⋯";
-    more.title = "폴더 설정";
-    more.setAttribute("aria-label", "폴더 설정");
-    more.onclick = () => openFolderForm(f, f2 => {
+
+    /* 오른쪽에는 **이 폴더에 하는 일** 둘. 넣기가 먼저, 고치기가 뒤 —
+       자주 하는 쪽이 앞이다. */
+    /* 비추기만 하는 폴더에는 넣을 수 없다 — 그건 남의 폴더를 보여 주는 껍데기다.
+       함께 쓰는 폴더만 예외다(canEdit): 그때는 원본 폴더에 걸린다.
+       누를 수 있는데 아무 일도 안 일어나는 버튼은 두지 않는다. */
+    if (!f.mirror || f.canEdit)
+      head.append(mk("＋", "작품 넣기", "", () => openFolderAdd(f, () => openFolderSheet(id))));
+    head.append(mk("⚙", "폴더 설정", "", () => openFolderForm(f, f2 => {
       closeSheet();
       render();
       if (f2) openFolderSheet(f2.id);        // 고치고 나면 보던 폴더로 돌아온다
-    });
-    head.append(more);
+    })));
   }
 
   sheet.querySelector(".sheet-body").addEventListener("click", e => {

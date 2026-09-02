@@ -124,6 +124,15 @@
     font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center;
   }
   .icon-btn:hover { border-color: var(--ink-3); color: var(--ink); }
+  /* 제목 글줄 **안에** 서는 버튼(폴더 제목 옆의 공유자). 제목에 딸린 것이므로 글자와 함께
+     흘러야 한다 — 오른쪽 버튼 무리에 두면 「이 폴더에 무엇을 할까」 사이에 「누가 있나」가
+     끼어 무엇을 하는 자리인지 흐려진다.
+     vertical-align 으로 글자 가운데에 맞춘다: inline-flex 는 기본이 baseline 이라
+     그냥 두면 버튼 밑이 글자 밑에 붙어 한 칸 떠 보인다. */
+  .icon-btn.in-title {
+    display: inline-flex; width: 26px; height: 26px; font-size: 12px;
+    border-radius: 8px; vertical-align: -6px;
+  }
   .tabs { display: flex; gap: 4px; background: var(--surface-2); border-radius: 99px; padding: 3px; }
   .tabs button {
     border: 0; background: transparent; color: var(--ink-3);
@@ -1003,6 +1012,12 @@
 
   /* 보관함 항목 */
   /* 여러 개 고르기 */
+  /* 구간 머리 오른쪽에 붙는 「구간 선택」 — 묶음마다 한 번에 담고 푼다 */
+  .plat-h .mini-btn { margin-left: auto; flex: none; }
+  /* 줄 전체가 체크 상자다(label). 손가락으로 작은 네모를 겨누지 않아도 되게 —
+     여기 줄에는 누를 것이 그것뿐이라 어디를 눌러도 뜻이 하나다. */
+  label.arch { cursor: pointer; }
+  label.arch:hover { background: var(--surface-2); }
   .arch-pick { display: flex; align-items: center; flex: none; padding: 0 2px; cursor: pointer; }
   .arch-pick input { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
   .bulk {

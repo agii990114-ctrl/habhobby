@@ -1630,8 +1630,9 @@ async function openFolderPeople(f, back) {
         아래 「＋ 더 부르기」로 함께 쓸 사람을 고르세요.</div>`;
     return `<div class="fr-list">${list.map(x => {
       const nm = nameOf(x.id);
+      /* 머리글자 상자는 두지 않는다 — 바로 옆에 이름이 통째로 있어 같은 글자를
+         두 번 보여 줄 뿐이고, 그만큼 줄이 두꺼워져 명단이 짧아 보인다. */
       return `<div class="uf-row" style="padding:8px 2px">
-        <span class="thumb ph">${esc(nm.slice(0, 1))}</span>
         <span class="ub" style="flex:1"><b>${esc(nm)}</b></span>
         <span class="${x.state === "ok" ? "st-ok" : "st-wait"}">${
           x.state === "ok" ? "수락함" : "대기 중"}</span>
@@ -1824,13 +1825,14 @@ function render() {
   badge.hidden = n === 0;
   fabEl.classList.remove("tucked");
   /* 곁창 아이콘은 캘린더에서만, 그리고 담을 것이 있을 때만 나온다 —
-     빈 창을 여는 버튼은 눌러 볼 이유가 없다. */
+     빈 창을 여는 버튼은 눌러 볼 이유가 없다.
+
+     **숫자는 붙이지 않는다.** 붉은 숫자는 "네가 해야 할 일이 이만큼 밀렸다" 는 말인데,
+     여기 담기는 것은 날짜가 없는 작품들이라 재촉할 일이 아니다. 있으면 버튼이 서고
+     없으면 사라지는 것만으로 충분하다 — 그 자체가 이미 "볼 것이 있다" 는 표다. */
   const idleN = tab === "cal" ? idleTotal() : 0;
   idleEl.hidden = !idleN;
   idleEl.classList.remove("tucked");
-  const ib = document.getElementById("idle-badge");
-  ib.textContent = idleN > 99 ? "99+" : idleN;
-  ib.hidden = !idleN;
 
   /* 🔔 은 늘 자리에 있다. 떠 있는 버튼이 아니라 **붙박이**라, 없어졌다 생겼다 하면
      그때마다 옆의 것들이 밀린다. 대신 붉은 숫자는 있을 때만 붙는다.
@@ -3022,17 +3024,19 @@ function openFolderForm(existing, after) {
       </div></div>
     <div class="field"><label for="fname">이름</label>
       <input id="fname" value="${esc(existing?.name ?? "")}" placeholder="예: 주말에 몰아볼 것" maxlength="24"></div>
-    ${guestMode() ? `<div class="field"><label>친구에게 공개</label>
+    ${/* 여기서부터 **남에게 보이는 이야기**다 — 위(아이콘·이름)는 내 폴더를 꾸미는
+         일이고 아래는 남과 나누는 일이라, 선 하나로 갈라 둔다. */""}
+    ${guestMode() ? `<div class="field sep"><label>친구에게 공개</label>
       <div class="rest" style="text-align:left;padding:2px">
         둘러보기로는 폴더를 공개할 수 없습니다. 로그인하면 쓸 수 있어요.</div></div>` : ""}
-    ${!guestMode() ? `<div class="field"><label>친구에게 공개</label>
+    ${!guestMode() ? `<div class="field sep"><label>친구에게 공개</label>
       ${optsHtml(SHARE_MODES, pick, "share")}
       <div data-share-who${pick === "some" || pick === "team" ? "" : " hidden"}>
         <div class="rest" style="text-align:left;padding:8px 2px 0">친구를 불러오는 중…</div>
       </div>
     </div>
     ${/* 함께 쓰는 폴더는 퍼가기가 이미 정해져 있다 — 그 칸은 보여 주지 않는다 */""}
-    <div class="field" data-take-box${pick === "none" || pick === "team" ? " hidden" : ""}>
+    <div class="field sep" data-take-box${pick === "none" || pick === "team" ? " hidden" : ""}>
       <label>퍼가기 허용</label>
       ${optsHtml(TAKE_MODES.filter(([v]) => v !== "edit"), take, "take")}
     </div>` : ""}
@@ -4121,9 +4125,11 @@ function openAppSettings() {
       <div class="rest" style="text-align:left;padding:0 2px">
         고른 색에서 글자·바탕 색을 만들어 냅니다. 어떤 색을 골라도 읽히도록 밝기를 맞춥니다.
       </div></div>
-    <div class="field"><label>작품을 여는 방식</label>
+    ${/* 색 → 여는 방식 → 계정 → 안내. 넷이 하는 일이 서로 다르므로 선으로 가른다 —
+         한 덩이로 흘려 두면 어디까지가 한 이야기인지 짚어 가며 읽어야 한다. */""}
+    <div class="field sep"><label>작품을 여는 방식</label>
       ${optsHtml(OPEN_MODES, settings.openMode, "openmode")}</div>
-    ${me ? `<div class="field"><label>계정</label>
+    ${me ? `<div class="field sep"><label>계정</label>
       <div class="acct">
         ${me.avatar ? `<img class="acct-av" src="${esc(me.avatar)}" alt="">`
           : `<span class="acct-av ph">${guestMode() ? "👤"
@@ -4164,7 +4170,7 @@ function openAppSettings() {
       <div class="rest" style="text-align:left;padding:7px 2px 0">
         탈퇴하면 담아둔 작품·폴더·설정이 모두 지워지고 되돌릴 수 없습니다.</div>
     </div>` : ""}
-    <div class="field"><label>연재 일정은 어떻게 정해지나요</label>
+    <div class="field sep"><label>연재 일정은 어떻게 정해지나요</label>
       <div class="rest" style="text-align:left;padding:0 2px">
         제목과 표지는 페이지가 공개한 정보(Open Graph)에서 가져옵니다. 연재 요일은
         어느 플랫폼도 공개하지 않기 때문에 <b>직접 골라주셔야</b> 합니다 — 작품당 한 번이면 됩니다.

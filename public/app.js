@@ -26,6 +26,9 @@ let works = [], folders = [], settings = { openMode: "app" }, platforms = {}, me
 let friends = null, friendCount = 0;
 /** 받은 폴더 초대. 첫 화면에 함께 실려 온다 — 대개 비어 있어 무게가 없다. */
 let folderInvites = [];
+/* 끊겼다는 소식. 새로 고칠 때 함께 실려 온다 — 웹소켓을 붙들고 있을 만큼 급한 소식이
+   아니고, 늘 이어 두면 그것대로 값이 든다. */
+let folderNotices = [];
 let tab = "cal", filter = "all", openFolderId = null;   // 들어오면 캘린더부터 보인다
 /* 폴더 탭은 내 폴더 아니면 친구의 공개 폴더를 보여 준다.
    null 이면 내 것. 친구 것을 볼 때는 그 친구가 준 화면을 통째로 들고 있는다
@@ -45,6 +48,7 @@ async function reload() {
   platforms = s.platforms; me = s.me;
   friendCount = s.friendCount ?? 0;
   folderInvites = s.folderInvites ?? [];
+  folderNotices = s.folderNotices ?? [];
   friends = null;              // 친구가 바뀌었을 수 있다 — 다음에 열 때 새로 부른다
   siteNamesPending = s.siteNamesPending ?? 0;
   applyTheme(settings.themeColor);
@@ -1120,10 +1124,43 @@ function whoseBar() {
 }
 
 /** 받은 폴더 초대 — 수락하면 곧바로 내 폴더 목록에 선다. */
-function openFolderInvites() {
+/* 폴더에 얽힌 소식이 두 갈래다 — **들어오라는 것**과 **끊겼다는 것**. 성격이 반대라
+   한 목록에 섞으면 수락 버튼 옆에 끊긴 소식이 서게 된다. 첫 화면에서 갈래를 고르고,
+   고른 쪽만 펼친다. */
+const unreadNotices = () => folderNotices.filter(n => !n.read).length;
+const folderBell = () => folderInvites.length + unreadNotices();
+
+function openFolderNotices() {
+  const line = (emoji, title, sub, n, key) => `
+    <button class="folder" data-go="${key}">
+      <div class="mini solo">${emoji}</div>
+      <span class="txt"><b>${title}${n ? ` <i class="mtag">${n}</i>` : ""}</b>
+        <span>${sub}</span></span>
+      <span class="chev">›</span></button>`;
+
+  openSheet(`
+    ${headHtml("폴더 알림", { back: false, actions: false,
+      sub: "폴더에 얽힌 소식을 여기서 봅니다." })}
+    <div class="folders">
+      ${line("✉️", "폴더 초대", folderInvites.length
+        ? "수락하면 그 폴더가 내 목록에 함께 섭니다." : "받은 초대가 없습니다.",
+        folderInvites.length, "inv")}
+      ${line("🔗", "알림", folderNotices.length
+        ? "끊긴 폴더가 있습니다." : "새 소식이 없습니다.",
+        unreadNotices(), "brk")}
+    </div>`);
+
+  sheet.querySelector(".sheet-body").addEventListener("click", e => {
+    const b = e.target.closest("[data-go]"); if (!b) return;
+    if (b.dataset.go === "inv") openFolderInvites(openFolderNotices);
+    else openBreakNotices(openFolderNotices);
+  });
+}
+
+function openFolderInvites(back) {
   const draw = () => {
     openSheet(`
-      ${headHtml("폴더 초대", { back: false, actions: false,
+      ${headHtml("폴더 초대", { back: !!back, actions: false,
         sub: "수락하면 그 폴더가 내 폴더 목록에 함께 섭니다." })}
       ${folderInvites.length ? `<div class="fr-list">${folderInvites.map(v => `
         <div class="inv">
@@ -1139,6 +1176,7 @@ function openFolderInvites() {
       <div class="rest" style="text-align:left;padding:10px 2px 0">
         함께 고치는 폴더입니다. 수락하면 내 작품을 넣고 뺄 수 있고, 남이 넣은 작품은
         폴더 안에서만 보입니다 — 내 캘린더에는 올라오지 않습니다.</div>`);
+    if (back) sheet.querySelector("[data-head-back]").onclick = back;
 
     sheet.querySelector(".sheet-body").addEventListener("click", guard(async e => {
       const yes = e.target.closest("[data-yes]"), no = e.target.closest("[data-no]");
@@ -1148,12 +1186,47 @@ function openFolderInvites() {
       await api("POST", `/api/folder-invites/${id}/${yes ? "accept" : "decline"}`);
       await reload();
       render();
-      if (!folderInvites.length) { closeSheet(); }
+      // 다 처리했으면 물러난다 — 빈 목록을 들여다볼 이유가 없다
+      if (!folderInvites.length) { if (back) back(); else closeSheet(); }
       else draw();
       toast(yes ? `«${name}» 폴더에 들어왔습니다` : `«${name}» 초대를 물렸습니다`);
     }));
   };
   draw();
+}
+
+/** 끊겼다는 소식. 여는 순간 읽음으로 둔다 — 붉은 숫자는 "봤나" 를 세는 것이다. */
+function openBreakNotices(back) {
+  const draw = () => {
+    openSheet(`
+      ${headHtml("알림", { back: !!back, actions: false,
+        sub: "폴더 연결이 끊겼을 때 여기에 남습니다." })}
+      ${folderNotices.length ? `<div class="fr-list">${folderNotices.map(n => `
+        <div class="inv${n.read ? "" : " new"}">
+          <span class="thumb ph">${esc(n.emoji)}</span>
+          <span class="ub"><b>${esc(n.name)}</b>
+            <span>${esc(n.ownerName)}님의 폴더 · ${esc(n.reason)} · ${ago(n.at)}</span></span>
+          <span class="inv-act">
+            <button class="mini-btn" data-drop="${esc(n.id)}">치우기</button>
+          </span>
+        </div>`).join("")}</div>`
+        : `<div class="empty">새 소식이 없습니다.</div>`}
+      <div class="rest" style="text-align:left;padding:10px 2px 0">
+        끊긴 폴더는 내 폴더 목록에 줄만 남고 안이 빕니다. 필요 없으면 그 줄을 지우세요 —
+        담아 뒀던 작품은 원래 그쪽 것이라 내 목록에는 없었습니다.</div>`);
+    if (back) sheet.querySelector("[data-head-back]").onclick = back;
+
+    sheet.querySelector(".sheet-body").addEventListener("click", guard(async e => {
+      const d = e.target.closest("[data-drop]"); if (!d) return;
+      await api("DELETE", `/api/folder-notices/${d.dataset.drop}`);
+      await reload(); render();
+      if (!folderNotices.length) { if (back) back(); else closeSheet(); }
+      else draw();
+    }));
+  };
+  draw();
+  // 본 것으로 친다. 실패해도 다음에 다시 알린다 — 붉은 숫자가 하루 더 남을 뿐이다.
+  if (unreadNotices()) api("POST", "/api/folder-notices").then(reload).then(render).catch(() => {});
 }
 
 /** 누구의 폴더를 볼지 고른다 */
@@ -1345,27 +1418,31 @@ function openOthersWork(w, opts) {
 }
 
 /** 이 폴더를 함께 쓰는 사람들. 주인은 명단을 고칠 수 있고, 불려 간 사람은 보기만 한다. */
-function openFolderPeople(f, back) {
+async function openFolderPeople(f, back) {
   const mine = !f.mirror;                    // 내가 연 폴더인가
+  if (mine) { try { await loadFriends(); } catch { /* 이름을 못 읽어도 명단은 보인다 */ } }
+  const nameOf = id => (friends ?? []).find(y => y.id === id)?.displayName ?? "이름 없음";
+
   const rows = () => {
-    if (mine) {
-      const list = (f.people ?? []);
-      if (!list.length)
-        return `<div class="empty">아직 아무도 부르지 않았습니다.<br>
-          폴더 설정의 「친구에게 공개」에서 함께 쓸 사람을 고르세요.</div>`;
-      return `<div class="fr-list">${list.map(x => {
-        const fr = (friends ?? []).find(y => y.id === x.id);
-        const nm = fr?.displayName ?? "이름 없음";
-        return `<div class="uf-row" style="padding:8px 2px">
-          <span class="thumb ph">${esc(nm.slice(0, 1))}</span>
-          <span class="ub" style="flex:1"><b>${esc(nm)}</b></span>
-          <span class="${x.state === "ok" ? "st-ok" : "st-wait"}">${
-            x.state === "ok" ? "수락함" : "대기 중"}</span>
-        </div>`;
-      }).join("")}</div>`;
-    }
-    return `<div class="rest" style="text-align:left;padding:2px">
-      ${esc(f.mirrorOf)}님이 연 폴더입니다. 함께 쓰는 사람 명단은 그쪽에서 정합니다.</div>`;
+    if (!mine)
+      return `<div class="rest" style="text-align:left;padding:2px">
+        ${esc(f.mirrorOf)}님이 연 폴더입니다. 함께 쓰는 사람 명단은 그쪽에서 정합니다.</div>`;
+    const list = f.people ?? [];
+    if (!list.length)
+      return `<div class="empty">아직 아무도 부르지 않았습니다.<br>
+        아래 「＋ 더 부르기」로 함께 쓸 사람을 고르세요.</div>`;
+    return `<div class="fr-list">${list.map(x => {
+      const nm = nameOf(x.id);
+      return `<div class="uf-row" style="padding:8px 2px">
+        <span class="thumb ph">${esc(nm.slice(0, 1))}</span>
+        <span class="ub" style="flex:1"><b>${esc(nm)}</b></span>
+        <span class="${x.state === "ok" ? "st-ok" : "st-wait"}">${
+          x.state === "ok" ? "수락함" : "대기 중"}</span>
+        ${/* 끊는 것은 **주인만** 한다. 불려 간 사람이 누를 자리가 아니다 —
+             나가려면 제 폴더 줄을 지우면 된다(그쪽이 leaveFolder 로 간다). */""}
+        <button class="mini-btn bad" data-cut="${esc(x.id)}">연결 해제</button>
+      </div>`;
+    }).join("")}</div>`;
   };
 
   const wait = mine ? (f.people ?? []).filter(x => x.state !== "ok").length : 0;
@@ -1375,10 +1452,70 @@ function openFolderPeople(f, back) {
         ? `함께 쓰는 사람${wait ? ` · ${wait}명이 아직 대기 중입니다` : ""}`
         : `${esc(f.mirrorOf)}님과 함께 쓰는 폴더` })}
     ${rows()}
-    ${mine ? `<div class="rest" style="text-align:left;padding:10px 2px 0">
-      거절한 사람은 명단에서 사라집니다. 부를 사람을 더하거나 빼려면 폴더 설정에서
-      「친구에게 공개」를 고치세요.</div>` : ""}`);
+    ${mine ? `<button class="btn" style="width:100%;margin-top:12px" data-more-people>＋ 더 부르기</button>
+      <div class="rest" style="text-align:left;padding:10px 2px 0">
+        연결을 해제하면 그 사람은 이 폴더를 더 볼 수 없고, 넣어 둔 작품도 이 폴더에서
+        빠집니다 — 작품 자체는 그 사람 목록에 남습니다. 끊겼다는 것은 그쪽에도 알려집니다.</div>` : ""}`);
   sheet.querySelector("[data-head-back]").onclick = back;
+
+  /* 명단이 바뀌면 **새로 온 값으로** 다시 그린다 — 손에 든 f 는 이미 옛 값이라,
+     그대로 다시 그리면 방금 부른 사람이 안 보이고 방금 끊은 사람이 남아 있다. */
+  const again = async () => {
+    await reload(); render();
+    const now = folders.find(x => x.id === f.id);
+    if (now) openFolderPeople(now, back); else back();
+  };
+
+  const add = sheet.querySelector("[data-more-people]");
+  if (add) add.onclick = () => openInviteMore(f, again, () => openFolderPeople(f, back));
+
+  sheet.querySelector(".sheet-body").addEventListener("click", guard(async e => {
+    const cut = e.target.closest("[data-cut]"); if (!cut) return;
+    const who = nameOf(cut.dataset.cut);
+    const yes = await askSure({
+      title: `${who}님의 연결을 해제할까요?`,
+      body: `이 폴더를 더 볼 수 없게 되고, 넣어 둔 작품도 이 폴더에서 빠집니다.
+        ${who}님에게 끊겼다는 알림이 갑니다.`,
+      ok: "해제", danger: true, back: () => openFolderPeople(f, back),
+    });
+    if (!yes) return;
+    await api("DELETE", `/api/folders/${f.id}/people/${cut.dataset.cut}`);
+    toast(`${who}님의 연결을 해제했습니다`);
+    await again();
+  }));
+}
+
+/** 「공유자」 창에서 몇 사람을 더 부른다 — 명단을 통째로 다시 쓰지 않고 더하기만 한다 */
+/** `done` 은 부르고 나서 갈 길, `back` 은 그냥 물러날 때 갈 길이다 —
+    부른 뒤에는 새 명단으로 다시 그려야 하므로 둘이 다르다. */
+async function openInviteMore(f, done, back) {
+  try { await loadFriends(); } catch (e) { toast(e.message); return; }
+  const had = (f.people ?? []).map(x => x.id);
+  const out = [];
+  const team = f.take === "edit";
+  openSheet(`
+    ${headHtml("더 부르기", { back: true, save: "부르기",
+      sub: `${f.emoji} ${esc(f.name)}` })}
+    ${friends.length
+      ? `<div data-pk></div>
+         <div class="rest" style="text-align:left;padding:12px 2px 0">${team
+           ? "부른 사람에게 초대가 갑니다. 수락하면 이 폴더에 함께 넣고 뺄 수 있습니다."
+           : "부른 사람은 곧바로 이 폴더를 볼 수 있습니다."}</div>`
+      : `<div class="empty">아직 친구가 없습니다.</div>`}`);
+  sheet.querySelector("[data-head-back]").onclick = back;
+
+  if (friends.length) friendPicker(sheet.querySelector("[data-pk]"),
+    { all: friends, already: had, out });
+
+  wireHead({
+    save: guard(async () => {
+      if (!out.length) { toast("부를 사람을 골라 주세요"); return; }
+      const { added } = await api("POST", `/api/folders/${f.id}/people`, { add: out });
+      toast(added ? `${added}명을 불렀습니다` : "이미 명단에 있는 사람입니다");
+      await done();
+    }),
+    cancel: back,
+  });
 }
 
 function folderRow(fid, emoji, name, f) {
@@ -1494,7 +1631,7 @@ function render() {
 
   /* 폴더 초대는 **폴더 탭에서, 받은 것이 있을 때만** 나온다 — 없는데 자리를 차지하면
      눌러 봐야 빈 창이다. */
-  const fiN = tab === "lib" && !viewing ? folderInvites.length : 0;
+  const fiN = tab === "lib" && !viewing ? folderBell() : 0;
   fiEl.hidden = !fiN;
   fiEl.classList.remove("tucked");
   const fb = document.getElementById("fi-badge");
@@ -2221,6 +2358,63 @@ const searchHtml = (placeholder, value = "", style = "") =>
   `<input class="arch-q" type="search" placeholder="${placeholder}" value="${esc(value)}"
           autocomplete="off" spellcheck="false"${style ? ` style="${style}"` : ""}>`;
 
+/* 친구를 골라 담는 칸. 폴더 설정의 「고른 친구에게만」과 「공유자」 창의 「더 부르기」가
+   같은 물건을 쓴다 — 찾기 칸, 고르개, 담은 이름표까지 셋이 한 벌이다.
+
+   `out` 에 고른 아이디가 쌓인다. `already` 에 든 사람은 고르개에 「이미 초대됨」으로
+   서고 고를 수 없다 — 목록에서 아예 빼면 "왜 이 사람이 안 보이지" 가 되고, 그냥 두면
+   눌렀는데 아무 일도 안 일어난다. */
+function friendPicker(box, { all, already = [], out, onChange }) {
+  let query = "";
+  const done = new Set(already);
+
+  /* 찾기 칸은 **한 번만 그리고 그대로 둔다** — 글자마다 다시 그리면 한글처럼 모아 쓰는
+     글자가 치는 도중에 깨진다. 갈아 끼우는 것은 아래 목록뿐이다. */
+  const paintList = () => {
+    const q = query.trim().toLowerCase();
+    const left = all.filter(f => !out.includes(f.id))
+      .filter(f => !q || f.displayName.toLowerCase().includes(q));
+    const got = out.map(id => all.find(f => f.id === id)).filter(Boolean);
+    const none = left.length ? (q ? left[0].displayName : "친구 고르기…")
+      : q ? "찾는 이름이 없습니다" : "모두 골랐습니다";
+    box.querySelector("[data-pk-body]").innerHTML = `
+      <select data-pk-add aria-label="친구 고르기">
+        <option value="">${esc(none)}</option>
+        ${left.map(f => `<option value="${esc(f.id)}"${done.has(f.id) ? " disabled" : ""}>${
+          f.starred ? "★ " : ""}${esc(f.displayName)}${done.has(f.id) ? " — 이미 초대됨" : ""}</option>`).join("")}
+      </select>
+      ${got.length ? `<div class="pickers" style="margin-top:10px">${got.map(f =>
+          `<button class="pick on" data-pk-off="${esc(f.id)}" title="빼기"
+            >${esc(f.displayName)} <i>✕</i></button>`).join("")}</div>` : ""}`;
+    onChange?.();
+  };
+
+  box.innerHTML = `${all.length > 8 ? searchHtml("이름으로 좁히기", "", "margin-bottom:8px") : ""}
+    <div data-pk-body></div>`;
+  paintList();
+
+  box.addEventListener("input", e => {
+    if (!e.target.closest(".arch-q")) return;
+    query = e.target.value;
+    paintList();                            // 치던 칸은 그대로 둔다
+  });
+  box.addEventListener("change", e => {
+    const sel = e.target.closest("[data-pk-add]"); if (!sel?.value) return;
+    if (!done.has(sel.value)) out.push(sel.value);
+    const qEl = box.querySelector(".arch-q");
+    if (qEl) qEl.value = "";                // 담았으면 다음 사람을 찾을 차례다
+    query = "";
+    paintList();
+  });
+  box.addEventListener("click", e => {
+    const b = e.target.closest("[data-pk-off]"); if (!b) return;
+    const i = out.indexOf(b.dataset.pkOff);
+    if (i >= 0) out.splice(i, 1);
+    paintList();
+  });
+  return paintList;
+}
+
 /** 하나만 고르는 목록. 여는 방식 · 공개 대상 · 퍼가기 허용이 같은 모양을 쓴다. */
 const optsHtml = (list, current, key) => `<div class="opts" data-opts="${key}">
     ${list.map(([v, t, d]) => `<button class="opt" data-o="${v}" aria-pressed="${current === v}">
@@ -2630,58 +2824,18 @@ function openFolderForm(existing, after) {
        눌러서 켜고 껐는데, 수십 명이 되면 그것만으로 화면이 가득 차서 정작 아래에 있는
        퍼가기 설정이 안 보였다. 지금은 담은 사람만 보이므로 목록 길이가 고른 수만큼이다.
 
-       고르개에는 **아직 안 담은 사람만** 올린다. 이미 담은 이름이 남아 있으면 골랐을 때
-       아무 일도 안 일어나는 것처럼 보인다. 담긴 이름을 누르면 빠진다. */
-    /* 고르개에 올릴 이름을 좁히는 찾기 칸. 친구가 수십 명이면 고르개를 열어 놓고
-       한참 굴려야 하는데, 그 안에서는 눈으로 훑는 것 말고 할 수 있는 게 없다.
-       여기서 몇 글자 치면 고르개가 그만큼 짧아진다. */
-    let query = "";
-
-    /* 찾기 칸은 **한 번만 그리고 그대로 둔다.** 글자마다 통째로 다시 그리던 때는 치는
-       도중에 칸이 사라졌다 새로 생겨서, 한글처럼 **모아 쓰는 글자가 깨졌다** — 초성을
-       치는 순간 조합하던 칸이 없어지니 이어 붙을 자리가 없다. 커서를 되돌려 놓는 것으로는
-       못 막는다. 갈아 끼우는 것은 아래 목록뿐이다. */
-    const paintList = () => {
-      const q = query.trim().toLowerCase();
-      const left = friends
-        .filter(f => !share.with.includes(f.id))
-        .filter(f => !q || f.displayName.toLowerCase().includes(q));
-      const got = share.with.map(id => friends.find(f => f.id === id)).filter(Boolean);
-      /* 안내말은 **찾은 결과를 보고** 정한다. 한때 "친 글자가 있으면 못 찾은 것" 으로
-         쳤는데, 그러면 이름을 제대로 쳐서 아래에 그 사람이 서 있는데도 고르개에는
-         "찾는 이름이 없습니다" 가 적혀 있었다. 접힌 고르개에서 사람이 보는 것은 이 한 줄뿐이라,
-         찾아 놓고도 못 찾은 줄 알았다. */
-      const none = left.length ? (q ? `찾은 ${left.length}명 중에 고르기…` : "친구 고르기…")
-        : q ? "찾는 이름이 없습니다" : "모두 골랐습니다";
-      whoBox.querySelector("[data-who-body]").innerHTML = `
-        <select data-who-add aria-label="공개할 친구 고르기">
-          <option value="">${none}</option>
-          ${left.map(f => `<option value="${esc(f.id)}">${
-            f.starred ? "★ " : ""}${esc(f.displayName)}</option>`).join("")}
-        </select>
-        ${got.length ? `<div class="pickers" style="margin-top:10px">${got.map(f =>
-            `<button class="pick on" data-w="${esc(f.id)}" title="빼기"
-              >${esc(f.displayName)} <i>✕</i></button>`).join("")}</div>`
-          : `<div class="rest" style="text-align:left;padding:10px 2px 0">
-              고른 사람이 없어 아무에게도 보이지 않습니다.</div>`}`;
-    };
-
-    const paintWho = () => {
-      if (!friends.length) {
-        whoBox.innerHTML = `<div class="rest" style="text-align:left;padding:2px">아직 친구가 없습니다.</div>`;
-        return;
-      }
-      whoBox.innerHTML = `${friends.length > 8
-        ? searchHtml("이름으로 좁히기", "", "margin-bottom:8px") : ""}<div data-who-body></div>`;
-      paintList();
-    };
-
-    // "고른 친구에게만" 을 골랐을 때 처음 한 번만 불러온다 — 그 전에는 쓸 일이 없다
+       고르개·찾기 칸·이름표는 「공유자」 창의 「더 부르기」와 **같은 물건**이라 한 자리에서
+       만든다(friendPicker). 한때 두 벌이 따로 있었고, 한쪽만 고친 탓에 같은 창의 같은
+       칸이 서로 다르게 굴었다. */
     const drawWho = async () => {
       if (drawn) return;
       drawn = true;
       await loadFriends();
-      paintWho();
+      if (!friends.length) {
+        whoBox.innerHTML = `<div class="rest" style="text-align:left;padding:2px">아직 친구가 없습니다.</div>`;
+        return;
+      }
+      friendPicker(whoBox, { all: friends, out: share.with });
     };
     if (pick === "some" || pick === "team") drawWho();
 
@@ -2699,26 +2853,6 @@ function openFolderForm(existing, after) {
       sheet.querySelector("[data-take-box]").hidden = v === "none" || v === "team";
     });
     wireOpts(sheet, "take", v => { take = v; });
-
-    whoBox.addEventListener("input", e => {
-      if (!e.target.closest(".arch-q")) return;
-      query = e.target.value;                // 고르개에 올릴 이름만 좁힌다
-      paintList();                           // 치던 칸은 그대로 둔다
-    });
-    whoBox.addEventListener("change", e => {
-      const sel = e.target.closest("[data-who-add]"); if (!sel?.value) return;
-      share.with = [...share.with, sel.value];
-      // 담았으면 찾던 것은 지운다 — 다음 사람을 찾을 차례다
-      const qEl = whoBox.querySelector(".arch-q");
-      if (qEl) qEl.value = "";
-      query = "";
-      paintList();                           // 고르개에서 빠지고 아래에 이름이 붙는다
-    });
-    whoBox.addEventListener("click", e => {
-      const b = e.target.closest("[data-w]"); if (!b) return;
-      share.with = share.with.filter(x => x !== b.dataset.w);
-      paintList();
-    });
   }
   /* 공개를 거두는 설정은 **남의 화면에서 무언가를 없앤다.** 저장하기 전에 한 번 묻는다 —
      이름을 고치러 들어왔다가 옆 칸을 잘못 건드려 남의 폴더를 비워 버리면 되돌릴 길이 없다. */
@@ -3838,7 +3972,7 @@ document.getElementById("btn-menu").onclick = () => {
 };
 drawerBack.addEventListener("click", e => { if (e.target === drawerBack) closeDrawer(); });
 idleEl.onclick = openIdle;
-fiEl.onclick = openFolderInvites;
+fiEl.onclick = openFolderNotices;
 document.getElementById("menu-close").onclick = closeDrawer;   // 마우스가 있는 기기에만 보인다
 
 /* 사이드 메뉴도 끌어 닫는다. 시트는 아래로, 이쪽은 **왼쪽으로** — 그래서 손잡이도

@@ -14,6 +14,7 @@ import {
   sharedView, createInvite, inviteOwner, getUser, setFolderShare, setFolderTake,
   getFolder, createFolder, canCopy, canMirror, canEdit, seenByMe, markSeen,
   folderInvites, acceptFolder, declineFolder, leaveFolder,
+  noticeBreak, folderNotices, readNotices, dropNotice, inviteToFolder, unlinkFromFolder,
   type Work, type User, type ShareMode, type TakeMode,
 } from "./db.ts";
 import {
@@ -283,8 +284,11 @@ function stateSnapshot(user: User) {
        메뉴뿐인데, 앱을 열 때마다 따라오면 캘린더만 보고 나가는 사람에게는 그냥 버려진다.
        200명이면 17KB다. 사이드 메뉴에 적을 숫자만 담고, 목록은 GET /api/friends 로 부른다. */
     friendCount: isGuest(user) ? 0 : countFriends(user.id),
-    // 폴더 탭의 초대 아이콘에 적을 숫자. 목록은 열 때 따로 부른다.
+    // 폴더 탭의 알림 아이콘에 적을 숫자. 목록은 열 때 따로 부른다.
     folderInvites: isGuest(user) ? [] : folderInvites(user.id),
+    /* 끊겼다는 소식. 새로 고칠 때 함께 실어 보내는 것이 곧 "알림이 오는" 길이다 —
+       웹소켓을 붙들고 있을 만큼 급한 소식이 아니다. */
+    folderNotices: isGuest(user) ? [] : folderNotices(user.id),
     // 0이면 클라이언트가 사이트 이름을 물으러 갈 이유가 없다
     siteNamesPending: pendingSiteNames(user.id).length,
   };
@@ -830,6 +834,36 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       json(res, 200, { ok: true, folders: listFolders(user.id) });
       return true;
     }
+    /* ── 공유자 명단 ──
+       폴더 설정의 「친구에게 공개」는 명단을 **통째로 다시 쓰는** 자리다. 한 사람을 더
+       부르거나 한 사람만 끊는 일은 거기서 하기에 손이 많이 가고, 잘못 건드리면 남은
+       사람까지 함께 떨어져 나간다. 그래서 「공유자」 창에 더하기와 끊기를 따로 둔다.
+
+       **주인만 할 수 있다.** 불려 간 쪽의 폴더는 껍데기라 mine.mirror 가 차 있고,
+       그때는 명단을 손댈 자격이 없다. */
+    if (seg[3] === "people") {
+      if (!mine || mine.mirror) {
+        json(res, 403, { ok: false, reason: "폴더 주인만 명단을 고칠 수 있습니다." });
+        return true;
+      }
+      if (m === "POST") {
+        const b = await readJson(req);
+        const want: string[] = Array.isArray(b.add)
+          ? b.add.filter((x: any) => typeof x === "string") : [];
+        // 친구만 부른다 — 담는 쪽에서 막는다(applyShare 와 같은 잣대)
+        const ok = want.filter(x => areFriends(user.id, x));
+        const n = inviteToFolder(id, ok);
+        json(res, 200, { ok: true, added: n, folders: listFolders(user.id) });
+        return true;
+      }
+      if (seg[4] && m === "DELETE") {
+        const gone = unlinkFromFolder(id, seg[4]);
+        json(res, gone ? 200 : 400, gone ? { ok: true, folders: listFolders(user.id) }
+          : { ok: false, reason: "「모든 친구에게」 연 폴더는 한 사람만 끊을 수 없습니다. 공개 대상을 먼저 좁혀 주세요." });
+        return true;
+      }
+    }
+
     if (m === "DELETE") {
       /* 폴더를 지워도 작품은 남는다 — 묶음만 사라진다.
 
@@ -840,6 +874,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
          이음줄은 원본 폴더에 붙어 있어 그대로 남고, 주인은 이제 남이 된 사람의 작품을
          계속 보게 된다. 나가기 전에 내 것을 걷어 간다. */
       if (mine?.mirror) leaveFolder(user.id, mine.mirror.folder);
+      /* 지우기 **전에** 알린다 — 지우고 나면 누가 닿아 있었는지도, 폴더 이름이 무엇이었는지도
+         물어볼 데가 없다. 내가 비추던 폴더를 지우는 것은 나 혼자 손 떼는 일이라 알릴 것이 없다. */
+      if (mine && !mine.mirror) noticeBreak(id, "폴더가 사라졌습니다");
       const rf = db.prepare("DELETE FROM folder WHERE id = ? AND user_id = ?").run(id, user.id);
       if (!rf.changes) { json(res, 404, { ok: false, reason: "없는 폴더입니다." }); return true; }
       json(res, 200, { ok: true });
@@ -917,6 +954,20 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
         gone ? { ok: true } : { ok: false, reason: "이미 지난 초대입니다." });
       return true;
     }
+  }
+
+  /* ── 끊겼다는 소식 ──
+     실시간으로 밀어 주지 않는다. 새로 고칠 때 /api/state 에 함께 실려 오고, 여기서는
+     읽음 표시와 치우기만 맡는다. */
+  if (p === "/api/folder-notices" && m === "POST") {
+    readNotices(user.id);
+    json(res, 200, { ok: true });
+    return true;
+  }
+  if (seg[0] === "api" && seg[1] === "folder-notices" && seg[2] && m === "DELETE") {
+    const gone = dropNotice(user.id, seg[2]);
+    json(res, gone ? 200 : 404, gone ? { ok: true } : { ok: false, reason: "이미 치운 소식입니다." });
+    return true;
   }
 
   /* ── 친구 ── */

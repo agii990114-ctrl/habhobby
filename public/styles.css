@@ -806,6 +806,16 @@
   .inv .ub b { display: block; font-size: 13px; font-weight: 600; line-height: 1.35; }
   .inv .ub span { font-size: 11px; color: var(--ink-3); }
   .inv-act { display: flex; gap: 6px; flex: none; }
+  /* 아직 안 본 소식은 왼쪽에 띠를 세운다. 목록이 쌓였을 때 어디까지 봤는지 훑어 알도록 —
+     글자 빛깔을 바꾸면 읽기가 나빠지고, 배경을 칠하면 줄이 뚱뚱해진다. */
+  .inv.new { position: relative; padding-left: 10px; }
+  .inv.new::before {
+    content: ""; position: absolute; left: 0; top: 9px; bottom: 9px;
+    width: 3px; border-radius: 99px; background: var(--bad);
+  }
+  /* 끊는 버튼. 되돌릴 수 없는 일이라 빛깔로 한 번 더 말한다 — 누르면 되묻는 창이 뜬다. */
+  .mini-btn.bad { color: var(--bad-ink); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
+  .mini-btn.bad:hover { background: var(--bad-soft); border-color: var(--bad); }
   /* 수락했는지 기다리는지 — 글자만으로도 갈리지만 빛깔이 있으면 훑을 때 바로 걸린다 */
   .st-ok, .st-wait {
     flex: none; font-size: 11px; font-weight: 600; border-radius: 99px; padding: 2px 9px;

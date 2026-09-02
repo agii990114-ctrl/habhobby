@@ -214,6 +214,31 @@ CREATE TABLE IF NOT EXISTS folder_share (
   PRIMARY KEY (folder_id, viewer_id)
 );
 
+/* 이음줄이 끊겼다는 것을 **끊긴 사람에게** 남긴다.
+
+   미러링과 폴더 공유는 읽을 때마다 주인 것을 가져다 보여 주는 방식이라, 주인이 설정을
+   바꾸면 다음에 화면을 그릴 때 그냥 비어 버린다. 폴더 줄에 왜인지가 적히기는 하지만
+   **폴더를 열어 봐야** 보이므로, 자주 안 여는 폴더라면 끊긴 줄도 모르고 지낸다.
+
+   실시간으로 밀어 줄 필요는 없다 — 웹소켓은 늘 붙어 있어야 해서 값이 비싸고, 이건
+   "언젠가 알면 되는" 소식이다. 새로 고칠 때 함께 실려 오면 충분하다.
+
+   폴더 이름과 주인 이름을 **그때 값으로 박아 둔다**: 폴더가 지워지면 이름을 물어볼 데가
+   없고, 이름이 바뀌어도 끊길 당시의 그 이름이라야 사람이 알아본다. 같은 이유로
+   folder_id 에 외래키를 걸지 않는다. */
+CREATE TABLE IF NOT EXISTS folder_notice (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  folder_id  TEXT,
+  name       TEXT NOT NULL,
+  emoji      TEXT NOT NULL DEFAULT '📁',
+  owner_name TEXT NOT NULL,
+  reason     TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  read_at    INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_notice_user ON folder_notice(user_id, created_at);
+
 CREATE INDEX IF NOT EXISTS idx_work_user   ON work(user_id, state);
 CREATE INDEX IF NOT EXISTS idx_folder_user ON folder(user_id);
 CREATE INDEX IF NOT EXISTS idx_session_exp ON session(expires_at);
@@ -735,10 +760,15 @@ export const leaveFolder = (userId: string, folderId: string): number =>
 /** 퍼가기 권한을 정한다 — 비추고 있는 폴더에는 뜻이 없다 (내 것이 아니므로) */
 export const setFolderTake = (folderId: string, take: TakeMode): void => {
   const was = db.prepare("SELECT user_id, take_mode FROM folder WHERE id = ?").get(folderId) as any;
+  const old = (was?.take_mode ?? "copy") as TakeMode;
+  const cut = was && canMirror(old) && !canMirror(take) ? connectedTo(folderId) : [];
   db.prepare("UPDATE folder SET take_mode = ? WHERE id = ?").run(take, folderId);
   /* 함께 고치기를 끄면 더는 함께 쓰는 폴더가 아니다 — 남들이 걸어 둔 것을 걷어 낸다 */
-  if (was && canEdit(was.take_mode as TakeMode) && !canEdit(take))
+  if (was && canEdit(old) && !canEdit(take))
     dropContributions(folderId, contributors(folderId, was.user_id));
+  /* 비추는 길이 닫히면 그쪽 폴더는 그 자리에서 빈다. 함께 쓰던 폴더였다면 그 말로 적는다 —
+     "미러링이 꺼졌습니다" 는 그 사람이 겪은 일과 다르다. */
+  if (cut.length) noticeBreak(folderId, canEdit(old) ? "함께 쓰기가 끝났습니다" : "미러링이 꺼졌습니다", cut);
 };
 
 /** 그 폴더를 누구에게 보여 줄지 정한다. mode 가 "some" 이 아니면 짝은 지운다. */
@@ -750,6 +780,10 @@ export function setFolderShare(folderId: string, mode: ShareMode, viewers: strin
   const was = new Map((db.prepare("SELECT viewer_id, state FROM folder_share WHERE folder_id = ?")
     .all(folderId) as any[]).map(r => [r.viewer_id, r.state ?? "ok"]));
   const f = db.prepare("SELECT user_id, take_mode FROM folder WHERE id = ?").get(folderId) as any;
+  /* 좁아지면서 **줄이 끊기는 사람**을 먼저 셈해 둔다 — 아래에서 folder_share 를 지우고 나면
+     누가 닿아 있었는지 물어볼 데가 없다. 넓히는 쪽(some → all)은 아무도 잃지 않는다. */
+  const cut = mode === "all" ? []
+    : connectedTo(folderId).filter(id => mode !== "some" || !viewers.includes(id));
   db.prepare("UPDATE folder SET share_mode = ? WHERE id = ?").run(mode, folderId);
   db.prepare("DELETE FROM folder_share WHERE folder_id = ?").run(folderId);
 
@@ -761,10 +795,88 @@ export function setFolderShare(folderId: string, mode: ShareMode, viewers: strin
     dropContributions(folderId, gone);
   }
 
-  if (mode !== "some") return;
-  const ins = db.prepare("INSERT OR IGNORE INTO folder_share(folder_id, viewer_id, state) VALUES(?,?,?)");
-  for (const v of new Set(viewers)) ins.run(folderId, v, was.get(v) ?? (needsAccept ? "pending" : "ok"));
+  if (mode === "some") {
+    const ins = db.prepare("INSERT OR IGNORE INTO folder_share(folder_id, viewer_id, state) VALUES(?,?,?)");
+    for (const v of new Set(viewers)) ins.run(folderId, v, was.get(v) ?? (needsAccept ? "pending" : "ok"));
+  }
+  noticeBreak(folderId, "공개가 끝났습니다", cut);
 }
+
+/** 명단에 몇 사람을 더 부른다 — 공개 대상을 통째로 다시 쓰지 않고 **더하기만** 한다 */
+export function inviteToFolder(folderId: string, add: string[]): number {
+  const f = db.prepare("SELECT take_mode, share_mode FROM folder WHERE id = ?").get(folderId) as any;
+  if (!f || f.share_mode !== "some") return 0;
+  const ins = db.prepare("INSERT OR IGNORE INTO folder_share(folder_id, viewer_id, state) VALUES(?,?,?)");
+  // 함께 고치는 폴더는 수락을 거쳐야 하고, 보여 주기만 하는 폴더는 수락할 것이 없다
+  const state = canEdit((f.take_mode ?? "copy") as TakeMode) ? "pending" : "ok";
+  let n = 0;
+  for (const v of new Set(add)) n += ins.run(folderId, v, state).changes;
+  return n;
+}
+
+/** 한 사람만 끊는다 — 주인이 「공유자」 창에서 누른다 */
+export function unlinkFromFolder(folderId: string, userId: string): boolean {
+  const f = db.prepare("SELECT user_id, share_mode FROM folder WHERE id = ?").get(folderId) as any;
+  if (!f || f.user_id === userId) return false;
+  const had = connectedTo(folderId).includes(userId);
+  const row = db.prepare("DELETE FROM folder_share WHERE folder_id = ? AND viewer_id = ?")
+    .run(folderId, userId).changes;
+  /* 「모든 친구에게」 연 폴더는 명단이 없어 한 사람만 뺄 수 없다 —
+     그 폴더에서 끊으려면 공개 대상을 먼저 좁혀야 한다. */
+  if (!row && f.share_mode !== "some") return false;
+  dropContributions(folderId, [userId]);
+  if (had) noticeBreak(folderId, "연결이 해제되었습니다", [userId]);
+  return true;
+}
+
+/* ── 끊겼다는 소식 ───────────────────────────────────────── */
+
+/** 지금 이 폴더에 **줄이 닿아 있는** 사람들 — 비추고 있거나, 수락하고 함께 쓰거나 */
+function connectedTo(folderId: string): string[] {
+  const a = db.prepare("SELECT user_id AS id FROM folder WHERE mirror_folder = ?")
+    .all(folderId) as any[];
+  const b = db.prepare("SELECT viewer_id AS id FROM folder_share WHERE folder_id = ? AND state = 'ok'")
+    .all(folderId) as any[];
+  return [...new Set([...a, ...b].map(r => r.id))];
+}
+
+/** 끊겼다고 적어 둔다. `who` 를 주면 그 사람들에게만, 안 주면 닿아 있던 모두에게. */
+export function noticeBreak(folderId: string, reason: string, who?: string[]): number {
+  const f = db.prepare(`SELECT f.name, f.emoji, f.user_id, u.display_name AS who
+    FROM folder f JOIN user u ON u.id = f.user_id WHERE f.id = ?`).get(folderId) as any;
+  if (!f) return 0;
+  const ids = (who ?? connectedTo(folderId)).filter(id => id && id !== f.user_id);
+  if (!ids.length) return 0;
+  const ins = db.prepare(`INSERT INTO folder_notice
+    (id, user_id, folder_id, name, emoji, owner_name, reason, created_at)
+    VALUES(?,?,?,?,?,?,?,?)`);
+  const now = Date.now();
+  for (const id of new Set(ids))
+    ins.run(newId("n"), id, folderId, f.name, f.emoji, f.who ?? "이름 없음", reason, now);
+  return ids.length;
+}
+
+export type Notice = {
+  id: string; folder: string | null; name: string; emoji: string;
+  ownerName: string; reason: string; at: number; read: boolean;
+};
+
+/** 내게 온 소식. 읽은 것도 함께 준다 — 지우기 전에는 다시 볼 수 있어야 한다. */
+export function folderNotices(userId: string): Notice[] {
+  return (db.prepare(`SELECT * FROM folder_notice WHERE user_id = ?
+    ORDER BY created_at DESC LIMIT 50`).all(userId) as any[])
+    .map(r => ({ id: r.id, folder: r.folder_id, name: r.name, emoji: r.emoji,
+                 ownerName: r.owner_name, reason: r.reason, at: r.created_at, read: !!r.read_at }));
+}
+
+/** 읽음으로 둔다 — 목록을 연 순간 붉은 숫자가 사라진다 */
+export const readNotices = (userId: string): number =>
+  db.prepare("UPDATE folder_notice SET read_at = ? WHERE user_id = ? AND read_at IS NULL")
+    .run(Date.now(), userId).changes;
+
+/** 한 줄 치운다 */
+export const dropNotice = (userId: string, id: string): boolean =>
+  !!db.prepare("DELETE FROM folder_notice WHERE id = ? AND user_id = ?").run(id, userId).changes;
 
 /** 내가 받은 폴더 초대 — 아직 수락도 거절도 안 한 것들 */
 export function folderInvites(userId: string): {

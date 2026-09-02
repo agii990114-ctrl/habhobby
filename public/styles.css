@@ -106,17 +106,29 @@
   }
   .app-bar {
     display: flex; align-items: center; justify-content: space-between;
+    /* space-between 만으로는 좁은 화면에서 양쪽이 맞닿는다 — 종과 로고가
+       닿지 않도록 최소 틈을 놓고, 로고 쪽이 줄어들 수 있게 해 둔다. */
+    gap: 10px;
     padding: 16px 18px 12px; border-bottom: 1px solid var(--line); flex: none;
   }
+  /* 로고는 줄이지 않는다 — min-width: 0 과 줄임표를 넣어 보았는데 375px 에서
+     "Hab…" 가 되어 붙어 서는 것보다 나쁘었다. 위의 gap 만으로 닿지 않게 된다. */
   .brand { font-family: "Hahmlet", serif; font-weight: 700; font-size: 18px; letter-spacing: -.01em; }
   .brand span { color: var(--accent); }
   .bar-left { display: flex; align-items: center; gap: 9px; }
-  /* 좁은 화면에서는 검색을 사이드 메뉴로 보낸다. 상단바가 빠듯해 로고를 접어야 했는데,
-     검색이 메뉴로 가면 그럴 필요가 없다. */
+  .bar-right { display: flex; align-items: center; gap: 8px; }
+  /* 종에 붙는 붉은 숫자. 떠 있는 ＋ 버튼의 것과 같은 물건이라 자리만 잡아 준다 —
+     .icon-btn 은 기준(relative)이 없어 그냥 두면 화면 왼쪽 위로 달아난다. */
+  .icon-btn.bell { position: relative; overflow: visible; }
+  .icon-btn.bell .fab-badge { top: -5px; right: -5px; }
+  /* 좁은 화면에서는 검색을 사이드 메뉴로 보낸다. 그러면 로고를 접지 않아도 되었는데,
+     비운 그 자리를 이번에 알림 종이 받았다 — 375px 에서 13px 이 모자라 탭의 「폴더」가
+     잘렸다. 종과 탭은 **누를 것**이고 로고는 읽는 것이라, 로고를 접는다. */
   #menu-search { display: none; }
   @media (max-width: 430px) {
     #btn-search { display: none; }
     #menu-search { display: flex; }
+    .brand { display: none; }
   }
   .icon-btn {
     width: 30px; height: 30px; flex: none; border-radius: 9px; cursor: pointer;
@@ -521,8 +533,16 @@
   .cal-box {
     margin-top: 14px; padding: 10px 12px 12px;
     border: 1px solid var(--line); border-radius: 11px;
+    /* 둥근 모서리 밖으로 아무것도 새지 않게 하는 빗장. 아래에서 레일을 제자리로
+       돌려놓지만, 나중에 무엇을 담더라도 테두리를 넘지 않는다. */
+    overflow: hidden;
   }
   .cal-box .plat { margin: 0; }
+  /* 레일은 "더 밀 수 있다" 는 것이 읽히도록 좌우로 16px 삐져나가 화면 끝까지 흐른다.
+     그런데 **테두리를 두른 통 안**에서는 그것이 그대로 선을 넘는 그림이 된다 —
+     카드가 박스 밖으로 나가 보였다. 통 안에서는 통의 안쪽 여백(12px)까지만 흐르게
+     바꿔 단다. 흘러나가는 느낌은 그대로 두고 넘는 선만 통의 것으로 갈아 끼우는 셈이다. */
+  .cal-box .rail { margin: 0 -12px; padding: 0 12px 6px; scroll-padding-left: 12px; }
   .cal-grid {
     display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 1px; background: var(--line);

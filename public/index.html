@@ -39,10 +39,17 @@
           <button class="icon-btn" id="btn-search" aria-label="작품 검색" title="검색">🔍</button>
           <div class="brand">Hab<span>Hobby</span></div>
         </div>
-        <div class="tabs" role="tablist">
-          <button role="tab" id="tab-cal" aria-selected="true">캘린더</button>
-          <button role="tab" id="tab-home" aria-selected="false">페이지</button>
-          <button role="tab" id="tab-lib" aria-selected="false">폴더</button>
+        <div class="bar-right">
+          <!-- 폴더 연결이 끊겼다는 소식. 탭 옆에 두는 이유는 그것이 **어느 탭에서든 오는**
+               소식이기 때문이다 — 폴더 탭 안에 숨겨 두면 캘린더만 보는 사람에게는 안 온다. -->
+          <button class="icon-btn bell" id="btn-bell" aria-label="알림" title="알림">
+            🔔<span class="fab-badge" id="bell-badge" hidden></span>
+          </button>
+          <div class="tabs" role="tablist">
+            <button role="tab" id="tab-cal" aria-selected="true">캘린더</button>
+            <button role="tab" id="tab-home" aria-selected="false">페이지</button>
+            <button role="tab" id="tab-lib" aria-selected="false">폴더</button>
+          </div>
         </div>
       </div>
 
@@ -57,7 +64,7 @@
       </button>
       <!-- 폴더 탭에서만, 받은 초대가 있을 때만 나온다. 추가 목록과 같은 자리를 쓴다 —
            한쪽은 캘린더에서만, 한쪽은 폴더에서만 나오므로 겹치지 않는다. -->
-      <button class="fab right" id="btn-fi" aria-label="폴더 알림" title="폴더 알림" hidden>
+      <button class="fab right" id="btn-fi" aria-label="폴더 초대" title="폴더 초대" hidden>
         🤝<span class="fab-badge" id="fi-badge" hidden></span>
       </button>
 

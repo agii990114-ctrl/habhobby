@@ -1301,37 +1301,12 @@ function whoseBar() {
 
 /** 받은 폴더 초대 — 수락하면 곧바로 내 폴더 목록에 선다. */
 /* 폴더에 얽힌 소식이 두 갈래다 — **들어오라는 것**과 **끊겼다는 것**. 성격이 반대라
-   한 목록에 섞으면 수락 버튼 옆에 끊긴 소식이 서게 된다. 첫 화면에서 갈래를 고르고,
-   고른 쪽만 펼친다. */
+   한 목록에 섞지 않는다: 수락 버튼 옆에 끊긴 소식이 서면 무엇을 하는 자리인지 흐려진다.
+
+   자리도 갈랐다. 초대는 **폴더 탭의 🤝** 에, 끊겼다는 소식은 **상단바의 🔔** 에 있다 —
+   초대는 폴더를 다루다 받는 것이지만, 끊겼다는 소식은 캘린더만 보는 사람에게도 온다.
+   폴더 탭 안에 숨겨 두면 그 사람은 폴더가 빈 것을 한참 뒤에야 안다. */
 const unreadNotices = () => folderNotices.filter(n => !n.read).length;
-const folderBell = () => folderInvites.length + unreadNotices();
-
-function openFolderNotices() {
-  const line = (emoji, title, sub, n, key) => `
-    <button class="folder" data-go="${key}">
-      <div class="mini solo">${emoji}</div>
-      <span class="txt"><b>${title}${n ? ` <i class="mtag">${n}</i>` : ""}</b>
-        <span>${sub}</span></span>
-      <span class="chev">›</span></button>`;
-
-  openSheet(`
-    ${headHtml("폴더 알림", { back: false, actions: false,
-      sub: "폴더에 얽힌 소식을 여기서 봅니다." })}
-    <div class="folders">
-      ${line("✉️", "폴더 초대", folderInvites.length
-        ? "수락하면 그 폴더가 내 목록에 함께 섭니다." : "받은 초대가 없습니다.",
-        folderInvites.length, "inv")}
-      ${line("🔗", "알림", folderNotices.length
-        ? "끊긴 폴더가 있습니다." : "새 소식이 없습니다.",
-        unreadNotices(), "brk")}
-    </div>`);
-
-  sheet.querySelector(".sheet-body").addEventListener("click", e => {
-    const b = e.target.closest("[data-go]"); if (!b) return;
-    if (b.dataset.go === "inv") openFolderInvites(openFolderNotices);
-    else openBreakNotices(openFolderNotices);
-  });
-}
 
 function openFolderInvites(back) {
   const draw = () => {
@@ -1810,9 +1785,19 @@ function render() {
   ib.textContent = idleN > 99 ? "99+" : idleN;
   ib.hidden = !idleN;
 
+  /* 🔔 은 늘 자리에 있다. 여기만 떠 있는 버튼이 아니라 **상단바의 붙박이**라, 없어졌다
+     생겼다 하면 그때마다 탭이 좌우로 밀린다. 대신 붉은 숫자는 있을 때만 붙는다. */
+  const bell = document.getElementById("bell-badge");
+  const bn = unreadNotices();
+  bell.textContent = bn > 99 ? "99+" : bn;
+  bell.hidden = !bn;
+  /* 게스트는 친구가 없어 끈길 줄도 없다 — 영영 빈 종을 달아 두지 않는다.
+     처음부터 안 보이므로 탭이 밀리는 일도 없다. */
+  document.getElementById("btn-bell").hidden = guestMode();
+
   /* 폴더 초대는 **폴더 탭에서, 받은 것이 있을 때만** 나온다 — 없는데 자리를 차지하면
      눌러 봐야 빈 창이다. */
-  const fiN = tab === "lib" && !viewing ? folderBell() : 0;
+  const fiN = tab === "lib" && !viewing ? folderInvites.length : 0;
   fiEl.hidden = !fiN;
   fiEl.classList.remove("tucked");
   const fb = document.getElementById("fi-badge");
@@ -4185,7 +4170,8 @@ document.getElementById("btn-menu").onclick = () => {
 };
 drawerBack.addEventListener("click", e => { if (e.target === drawerBack) closeDrawer(); });
 idleEl.onclick = openIdle;
-fiEl.onclick = openFolderNotices;
+fiEl.onclick = () => openFolderInvites();
+document.getElementById("btn-bell").onclick = () => openBreakNotices();
 document.getElementById("menu-close").onclick = closeDrawer;   // 마우스가 있는 기기에만 보인다
 
 /* 사이드 메뉴도 끌어 닫는다. 시트는 아래로, 이쪽은 **왼쪽으로** — 그래서 손잡이도

@@ -7,7 +7,11 @@ import { DOMAIN_PREFIX } from "./platforms.ts";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-const DB_PATH = resolve(process.cwd(), "data/habhobby.db");
+/* 곁에서 시험 삼아 띄운 서버가 **돌아가는 서비스의 데이터베이스**를 열어 버리는 일이
+   있었다. WAL 잠금은 한 프로세스만 쥘 수 있어서, 그러면 진짜 서버가 못 열고 죽는다
+   (`disk I/O error`). DATA_DIR 을 두어 시험판이 제 자리를 쓸 수 있게 한다. */
+const DATA_DIR = resolve(process.cwd(), process.env.DATA_DIR ?? "data");
+const DB_PATH = resolve(DATA_DIR, "habhobby.db");
 mkdirSync(dirname(DB_PATH), { recursive: true });
 
 export const db = new DatabaseSync(DB_PATH);

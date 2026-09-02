@@ -203,7 +203,31 @@ function pageIsGeneric(og: Og, askedUrl: string, plat: Platform, title: string):
   } catch { return false; }
 }
 
+/* 주소창에 한 글자 멈출 때마다(0.4초) 이쪽이 불린다. 지우고 다시 치거나, 안 되는 줄
+   알고 같은 주소를 두어 번 넣어 보는 일이 흔한데 그때마다 남의 페이지를 새로 긁었다.
+   같은 주소를 잠깐 기억해 둔다 — 짧게 두는 이유는 표지나 제목이 바뀌었을 때 영영 옛것을
+   붙들고 있지 않기 위해서다. 실패는 기억하지 않는다(잠깐 죽은 것일 수 있다).
+
+   *** 뜻이 있는 부수 효과: 남의 서버를 두드리는 횟수가 줄어 차단당할 일도 준다. */
+const MEMO_MS = 10 * 60 * 1000;
+const memo = new Map<string, { at: number; got: Resolved }>();
+
 export async function resolveUrl(raw: string): Promise<Resolved> {
+  const key = raw.trim();
+  const seen = memo.get(key);
+  if (seen && Date.now() - seen.at < MEMO_MS) return seen.got;
+
+  const got = await resolveOnce(raw);
+  /* 못 읽은 것(blocked)은 기억하지 않는다 — 잠깐 죽었거나 느렸을 뿐일 수 있고,
+     그걸 10분 붙들면 다시 넣어 보는 사람에게 같은 실패만 되돌려 준다. */
+  if (got.ok && got.origin !== "blocked") {
+    if (memo.size >= 300) memo.clear();      // 오래 도는 서버에서 끝없이 불어나지 않게
+    memo.set(key, { at: Date.now(), got });
+  }
+  return got;
+}
+
+async function resolveOnce(raw: string): Promise<Resolved> {
   // 주소를 먼저 골라낸다. 공유받은 문자열은 제목이 붙어 있어서, 그대로는
   // 단축 주소인지조차 알아볼 수 없다 — 그러면 리다이렉트를 못 따라간다.
   const p = parseShared(await unshorten(extractUrl(raw)));

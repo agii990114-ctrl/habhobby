@@ -33,7 +33,7 @@ const PUBLIC = pathResolve(process.cwd(), "public");
 /* 직접 올린 표지를 두는 곳. 아이폰 사파리에는 "이미지 주소 복사" 가 없어서 주소만으로는
    길이 막힌다 — 사진을 그대로 올릴 수 있어야 한다.
    data/ 아래에 두는 이유는 그 폴더만 바깥에 매어 두면(도커 bind mount) 되기 때문이다. */
-const COVERS = pathResolve(process.cwd(), "data/covers");
+const COVERS = pathResolve(process.cwd(), process.env.DATA_DIR ?? "data", "covers");
 mkdirSync(COVERS, { recursive: true });
 /* 화면에서 긴 변 400px 로 줄여 보내므로 한 장이 30~50KB 다. 1MB 는 그것이 어긋났을 때를
    막는 빗장이지 실제로 닿는 값이 아니다. */
@@ -448,7 +448,7 @@ async function assetVersion(): Promise<string> {
 
    index.html 은 판 번호를 박아 넣은 뒤의 모습으로 갈무리한다 — 그 치환도 매번 할 일이 아니다.
    data/ 아래 표지 그림은 사용자가 올리고 지우는 것이라 여기 오지 않는다(따로 다룬다). */
-const served = new Map<string, { body: Buffer; type: string }>();
+const served = new Map<string, { body: Buffer; type: string; etag: string }>();
 
 async function serveStatic(req: IncomingMessage, res: ServerResponse, urlPath: string): Promise<boolean> {
   const rel = normalize(decodeURIComponent(urlPath)).replace(/^([/\\])+/, "");
@@ -466,14 +466,30 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, urlPath: s
         body = Buffer.from(body.toString("utf8")
           .replace(/\/(app\.js|styles\.css)"/g, `/$1?v=${v}"`), "utf8");
       }
-      hit = { body, type: MIME[extname(file)] ?? "application/octet-stream" };
+      /* 표딱지(ETag)는 내용에서 뽑는다 — 파일이 도는 동안 바뀌지 않으므로 한 번이면 된다. */
+      hit = {
+        body, type: MIME[extname(file)] ?? "application/octet-stream",
+        etag: '"' + createHash("sha256").update(body).digest("hex").slice(0, 16) + '"',
+      };
       served.set(file, hit);
     } catch { return false; }
+  }
+  /* no-cache 는 "쓰지 말라"가 아니라 "쓰기 전에 물어보라"다. 그런데 물어볼 거리를
+     안 주고 있었다 — 표딱지가 없으니 되물을 때마다 늘 200 에 몸통 전부를 얹어 보냈다.
+     index.html 은 CF가 캐시하지 않는 문서라 **새로 고칠 때마다** 3.2KB 가 그대로 오갔고,
+     app.js 는 네 시간이 지나 브라우저가 되물으면 264KB 를 통째로 다시 받았다.
+     표딱지를 붙여 두면 같은 판일 때 머리 몇 줄로 끝난다. */
+  const asked = req.headers["if-none-match"];
+  if (asked && asked.split(",").some(t => t.trim() === hit.etag)) {
+    res.writeHead(304, { ETag: hit.etag, "Cache-Control": "no-cache" });
+    res.end();
+    return true;
   }
   res.writeHead(200, {
     "Content-Type": hit.type,
     "Content-Length": hit.body.length,
     "Cache-Control": "no-cache",
+    ETag: hit.etag,
   });
   res.end(hit.body);
   return true;

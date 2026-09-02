@@ -381,7 +381,7 @@ function takable(me: string, other: string): Map<string, Work> {
 
 /** 한 편을 담아 간다. 이미 있으면 새로 만들지 않고 폴더에만 넣는다. */
 async function takeWork(userId: string, src: Work, folderIds: string[]):
-  Promise<{ already: boolean }> {
+  Promise<{ already: boolean; id: string }> {
   const had = db.prepare(
     "SELECT id FROM work WHERE user_id = ? AND platform_id = ? AND series_id = ?")
     .get(userId, src.platformId, src.seriesId) as { id: string } | undefined;
@@ -393,7 +393,7 @@ async function takeWork(userId: string, src: Work, folderIds: string[]):
       const cur = getWork(userId, had.id)!.folders;
       setWorkFolders(userId, had.id, [...new Set([...cur, ...folderIds])]);
     }
-    return { already: true };
+    return { already: true, id: had.id };
   }
 
   const id = newId("w");
@@ -409,7 +409,7 @@ async function takeWork(userId: string, src: Work, folderIds: string[]):
       src.schedule.mode, JSON.stringify(src.schedule.days),
       src.schedule.next, src.schedule.source, now);
   if (folderIds.length) setWorkFolders(userId, id, folderIds);
-  return { already: false };
+  return { already: false, id };
 }
 
 /* ── 라우팅 ───────────────────────────────────────────────── */
@@ -1050,8 +1050,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
            허락하면 담을 수 있다 — 주인이 그 작품을 가져가도 좋다고 한 것이다. */
         const src = takable(user.id, other).get(b.work);
         if (!src) { json(res, 403, { ok: false, reason: "담아갈 수 없는 작품입니다." }); return true; }
-        const { already } = await takeWork(user.id, src, []);
-        json(res, 200, { ok: true, already, title: src.title });
+        /* 번호를 함께 돌려준다 — 화면이 곧바로 그 작품의 설정 창을 열어, 친구가 정해 둔
+           값을 보면서 내 것으로 손볼 수 있게 한다. */
+        const { already, id } = await takeWork(user.id, src, []);
+        json(res, 200, { ok: true, already, id, title: src.title });
         return true;
       }
 

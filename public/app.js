@@ -1110,9 +1110,14 @@ function openFolderSheet(id) {
   writeHash();
 
   /* 🗂 · 🫙 는 우리가 고른 표식이라 그린 아이콘으로, 폴더 이모지는 그 사람이 고른 것이라
-     그대로 둔다. */
+     그대로 둔다.
+
+     **여기서 이미 다듬은 글을 만든다.** 아이콘은 우리가 그린 마크업이고 이름은 사람이
+     친 글자라, 둘을 붙여 놓고 통째로 esc 에 넣으면 아이콘이 글자 그대로 찍힌다 —
+     실제로 「전체」와 「미분류」 제목에 <svg …> 가 통째로 나왔다. 사람이 친 쪽만 여기서
+     다듬고, 아래로는 이미 다듬어진 것으로 넘긴다. */
   const name = id === "_all" ? icon("grid") + " 전체"
-    : id === "_none" ? icon("inbox") + " 미분류" : `${f.emoji} ${f.name}`;
+    : id === "_none" ? icon("inbox") + " 미분류" : `${esc(f.emoji)} ${esc(f.name)}`;
   const inFolder = byRecent(worksIn(id));
   const shown = inFolder.filter(w => filter === "all" || w.mediaType === filter);
   const types = ["all", ...Object.keys(MEDIA).filter(t => inFolder.some(w => w.mediaType === t))];
@@ -1124,7 +1129,7 @@ function openFolderSheet(id) {
       : ""}
     ${gridHtml(shown, id === "_none" ? "미분류 작품이 없습니다." : "이 폴더는 비어 있습니다.")}`, {
     full: true,
-    title: esc(name),
+    title: name,               // 위에서 이미 다듬었다 — 여기서 또 esc 하면 아이콘이 글자가 된다
     /* 버튼이 무엇을 하는지는 버튼이 말한다 — 안내말에 "오른쪽 위 ⋯ 로 고칠 수 있습니다"
        를 적어 두었는데, 그건 아이콘이 알아볼 만하지 않다는 뜻이었다. 톱니로 바꾸면
        설명이 필요 없다. */
@@ -1604,13 +1609,24 @@ function openOthersWork(w, opts) {
   const take = sheet.querySelector("[data-take]");
   /* 곧바로 담는다. 한때 URL 추가 창으로 넘겼는데, 그러면 **서버가 그 페이지를 다시 읽는다** —
      이미 친구 쪽에 제목·표지·플랫폼·일정이 다 있는데도. 게다가 읽기를 막는 사이트라면
-     친구는 멀쩡히 갖고 있는 표지를 나는 못 받는다. 친구 것을 그대로 떠 오는 편이 빠르고 낫다. */
+     친구는 멀쩡히 갖고 있는 표지를 나는 못 받는다. 친구 것을 그대로 떠 오는 편이 빠르고 낫다.
+
+     담고 나면 **작품 설정 창으로 이어 준다.** 떠 온 값은 친구가 정해 둔 것이라 내 사정과
+     다를 수 있다 — 폴더도 아직 안 정해져 있다. 그것을 지금 손보게 하는 것이 담자마자
+     다시 찾아 들어가게 하는 것보다 낫다.
+
+     **취소하면 보던 자리로 돌아온다.** 작품 설정의 기본 되돌림은 「내 작품 창」인데, 여기서
+     그것을 쓰면 친구 폴더를 보다가 난데없이 내 작품 창에 서게 된다. 돌아갈 곳을 짚어 준다. */
   if (take) take.onclick = guard(async () => {
     const r = await api("POST", `/api/friends/${ownerId}/take`, { work: w.id });
-    if (r.already) { toast(`«${r.title}» 은(는) 이미 담겨 있습니다`); return; }
     await reload(); render();
-    closeSheet();                       // 보던 폴더로 돌아간다 — 이어서 더 담을 수 있게
-    toast(`«${r.title}» 담았습니다`);
+    /* 돌아갈 곳을 **지금 잡아 둔다.** 작품 설정은 제 시트를 새로 열면서 쌓아 둔 되돌림
+       더미를 비우므로(openSheet), 그 뒤에 closeSheet 를 불러 봐야 창만 닫힌다.
+       `over` 는 이 창이 덮고 있던 자리를 다시 여는 손잡이다 — 그것을 그대로 넘긴다. */
+    const back = opts.over ?? (() => hideSheet());
+    toast(r.already ? `«${r.title}» 은(는) 이미 담겨 있습니다` : `«${r.title}» 담았습니다`);
+    if (r.id && works.some(x => x.id === r.id)) openWorkSettings(r.id, { back });
+    else back();
   });
 }
 
@@ -2002,7 +2018,9 @@ function wireHead({ save, cancel, back = cancel }) {
 /* 기본은 아래에서 올라오는 낮은 시트. 목록이 긴 화면은 full로 띄운다 —
    손잡이 대신 제목줄과 닫기 버튼이 고정되고 본문만 스크롤된다. */
 function openSheet(html, opts = {}) {
-  sheet.className = opts.full ? "sheet full" : "sheet";
+  /* flush 는 **통의 위 여백을 떼는** 갈래다. 붙는 머리글(sticky)이 통 맨 위에 닿아야
+     하는 화면에서 쓴다 — 여백이 남아 있으면 지나가는 줄이 그 틈으로 비친다. */
+  sheet.className = (opts.full ? "sheet full" : "sheet") + (opts.flush ? " flush" : "");
   // 손잡이는 모든 시트에 둔다 — 어느 창이든 같은 자리를 잡아 끌어 내리면 닫힌다.
   // 그래서 닫기 버튼은 없앴다. 배경을 눌러도, Esc 를 눌러도 닫힌다.
   /* 닫기 버튼은 마크업에 늘 넣어 두고, **보일지는 CSS가 정한다** (마우스가 있는 기기에서만).
@@ -4021,7 +4039,7 @@ async function openFriends() {
     </div>
     ${/* 마지막 칸도 맨 위까지 올라올 수 있게 뒤에 빈 자리를 둔다 — 얼마나 둘지는
          화면 크기에 달렸으므로 아래에서 재서 정한다 */""}
-    <div class="fr-pad"></div>`);
+    <div class="fr-pad"></div>`, { flush: true });
 
   const list = sheet.querySelector("[data-fr-list]");
 
@@ -4155,6 +4173,41 @@ async function openFriends() {
      체크는 보이는데 셈에는 안 들어가, 골랐다고 믿은 사람이 안 골린 채로 끊게 된다.
 
      고르는 중에는 네모칸이든 줄이든 같은 뜻이다 — 그때 열어 볼 일은 없다. */
+  /* 꾹 눌러 고르기. 손가락으로 다룰 때 「선택」을 먼저 찾아 누르는 것은 한 손짓이 더
+     드는 일이라, 줄을 꾹 누르면 그 줄이 골라진 채로 고르기에 들어간다.
+
+     **끄는 손짓과 갈라야 한다** — 목록을 굴리려고 짚은 것도 처음에는 꾹 누르는 것과
+     똑같이 생겼다. 8px 만 움직여도 손을 뗀 것으로 친다. */
+  let hold = null, from = null, held = false;
+  const dropHold = () => { clearTimeout(hold); hold = null; };
+  list.addEventListener("pointerdown", e => {
+    const row = e.target.closest("[data-friend]"); if (!row) return;
+    from = { x: e.clientX, y: e.clientY };
+    hold = setTimeout(() => {
+      hold = null; held = true;
+      if (!sel) { sel = new Set(); repaintBar(); }
+      sel.add(row.dataset.friend);
+      repaint(); repaintBulk();
+      // 손끝에 걸리는 것이 있어야 "고르기로 들어왔다" 가 읽힌다. 없는 기기면 그냥 넘어간다.
+      try { navigator.vibrate?.(12); } catch { }
+    }, 450);
+  });
+  list.addEventListener("pointermove", e => {
+    if (!hold || !from) return;
+    if (Math.abs(e.clientX - from.x) > 8 || Math.abs(e.clientY - from.y) > 8) dropHold();
+  });
+  list.addEventListener("pointerup", dropHold);
+  list.addEventListener("pointercancel", dropHold);
+
+  /* 꾹 누른 뒤에는 click 이 따라온다 — 그대로 두면 방금 고른 줄이 곧바로 풀린다.
+     같은 마디에 걸린 다른 손잡이까지 막아야 하므로 stopImmediatePropagation 이다
+     (그냥 stopPropagation 은 같은 마디의 나머지 손잡이를 못 막는다). */
+  list.addEventListener("click", e => {
+    if (!held) return;
+    held = false;
+    e.preventDefault(); e.stopImmediatePropagation();
+  }, true);
+
   list.addEventListener("click", e => {
     if (!sel) return;
     const pick = e.target.closest("[data-fpick]") ?? e.target.closest("[data-friend]");

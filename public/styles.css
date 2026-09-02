@@ -751,6 +751,9 @@
   .anchor button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 
   .pickers { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+  /* 퍼가기 태그 — 공개 대상 목록 바로 밑에 딸려 붙는다. 설명은 고른 것 하나만 작게. */
+  .take-tags { margin-top: 10px; }
+  .take-note { text-align: left; padding: 6px 2px 0; font-size: 11.5px; line-height: 1.5; }
   .pick {
     border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-2);
     font-size: 12.5px; padding: 5px 11px; border-radius: 99px; cursor: pointer;
@@ -908,9 +911,19 @@
   .star-on { color: var(--star); font-style: normal; }
 
   /* 찾기 칸과 즐겨찾기 단추가 한 줄에 선다. 찾기 칸이 없을 때는 단추만 오른쪽에 남는다. */
-  .fr-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  /* 찾는 줄 — 찾기 칸과 즐겨찾기 단추가 나란히 선다.
+     **키를 맞추는 것은 stretch 로 한다.** 단추에 높이를 숫자로 박아 두면 칸의 글자 크기나
+     안쪽 여백이 바뀔 때마다 따로 고쳐야 하고, 그 사이에는 한쪽만 삐져나온다.
+     위 안내글과 붙어 있으면 찾기 칸이 그 글의 일부처럼 읽혀서 한 칸 띄운다. */
+  .fr-bar { display: flex; align-items: stretch; gap: 8px; margin: 14px 0 4px; }
   .fr-bar .arch-q { flex: 1; min-width: 0; margin: 0; }
-  .fr-bar .mini-btn { flex: none; margin-left: auto; }
+  .fr-bar .mini-btn {
+    flex: none; margin-left: auto;
+    display: flex; align-items: center; gap: 5px;
+    padding: 0 13px; font-size: 12.5px; border-radius: 9px;
+  }
+  /* 고르는 줄. 「선택」은 왼쪽 끝, 찾기 칸의 왼쪽 모서리와 줄을 맞춘다. */
+  .fr-pick { display: flex; margin: 8px 0 4px; }
 
   /* ── Side menu ───────────────────────── */
   .drawer-back { position: absolute; inset: 0; background: rgba(20, 12, 16, .42); display: flex; z-index: 6; }

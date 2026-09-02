@@ -350,21 +350,21 @@ const guestMode = () => me?.provider === "guest";
    담아가기는 한 벌 떠 가는 것이라 그 뒤로 서로 상관이 없고, 미러링은 비추기만 해서
    내가 고치면 그쪽에도 바뀐다. 어느 쪽을 허락할지는 폴더마다 다를 수 있다 —
    "가져가서 네 맘대로 해" 와 "내가 고르는 걸 계속 봐" 는 다른 뜻이다. */
-/* 공개와 「함께 쓰기」를 한 줄에 둔다. 한때 공개 대상을 고르고 **또** 퍼가기 허용에서
-   함께 고치기를 고르게 했는데, 두 곳을 다 맞춰야 초대가 나가므로 한 곳만 고치고 왜
-   아무 일도 안 일어나는지 몰랐다. 공유 폴더를 만드는 일은 한 가지 결정이다. */
+/* 폴더 설정은 **두 가지만 묻는다** — 누구에게 보일지, 그 사람이 무엇을 할 수 있는지.
+   한때 「고른 친구와 함께 쓰기」를 공개 갈래에 끼워 두었는데, 그건 공개 대상과 퍼가기를
+   한 항목에 뭉쳐 놓은 것이라 갈래가 셋인지 넷인지도 헷갈렸다. 함께 쓰기는 **퍼가기 쪽**
+   이야기다 — 「폴더 공유」로 그리로 옮겼다. */
 const SHARE_MODES = [
   ["none", "나만 보기", "아무에게도 보이지 않습니다."],
   ["all", "모든 친구에게", "친구가 늘어나면 그 사람에게도 보입니다."],
-  ["some", "고른 친구에게만", "고른 사람이 볼 수 있습니다. 넣고 빼는 것은 나만 합니다."],
-  ["team", "고른 친구와 함께 쓰기", "고른 사람에게 초대를 보냅니다. 수락하면 함께 넣고 뺍니다."],
+  ["some", "고른 친구에게만", "고른 사람이 볼 수 있습니다."],
 ];
 const TAKE_MODES = [
   ["none", "보기만", "가져갈 수 없습니다. 눈으로만 봅니다."],
   ["copy", "담아가기만", "한 벌 떠 갑니다. 그 뒤로는 내가 고쳐도 그쪽엔 안 갑니다."],
   ["mirror", "미러링만", "내 폴더를 그대로 비춥니다. 내가 고치면 그쪽에도 바뀝니다."],
   ["both", "둘 다", "담아가든 비추든 친구가 고릅니다."],
-  ["edit", "함께 고치기", "공개한 친구들도 이 폴더에 넣고 뺄 수 있습니다. 작품 자체는 넣은 사람만 고칩니다."],
+  ["edit", "폴더 공유", "고른 사람에게 초대를 보냅니다. 수락하면 함께 넣고 뺍니다. 작품 자체는 넣은 사람만 고칩니다."],
 ];
 // 함께 고치는 사이라면 담아가는 것도 된다 — 가장 너그러운 갈래다
 const canCopy = t => t === "copy" || t === "both" || t === "edit";
@@ -3004,10 +3004,21 @@ function openFolderForm(existing, after) {
   /* 보는 것과 가져가는 것은 다른 일이다 — 공개했다고 다 퍼 가도 좋다는 뜻은 아니다.
      기본은 담아가기까지. 미러링은 "내가 고르는 걸 계속 보라" 는 뜻이라 직접 켜야 열린다. */
   let take = existing?.take ?? "copy";
-  /* 화면에서는 "고른 친구와 함께 쓰기" 가 한 항목이지만, 담길 때는 두 값이다 —
-     공개 대상 some + 퍼가기 edit. 화면 값과 담기는 값을 여기서 갈아 끼운다. */
-  let pick = share.mode === "some" && take === "edit" ? "team" : share.mode;
-  const asShare = v => (v === "team" ? "some" : v);
+
+  /* 「폴더 공유」는 **고른 친구에게만** 일 때만 고를 수 있다. 초대를 보내려면 이름이
+     적힌 명단이 있어야 하는데, 「모든 친구에게」에는 그 명단이 없다 — 골라 놓아도
+     아무에게도 초대가 안 가고 폴더는 그쪽 목록에 서지도 않는다. */
+  const takeList = () => TAKE_MODES.filter(([v]) => v !== "edit" || share.mode === "some");
+
+  /** 퍼가기 태그 한 줄 — 고른 것만 켜 두고, 그 설명은 바로 아래 작게 적는다 */
+  const takeHtml = () => {
+    const list = takeList();
+    const cur = list.find(([v]) => v === take) ?? list[0];
+    return `<div class="pickers take-tags">${list.map(([v, t]) =>
+      `<button type="button" class="pick${v === take ? " on" : ""}" data-take="${v}"
+        >${t}</button>`).join("")}</div>
+      <div class="rest take-note">${cur ? cur[2] : ""}</div>`;
+  };
   openSheet(`
     ${headHtml(existing ? "폴더 편집" : "새 폴더", { back: false,
       save: existing ? "저장" : "만들기",
@@ -3030,15 +3041,17 @@ function openFolderForm(existing, after) {
       <div class="rest" style="text-align:left;padding:2px">
         둘러보기로는 폴더를 공개할 수 없습니다. 로그인하면 쓸 수 있어요.</div></div>` : ""}
     ${!guestMode() ? `<div class="field sep"><label>친구에게 공개</label>
-      ${optsHtml(SHARE_MODES, pick, "share")}
-      <div data-share-who${pick === "some" || pick === "team" ? "" : " hidden"}>
+      ${optsHtml(SHARE_MODES, share.mode, "share")}
+      <div data-share-who${share.mode === "some" ? "" : " hidden"}>
         <div class="rest" style="text-align:left;padding:8px 2px 0">친구를 불러오는 중…</div>
       </div>
-    </div>
-    ${/* 함께 쓰는 폴더는 퍼가기가 이미 정해져 있다 — 그 칸은 보여 주지 않는다 */""}
-    <div class="field sep" data-take-box${pick === "none" || pick === "team" ? " hidden" : ""}>
-      <label>퍼가기 허용</label>
-      ${optsHtml(TAKE_MODES.filter(([v]) => v !== "edit"), take, "take")}
+      ${/* 퍼가기는 **공개 대상에 딸린 이야기**라 같은 칸 안, 목록 바로 밑에 둔다.
+           갈래 목록으로 또 한 칸을 세우면 창이 두 배로 길어지고, 위에서 고른 것과
+           아래에서 고르는 것이 무슨 사이인지 흐려진다. 여기서는 태그 한 줄이면 된다.
+
+           설명도 다섯 줄을 늘어놓지 않는다 — 고른 것 하나만 아래에 작게 적는다.
+           안 고른 갈래의 설명은 지금 읽을 이야기가 아니다. */""}
+      <div data-take-box${share.mode === "none" ? " hidden" : ""}>${takeHtml()}</div>
     </div>` : ""}
     ${existing ? `<div class="link-row"><button class="btn" id="fdel">폴더 삭제</button></div>` : ""}
     <div class="link-row wide-only">
@@ -3096,22 +3109,28 @@ function openFolderForm(existing, after) {
       }
       friendPicker(whoBox, { all: friends, out: share.with });
     };
-    if (pick === "some" || pick === "team") drawWho();
+    if (share.mode === "some") drawWho();
+
+    const takeBox = sheet.querySelector("[data-take-box]");
+    const paintTake = () => { takeBox.innerHTML = takeHtml(); };
 
     wireOpts(sheet, "share", v => {
-      pick = v;
-      share.mode = asShare(v);
-      // 함께 쓰기를 고르면 퍼가기도 그것으로 정해진다. 되돌리면 담아가기로 돌아간다.
-      if (v === "team") take = "edit";
-      else if (take === "edit") take = "copy";
-      const withWho = v === "some" || v === "team";
-      whoBox.hidden = !withWho;
-      if (withWho) drawWho();
-      /* 아무에게도 안 보이는 폴더에는 퍼가기라는 말이 성립하지 않고,
-         함께 쓰는 폴더는 이미 정해져 있다. */
-      sheet.querySelector("[data-take-box]").hidden = v === "none" || v === "team";
+      share.mode = v;
+      whoBox.hidden = v !== "some";
+      if (v === "some") drawWho();
+      /* 「고른 친구에게만」을 떠나면 폴더 공유는 고를 수 없다 — 담아가기로 되돌린다.
+         켜져 있던 태그가 목록에서 사라지기만 하면 무엇이 골라져 있는지 알 수 없다. */
+      if (take === "edit" && v !== "some") take = "copy";
+      // 아무에게도 안 보이는 폴더에는 퍼가기라는 말이 성립하지 않는다
+      takeBox.hidden = v === "none";
+      paintTake();
     });
-    wireOpts(sheet, "take", v => { take = v; });
+
+    takeBox.addEventListener("click", e => {
+      const b = e.target.closest("[data-take]"); if (!b) return;
+      take = b.dataset.take;
+      paintTake();                       // 켜진 태그와 아래 설명이 함께 바뀐다
+    });
   }
   /* 공개를 거두는 설정은 **남의 화면에서 무언가를 없앤다.** 저장하기 전에 한 번 묻는다 —
      이름을 고치러 들어왔다가 옆 칸을 잘못 건드려 남의 폴더를 비워 버리면 되돌릴 길이 없다. */
@@ -3966,7 +3985,6 @@ async function openFriends() {
       ${friends.length > 6 ? searchHtml("이름으로 찾기", query) : ""}
       <button class="mini-btn" data-only-star aria-pressed="${onlyStar}"
         >${icon("star")} 즐겨찾기</button>
-      ${sel ? "" : `<button class="mini-btn" data-fsel>선택</button>`}
     </div>`;
     return top + `<div data-fr-bulk>${bulkHtml()}</div>`;
   };
@@ -3974,12 +3992,14 @@ async function openFriends() {
   /* 셈이 바뀔 때 갈아 끼우는 것은 **이 조각뿐**이다 — 위의 찾기 칸까지 함께 다시 그리면
      이름을 치다가 네모칸을 하나 누른 순간 치던 글자가 끊긴다. */
   const bulkHtml = () => {
-    if (!sel) return "";
-    const vis = shown();
-    const all = vis.length > 0 && vis.every(f => sel.has(f.id));
+    // 고르기 전에는 「선택」 하나만. 왼쪽 끝에 두어 찾기 칸의 왼쪽 모서리와 줄을 맞춘다.
+    if (!sel) return `<div class="fr-pick"><button class="mini-btn" data-fsel>선택</button></div>`;
+    /* 「전체 선택」은 두지 않는다 — 친구를 통째로 끊는 일에 한 번 누르면 되는 길을
+       내줄 이유가 없다. 잘못 눌러도 되돌릴 수 없는 쪽으로는 손이 더 가야 맞다.
+       고른 것을 한꺼번에 푸는 쪽은 남긴다: 그건 되돌리는 손짓이다. */
     return `<div class="bulk">
       <b>${sel.size}명 선택</b>
-      ${vis.length ? `<button class="mini-btn" data-fsel-all>${all ? "전체 해제" : "전체 선택"}</button>` : ""}
+      ${sel.size ? `<button class="mini-btn" data-fsel-all>전체 해제</button>` : ""}
       <span class="bulk-act">
         <button class="mini-btn danger" data-fsel-del${sel.size ? "" : " disabled"}>친구 끊기</button>
         <button class="mini-btn" data-fsel-off>완료</button>
@@ -4044,20 +4064,16 @@ async function openFriends() {
     const off = bar.querySelector("[data-fsel-off]");
     if (off) off.onclick = () => { sel = null; repaintBar(); repaint(); };
     const all = bar.querySelector("[data-fsel-all]");
-    if (all) all.onclick = () => {
-      const vis = shown();
-      if (vis.every(f => sel.has(f.id))) for (const f of vis) sel.delete(f.id);
-      else for (const f of vis) sel.add(f.id);
-      repaintBulk(); repaint();
-    };
+    if (all) all.onclick = () => { sel.clear(); repaintBulk(); repaint(); };
     const del = bar.querySelector("[data-fsel-del]");
     if (del) del.onclick = cutFriends;
+    // 「선택」은 이제 아래 줄에 있다 — 갈래가 바뀌므로 칸을 통째로 다시 그린다
+    const on = bar.querySelector("[data-fsel]");
+    if (on) on.onclick = () => { sel = new Set(); repaintBar(); repaint(); };
   }
 
   function wireBar() {
     wireBulk();
-    const on = bar.querySelector("[data-fsel]");
-    if (on) on.onclick = () => { sel = new Set(); repaintBar(); repaint(); };
 
     /* 찾기 칸을 치는 동안에는 **줄 위 칸을 다시 그리지 않는다** — 갈아 끼우면 치던 칸이
        사라졌다 새로 생겨서 한글처럼 모아 쓰는 글자가 깨진다. 갈아 끼우는 것은 목록뿐이다. */

@@ -1302,11 +1302,9 @@
 
   /* ── 친구 ─────────────────────────── */
   .fr-list { display: flex; flex-direction: column; }
-  .thumb.ph {
-    background: var(--surface-3); color: var(--ink-2);
-    display: flex; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 13px;
-  }
+  /* .thumb.ph — 이름 앞의 머리글자 상자. 바로 옆에 이름이 통째로 있어 같은 글자를 두 번
+     보여 줄 뿐이었고, 그만큼 줄이 두꺼워져 한 화면에 담기는 수가 줄었다. 폴더 이모지도
+     이제 이름과 한 줄에 붙여 쓴다. 쓰는 곳이 없어져 규칙째 걷어냈다. */
 
   /* ── 모바일: 문서가 구르는 배치 ─────────────────────────
      사파리는 **문서**가 아래로 구를 때만 주소창을 접는다. 앱을 화면 높이에 못 박고

@@ -609,6 +609,111 @@ function gridHtml(list, emptyMsg) {
   return `<div class="grid">${list.map(w => workCard(w)).join("")}</div>`;
 }
 
+/* ── 작품 격자에서 여럿 고르기 ────────────────────────────
+   폴더 안과 구간별 세부 목록이 **같은 카드를 같은 손짓으로** 다루는 자리라, 고르는 물건도
+   하나만 둔다. 고른 것은 한꺼번에 감상 완료나 휴지통으로 보낸다 — 지우는 것이 아니라
+   보관함으로 옮기는 일이라 되돌릴 길이 남는다.
+
+   `key` 는 지금 어느 목록을 고르고 있는지다. 다른 목록으로 넘어가면 고른 것을 버린다 —
+   폴더 A 에서 셋을 골라 둔 채 폴더 B 를 열었는데 그 셋이 따라오면 엉뚱한 것을 옮긴다. */
+let workSel = null, workSelKey = null;
+const workPickAt = key => { if (workSelKey !== key) { workSel = null; workSelKey = key; } };
+
+/** 고르는 중인 카드. 켜진 것은 표지를 덮고 체크를 얹는다 — 「작품 넣기」와 같은 모양이다. */
+const workPickCard = w => `<button class="work pick-work${workSel.has(w.id) ? " on" : ""}"
+    data-wpick="${esc(w.id)}" aria-pressed="${workSel.has(w.id)}">
+    <div class="cover" style="${coverStyle(w)}">${coverChar(w)}
+      ${w.episode ? `<span class="ep">${esc(w.episode)}</span>` : ""}
+      <span class="tick">${icon("check")}</span>
+    </div>
+    <h4>${esc(w.title)}</h4><time>${ago(w.lastAt)}</time>
+  </button>`;
+
+/** 고르는 중이면 고르는 격자로, 아니면 여느 격자로 */
+const workGridHtml = (list, emptyMsg) => workSel
+  ? (list.length ? `<div class="grid">${list.map(workPickCard).join("")}</div>`
+    : `<div class="empty">${emptyMsg}</div>`)
+  : gridHtml(list, emptyMsg);
+
+/** 목록 위 줄 — 고르기 전에는 「선택」, 고르는 중에는 셈과 실행 */
+const workBarHtml = any => {
+  if (!any) return "";
+  if (!workSel)
+    return `<div class="fr-pick"><button class="mini-btn" data-wsel>선택</button></div>`;
+  return `<div class="bulk">
+    <b>${workSel.size}개 선택</b>
+    ${workSel.size ? `<button class="mini-btn" data-wsel-all>전체 해제</button>` : ""}
+    <span class="bulk-act">
+      <button class="mini-btn" data-wbulk="watched"${workSel.size ? "" : " disabled"}
+        >${icon("check")} 감상 완료</button>
+      <button class="mini-btn danger" data-wbulk="dropped"${workSel.size ? "" : " disabled"}
+        >${icon("trash")} 휴지통</button>
+      <button class="mini-btn" data-wsel-off>완료</button>
+    </span></div>`;
+};
+
+/** 고르는 손짓을 잇는다. `redraw` 는 부르는 쪽이 제 화면을 다시 그리는 길이다. */
+function wireWorkPick(box, redraw) {
+  // 카드를 꾹 누르면 그 카드가 골라진 채로 고르기에 들어간다
+  holdToPick(box, ".work[data-id], .work[data-wpick]", card => {
+    if (!workSel) workSel = new Set();
+    workSel.add(card.dataset.id ?? card.dataset.wpick);
+    redraw();
+  });
+
+  box.addEventListener("click", e => {
+    if (e.target.closest("[data-wsel]")) { workSel = new Set(); return redraw(); }
+    if (e.target.closest("[data-wsel-off]")) { workSel = null; return redraw(); }
+    if (e.target.closest("[data-wsel-all]")) { workSel.clear(); return redraw(); }
+    const c = e.target.closest("[data-wpick]");
+    if (c) {
+      const id = c.dataset.wpick;
+      const on = !workSel.has(id);
+      on ? workSel.add(id) : workSel.delete(id);
+      /* **그 카드만 뒤집는다.** 격자를 통째로 다시 그리면 지금 짚고 있는 카드가 그 자리에서
+         사라졌다 새로 생겨, 훑으며 톡톡 짚을 때 두 번째부터 헛손질이 된다. */
+      c.classList.toggle("on", on);
+      c.setAttribute("aria-pressed", String(on));
+      const bar = box.querySelector("[data-wbar]");
+      if (bar) { bar.innerHTML = workBarHtml(true); }
+      return;
+    }
+  });
+
+  box.addEventListener("click", guard(async e => {
+    const b = e.target.closest("[data-wbulk]"); if (!b) return;
+    const to = b.dataset.wbulk, ids = [...workSel];
+    if (!ids.length) return;
+    const picked = ids.map(id => works.find(w => w.id === id)).filter(Boolean);
+    if (!picked.length) return;
+    const label = STATES[to].label;
+
+    /* **감상 완료는 별점을 묻는다** — 한 편을 옮길 때와 같다. 나중에 별점별로 모아 보는
+       것이 그 값의 쓰임이라, 여럿을 한꺼번에 끝낼 때야말로 매겨 둘 만하다. */
+    if (to === "watched") {
+      return openRating(picked, to, { after: () => {
+        workSel = null;
+        toast(`${picked.length}편을 ${label}${ro(label)} 옮겼습니다`);
+        redraw();
+      } });
+    }
+
+    /* 휴지통은 묻지 않는다 — 버리는 것에 점수를 매길 일은 없다. 대신 정말 내릴 것인지는
+       묻는다. 취소는 **보던 목록으로** 돌아간다: 되묻는 창만 닫히고 창까지 닫히면 안 된다. */
+    const yes = await askSure({
+      title: `${picked.length}편을 ${label}${ro(label)} 옮길까요?`,
+      ok: label, danger: true, back: redraw,
+      body: "지워지지 않습니다. 왼쪽 메뉴의 보관함으로 옮겨지고, 거기서 되돌릴 수 있습니다. 매겨 둔 별점도 그대로 남습니다.",
+    });
+    if (!yes) return;
+    for (const id of ids) await api("PATCH", `/api/works/${id}`, { state: to });
+    workSel = null;
+    await reload(); render();
+    toast(`${picked.length}편을 ${label}${ro(label)} 옮겼습니다`);
+    redraw();
+  }));
+}
+
 /* 홈 — 플랫폼별 가로 슬라이드. 입력이 최근순이라 Map 삽입 순서가 곧 최근 플랫폼 순이다. */
 function railsHtml(list) {
   if (!list.length)
@@ -1122,12 +1227,14 @@ function openFolderSheet(id) {
   const shown = inFolder.filter(w => filter === "all" || w.mediaType === filter);
   const types = ["all", ...Object.keys(MEDIA).filter(t => inFolder.some(w => w.mediaType === t))];
 
+  workPickAt("folder:" + id);          // 다른 폴더로 넘어가면 고른 것은 버린다
   openSheet(`${types.length > 2
       ? `<div class="chips">${types.map(t =>
           `<button class="chip" data-filter="${t}" aria-pressed="${filter === t}">${
             t === "all" ? "전체" : MEDIA[t]}</button>`).join("")}</div>`
       : ""}
-    ${gridHtml(shown, id === "_none" ? "미분류 작품이 없습니다." : "이 폴더는 비어 있습니다.")}`, {
+    <div data-wbar>${workBarHtml(shown.length)}</div>
+    ${workGridHtml(shown, id === "_none" ? "미분류 작품이 없습니다." : "이 폴더는 비어 있습니다.")}`, {
     full: true,
     title: name,               // 위에서 이미 다듬었다 — 여기서 또 esc 하면 아이콘이 글자가 된다
     /* 버튼이 무엇을 하는지는 버튼이 말한다 — 안내말에 "오른쪽 위 ⋯ 로 고칠 수 있습니다"
@@ -1176,9 +1283,12 @@ function openFolderSheet(id) {
     })));
   }
 
+  wireWorkPick(sheet.querySelector(".sheet-body"), () => openFolderSheet(id));
+
   sheet.querySelector(".sheet-body").addEventListener("click", e => {
     const c = e.target.closest(".chip");
     if (c) { filter = c.dataset.filter; return openFolderSheet(id); }
+    if (workSel) return;                 // 고르는 중에는 열어 볼 일이 없다
     const w = e.target.closest(".work, .row");
     if (w) openWork(w.dataset.id, () => openFolderSheet(id));   // 폴더 위에 겹친다
   });
@@ -1377,8 +1487,7 @@ function openFolderInvites(back) {
         sub: "수락하면 그 폴더가 내 폴더 목록에 함께 섭니다." })}
       ${folderInvites.length ? `<div class="fr-list">${folderInvites.map(v => `
         <div class="inv">
-          <span class="thumb ph">${esc(v.emoji)}</span>
-          <span class="ub"><b>${esc(v.name)}</b>
+          <span class="ub"><b>${esc(v.emoji)} ${esc(v.name)}</b>
             <span>${esc(v.ownerName)}님이 불렀습니다 · ${v.count}편</span></span>
           <span class="inv-act">
             <button class="mini-btn" data-no="${esc(v.folder)}">거절</button>
@@ -1415,8 +1524,7 @@ function openBreakNotices(back) {
       sub: "폴더 연결이 끊겼을 때 여기에 남습니다." })}
     ${folderNotices.length ? `<div class="fr-list">${folderNotices.map(n => `
       <div class="inv${n.read ? "" : " new"}">
-        <span class="thumb ph">${esc(n.emoji)}</span>
-        <span class="ub"><b>${esc(n.name)}</b>
+        <span class="ub"><b>${esc(n.emoji)} ${esc(n.name)}</b>
           <span>${esc(n.ownerName)}님의 폴더 · ${esc(n.reason)} · ${ago(n.at)}</span></span>
       </div>`).join("")}</div>`
       : `<div class="empty">새 소식이 없습니다.</div>`}
@@ -1450,7 +1558,6 @@ async function openWhose() {
     /* 별은 여기서 켜고 끄지 않는다 — 보여 주기만 한다. 같은 스위치가 여러 화면에 있으면
        어디서 켠 것인지 헷갈린다. 순서는 서버가 이미 별 켠 사람을 위로 올려 준다. */
     return list.map(f => `<button class="uf-item" data-go-friend="${esc(f.id)}">
-      <span class="thumb ph">${esc(f.displayName.slice(0, 1))}</span>
       <span class="ub"><b>${f.starred ? `<i class="star-on">${icon("star", "on")}</i> ` : ""}${esc(f.displayName)}</b>
         <span>나에게 공개한 폴더 ${f.sharedFolders}개</span></span>
       ${viewing?.id === f.id ? `<span class="wnow">보는 중</span>` : `<span class="chev">${icon("right")}</span>`}</button>`).join("");
@@ -1589,9 +1696,12 @@ function openOthersWork(w, opts) {
         <dt>담긴 때</dt><dd>${ago(w.addedAt)}</dd>
       </dl>
     </div>
-    ${linked ? goHtml(w, plat, false) : ""}
+    ${/* **보러가기가 테마색이다.** 내 작품 창에서도 그랬으므로, 같은 자리에 같은 무게로
+         둔다 — 한쪽에서는 담기가, 한쪽에서는 보러가기가 진하면 어느 것이 이 창의 본 일인지
+         매번 다시 읽어야 한다. 어느 창이든 먼저 하는 일은 「보러 가는 것」이다. */""}
+    ${linked ? goHtml(w, plat, true) : ""}
     ${mayTake
-      ? `<button class="btn primary" style="width:100%;margin-top:9px" data-take>내 목록에 담기</button>
+      ? `<button class="btn" style="width:100%;margin-top:9px" data-take>내 목록에 담기</button>
          <div class="rest" style="text-align:left;padding:7px 2px 0">
            담아 오면 내 것이 되어 일정도 표지도 내가 고칠 수 있습니다. 그 전에는 볼 수만 있어요.</div>`
       : `<div class="rest" style="text-align:left;padding:9px 2px 0">${
@@ -2382,10 +2492,23 @@ function openWork(id, over) {
   });
   const p = platformOf(w.platformId);
   const linked = !!w.listUrl;    // 직접 입력한 항목에는 열 곳이 없다
+  const st = STATES[w.state];
   openSheet(`
-    ${headHtml(esc(w.title), { back: false, actions: false,
-      sub: `${esc(p.name)}${linked ? ` · ${MEDIA[w.mediaType] ?? "링크"}` : ""} · ${
-        esc(schedText(w))} · ${ago(w.lastAt)}` })}
+    ${headHtml(esc(w.title), { back: false, actions: false, sub: "내 목록" })}
+    ${/* 남의 작품 창과 **같은 모양**이다. 한때 여기만 값을 작은 글씨 한 줄에 몰아 놓았는데,
+         같은 작품을 어디서 여느냐에 따라 읽는 자리가 달라지면 매번 다시 찾아야 한다.
+         값의 차례도 작품 설정과 맞춰 둔다. */""}
+    <div class="ov">
+      ${w.coverUrl ? `<div class="ov-cover" style="${coverStyle(w)}"></div>` : ""}
+      <dl class="kv">
+        <dt>플랫폼</dt><dd>${esc(p.name)}${linked ? ` · ${MEDIA[w.mediaType] ?? "링크"}` : ""}</dd>
+        <dt>연재 일정</dt><dd>${esc(schedText(w))}</dd>
+        ${w.episode ? `<dt>회차</dt><dd>${esc(w.episode)}</dd>` : ""}
+        ${w.rating ? `<dt>별점</dt><dd><i class="stars-h">${starText(w.rating)}</i></dd>` : ""}
+        ${st ? `<dt>상태</dt><dd>${icon(st.icon)} ${esc(st.label)}</dd>` : ""}
+        <dt>마지막 실행</dt><dd>${ago(w.lastAt)}</dd>
+      </dl>
+    </div>
     ${linked ? goHtml(w, p, true)
       : `<div class="rest" style="text-align:left;padding:2px 2px 8px">
            주소 없이 담은 항목입니다. 나중에 페이지가 생기면 설정에서 주소를 붙일 수 있습니다.</div>`}
@@ -2543,13 +2666,21 @@ function openWorkSettings(id, opts) {
 
 /* 목록에서 내릴 때 별점을 묻는다. 나중에 보관함에서 별점별로 모아 보기 위한 것이라
    건너뛸 수 있어야 한다 — 강요하면 내리기 자체를 망설이게 된다. */
-function openRating(w, state) {
+/* 한 편도, 여럿도 이 창으로 온다 — 별점을 묻는 자리가 둘이면 한쪽만 고치게 된다.
+
+   **여럿일 때 안 고르면 손대지 않는다.** 한 편일 때는 이미 매긴 점수가 초기값이라 그냥
+   옮겨도 그대로 남지만, 여럿은 저마다 다른 점수를 갖고 있어 0 을 보내면 그것들이 통째로
+   지워진다. 값을 아예 안 실어 보내 서버가 그 칸을 건드리지 않게 한다. */
+function openRating(target, state, opts = {}) {
+  const list = Array.isArray(target) ? target : [target];
+  const one = list.length === 1 ? list[0] : null;
   const meta = STATES[state];
-  let picked = w.rating ?? 0;
+  let picked = one?.rating ?? 0;
 
   openSheet(`
     ${headHtml(`${icon(meta.icon)} ${meta.label}`,
-      { back: false, save: `${esc(meta.label)}${ro(meta.label)} 옮기기`, sub: esc(w.title) })}
+      { back: false, save: `${esc(meta.label)}${ro(meta.label)} 옮기기`,
+        sub: one ? esc(one.title) : `고른 ${list.length}편` })}
     <div class="field"><label>별점</label>
       <div class="stars">${Array.from({ length: MAX_STAR }, (_, i) =>
         `<button data-star="${i + 1}" aria-label="${i + 1}점">${icon("star")}</button>`).join("")}</div>
@@ -2565,7 +2696,8 @@ function openRating(w, state) {
     .forEach(b => b.classList.toggle("on", +b.dataset.star <= n));
   const sum = () => {
     sheet.querySelector("[data-star-sum]").innerHTML =
-      picked ? `${starText(picked)} ${picked}점` : "안 매겨도 됩니다.";
+      picked ? `${starText(picked)} ${picked}점${one ? "" : " · 고른 전부에 같은 점수"}`
+        : one ? "안 매겨도 됩니다." : "안 매기면 저마다 매겨 둔 점수를 그대로 둡니다.";
   };
   paint(picked); sum();
 
@@ -2584,8 +2716,11 @@ function openRating(w, state) {
      이미 매긴 점수는 picked 의 초기값이므로 그냥 옮기면 그대로 남는다. */
   wireHead({
     save: guard(async () => {
-      await api("PATCH", `/api/works/${w.id}`, { state, rating: picked || null });
-      await reload(); render(); closeSheet();
+      // 한 편이면 0 도 뜻이 있다(점수를 지운다). 여럿이면 안 고른 것은 손대지 않는다.
+      const rating = picked || (one ? null : undefined);
+      for (const x of list) await api("PATCH", `/api/works/${x.id}`, { state, rating });
+      await reload(); render();
+      if (opts.after) opts.after(); else closeSheet();
     }),
     // 취소는 아무것도 바꾸지 않고 한 걸음 뒤로 — 잘못 눌렀을 때 빠져나갈 길
     cancel: () => openWorkSettings(w.id),
@@ -2656,6 +2791,46 @@ function friendPicker(box, { all, already = [], out, onChange }) {
     paintList();
   });
   return paintList;
+}
+
+/* 꾹 눌러 고르기. 친구 목록·폴더 목록·작품 격자가 같은 손짓을 쓰므로 한 자리에서 만든다.
+
+   **끄는 손짓과 갈라야 한다** — 목록을 굴리려고 짚은 것도 처음에는 꾹 누르는 것과 똑같이
+   생겼다. 8px 만 움직여도 손을 뗀 것으로 친다.
+
+   `held` 를 **다음 pointerdown 에서 되돌리는 것**이 이 물건의 핵심이다. 꾹 누른 뒤 따라오는
+   click 을 삼키려고 표를 세워 두는데, 꾹 누르는 사이에 목록을 다시 그리면 짚고 있던 마디가
+   떨어져 나가 **그 click 이 아예 안 온다**. 그러면 표가 선 채로 남아 다음 톡을 대신 삼켰고,
+   고르기에 들어간 직후 한 번은 아무 일도 안 일어났다. 손짓이 새로 시작할 때 지우면
+   그 자리가 없어진다. */
+function holdToPick(root, sel, onHold, opts = {}) {
+  const ms = opts.ms ?? 450;
+  let timer = null, from = null, held = false;
+  const drop = () => { clearTimeout(timer); timer = null; };
+  root.addEventListener("pointerdown", e => {
+    held = false;                       // 지난번 꾹 누르기의 뒷정리 — click 이 안 왔을 수 있다
+    const row = e.target.closest(sel); if (!row) return;
+    from = { x: e.clientX, y: e.clientY };
+    timer = setTimeout(() => {
+      timer = null; held = true;
+      onHold(row);
+      // 손끝에 걸리는 것이 있어야 "고르기로 들어왔다" 가 읽힌다. 없는 기기면 그냥 넘어간다.
+      try { navigator.vibrate?.(12); } catch { }
+    }, ms);
+  });
+  root.addEventListener("pointermove", e => {
+    if (!timer || !from) return;
+    if (Math.abs(e.clientX - from.x) > 8 || Math.abs(e.clientY - from.y) > 8) drop();
+  });
+  root.addEventListener("pointerup", drop);
+  root.addEventListener("pointercancel", drop);
+  /* 같은 마디에 걸린 다른 손잡이까지 막아야 하므로 stopImmediatePropagation 이다 —
+     그냥 stopPropagation 은 같은 마디의 나머지 손잡이를 못 막는다. */
+  root.addEventListener("click", e => {
+    if (!held) return;
+    held = false;
+    e.preventDefault(); e.stopImmediatePropagation();
+  }, true);
 }
 
 /** 하나만 고르는 목록. 여는 방식 · 공개 대상 · 퍼가기 허용이 같은 모양을 쓴다. */
@@ -3309,9 +3484,11 @@ function drawPlatformList(pid) {
       return `<div class="empty">${q ? "찾는 작품이 없습니다." : "비어 있습니다."}</div>`;
     return (q ? `<div class="rest" style="text-align:left;padding:0 2px 8px">
         &ldquo;${esc(platQuery.trim())}&rdquo; · ${hits.length}편</div>` : "")
-      + gridHtml(hits, "");
+      + `<div data-wbar>${workBarHtml(hits.length)}</div>`
+      + workGridHtml(hits, "");
   };
 
+  workPickAt("plat:" + pid);           // 다른 구간으로 넘어가면 고른 것은 버린다
   openSheet(`
     ${all.length > 7 ? searchHtml("작품명으로 검색", platQuery) : ""}
     <div data-plat-body>${body()}</div>`,
@@ -3323,8 +3500,11 @@ function drawPlatformList(pid) {
     sheet.querySelector("[data-plat-body]").innerHTML = body();
   });
 
+  wireWorkPick(sheet.querySelector(".sheet-body"), () => drawPlatformList(pid));
+
   sheet.querySelector(".sheet-body").addEventListener("click", e => {
-    const r = e.target.closest(".row[data-id]");
+    if (workSel) return;                 // 고르는 중에는 열어 볼 일이 없다
+    const r = e.target.closest(".work[data-id], .row[data-id]");
     if (r) openWork(r.dataset.id, () => drawPlatformList(pid));   // 구간 목록 위에 겹친다
   });
 }
@@ -3948,8 +4128,9 @@ async function openFriends() {
   const row = f => `<div class="uf-row">
     ${sel ? `<label class="arch-pick"><input type="checkbox" data-fpick="${esc(f.id)}"
       ${sel.has(f.id) ? "checked" : ""} aria-label="${esc(f.displayName)} 선택"></label>` : ""}
+    ${/* 머리글자 상자는 두지 않는다 — 바로 옆에 이름이 통째로 있어 같은 글자를 두 번
+         보여 줄 뿐이고, 그만큼 줄이 두꺼워져 한 화면에 담기는 사람이 줄어든다. */""}
     <button class="uf-item" data-friend="${esc(f.id)}">
-      <span class="thumb ph">${esc(f.displayName.slice(0, 1))}</span>
       <span class="ub"><b>${esc(f.displayName)}</b>
         <span>${f.sharedFolders ? `나에게 공개한 폴더 ${f.sharedFolders}개` : "나에게 공개한 폴더 없음"}</span></span>
       ${/* 고르는 중에는 화살표도 별도 치운다 — 지금 할 수 있는 일은 고르는 것뿐이다 */""}
@@ -4173,40 +4354,12 @@ async function openFriends() {
      체크는 보이는데 셈에는 안 들어가, 골랐다고 믿은 사람이 안 골린 채로 끊게 된다.
 
      고르는 중에는 네모칸이든 줄이든 같은 뜻이다 — 그때 열어 볼 일은 없다. */
-  /* 꾹 눌러 고르기. 손가락으로 다룰 때 「선택」을 먼저 찾아 누르는 것은 한 손짓이 더
-     드는 일이라, 줄을 꾹 누르면 그 줄이 골라진 채로 고르기에 들어간다.
-
-     **끄는 손짓과 갈라야 한다** — 목록을 굴리려고 짚은 것도 처음에는 꾹 누르는 것과
-     똑같이 생겼다. 8px 만 움직여도 손을 뗀 것으로 친다. */
-  let hold = null, from = null, held = false;
-  const dropHold = () => { clearTimeout(hold); hold = null; };
-  list.addEventListener("pointerdown", e => {
-    const row = e.target.closest("[data-friend]"); if (!row) return;
-    from = { x: e.clientX, y: e.clientY };
-    hold = setTimeout(() => {
-      hold = null; held = true;
-      if (!sel) { sel = new Set(); repaintBar(); }
-      sel.add(row.dataset.friend);
-      repaint(); repaintBulk();
-      // 손끝에 걸리는 것이 있어야 "고르기로 들어왔다" 가 읽힌다. 없는 기기면 그냥 넘어간다.
-      try { navigator.vibrate?.(12); } catch { }
-    }, 450);
+  // 줄을 꾹 누르면 그 줄이 골라진 채로 고르기에 들어간다
+  holdToPick(list, "[data-friend]", row => {
+    if (!sel) { sel = new Set(); repaintBar(); }
+    sel.add(row.dataset.friend);
+    repaint(); repaintBulk();
   });
-  list.addEventListener("pointermove", e => {
-    if (!hold || !from) return;
-    if (Math.abs(e.clientX - from.x) > 8 || Math.abs(e.clientY - from.y) > 8) dropHold();
-  });
-  list.addEventListener("pointerup", dropHold);
-  list.addEventListener("pointercancel", dropHold);
-
-  /* 꾹 누른 뒤에는 click 이 따라온다 — 그대로 두면 방금 고른 줄이 곧바로 풀린다.
-     같은 마디에 걸린 다른 손잡이까지 막아야 하므로 stopImmediatePropagation 이다
-     (그냥 stopPropagation 은 같은 마디의 나머지 손잡이를 못 막는다). */
-  list.addEventListener("click", e => {
-    if (!held) return;
-    held = false;
-    e.preventDefault(); e.stopImmediatePropagation();
-  }, true);
 
   list.addEventListener("click", e => {
     if (!sel) return;
@@ -4559,6 +4712,16 @@ document.getElementById("menu-search").onclick = () => { closeDrawer(); openFind
 document.getElementById("tab-cal").onclick = () => { tab = "cal"; render(); };
 document.getElementById("tab-home").onclick = () => { tab = "home"; render(); };
 document.getElementById("tab-lib").onclick = () => { tab = "lib"; closeSheet(); render(); };
+
+/* 폴더 줄도 꾹 누르면 고르기로 들어간다 — 친구 목록과 같은 손짓이다.
+   🗂 전체와 🫙 미분류는 진짜 폴더가 아니라 고를 것이 없다. */
+holdToPick(screenEl, ".folder[data-folder]", row => {
+  const id = row.dataset.folder;
+  if (tab !== "lib" || viewing || !folders.some(f => f.id === id)) return;
+  if (!folderSel) folderSel = new Set();
+  folderSel.add(id);
+  render();
+});
 
 screenEl.addEventListener("click", e => {
   if (e.target.closest("[data-idle]")) return openIdle();

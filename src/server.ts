@@ -15,7 +15,7 @@ import {
   getFolder, createFolder, canCopy, canMirror, canEdit, seenByMe, markSeen,
   folderInvites, acceptFolder, declineFolder, leaveFolder,
   noticeBreak, folderNotices, readNotices, sweepNotices, inviteToFolder, unlinkFromFolder,
-  cleanName, setDisplayName, starFolder,
+  cleanName, setDisplayName, starFolder, findOrMakeUrl,
   type Work, type User, type ShareMode, type TakeMode,
 } from "./db.ts";
 import {
@@ -109,7 +109,9 @@ type PlatCtx = {
 };
 
 function platformCtx(userId: string): PlatCtx {
-  const rows = db.prepare("SELECT platform_id, list_url FROM work WHERE user_id = ?")
+  /* 구간은 내 분류(work), 주소는 공용(url) — 나뉘어 있으므로 이어 붙여 읽는다. */
+  const rows = db.prepare(`SELECT w.platform_id, u.list_url
+    FROM work w JOIN url u ON u.id = w.url_id WHERE w.user_id = ?`)
     .all(userId) as { platform_id: string; list_url: string }[];
   const sets = new Map<string, Set<string>>();
   for (const r of rows) {
@@ -342,16 +344,23 @@ function upsertWork(userId: string, input: {
      새로 담는 것은 별개다. 예전에는 여기서 찾아내 state='active' 로 되살렸는데,
      그러면 그때 매겨 둔 별점과 폴더가 딸려 와 "새로 담았다" 와 다른 것이 생겼다.
      살아 있는 것끼리의 중복은 여전히 막는다. */
+  /* **공용 줄을 먼저 세운다.** 이미 있으면 그대로 쓴다 — 남이 담아 둔 줄을 내가 담는다고
+     고쳐 쓰면 그 사람 화면의 제목과 표지가 말없이 바뀐다. */
+  const urlId = findOrMakeUrl({
+    platformId: input.platformId, seriesId: input.seriesId, listUrl: input.listUrl,
+    appUrl: input.appUrl, mediaType: input.mediaType, title: input.title,
+    coverUrl: input.coverUrl, coverAspect: input.coverAspect, episode: input.episode,
+  });
+
   const existing = db.prepare(
-    "SELECT id FROM work WHERE user_id = ? AND platform_id = ? AND series_id = ? AND state = 'active'")
-    .get(userId, input.platformId, input.seriesId) as { id: string } | undefined;
+    "SELECT id FROM work WHERE user_id = ? AND url_id = ? AND state = 'active'")
+    .get(userId, urlId) as { id: string } | undefined;
 
   if (existing) {
-    db.prepare(`UPDATE work SET title = ?, cover_url = COALESCE(?, cover_url),
-        cover_aspect = COALESCE(?, cover_aspect),
-        episode = COALESCE(?, episode), last_at = ?, state = 'active'
-      WHERE id = ?`)
-      .run(input.title, input.coverUrl, input.coverAspect, input.episode, now, existing.id);
+    /* 이미 담아 둔 것은 **제목과 표지를 건드리지 않는다.** 그건 내가 고쳐 뒀을 수 있는
+       값이고, 공용 줄에 원본이 남아 있어 여기서 다시 적을 이유가 없다. 예전에는
+       title 을 무조건 덮어써서 고쳐 둔 제목이 날아갔다. 열어 본 때만 새로 적는다. */
+    db.prepare("UPDATE work SET last_at = ? WHERE id = ?").run(now, existing.id);
     if (input.folders.length) {
       const cur = getWork(userId, existing.id)!.folders;
       setWorkFolders(userId, existing.id, [...new Set([...cur, ...input.folders])]);
@@ -359,14 +368,15 @@ function upsertWork(userId: string, input: {
     return getWork(userId, existing.id)!;
   }
 
+  /* 내 줄에는 **덮어쓸 값을 비워 둔다**(title·cover 는 NULL). 담는 순간에는 고친 것이
+     없으니 공용 줄 것을 그대로 보게 된다. platform_id 만은 제 값이 필요하다 — 그건
+     덮어쓰기가 아니라 내 분류라서 「도메인 떼어내기」가 여기를 고친다. */
   const id = newId("w");
   db.prepare(`INSERT INTO work
-      (id, user_id, platform_id, series_id, title, media_type, list_url, app_url, cover_url,
-       cover_aspect, episode, state, filed, visits, last_at, added_at,
+      (id, user_id, url_id, platform_id, state, filed, visits, last_at, added_at,
        sched_mode, sched_days, sched_next, sched_source, sched_from, color)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?, 'active', ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(id, userId, input.platformId, input.seriesId, input.title, input.mediaType,
-      input.listUrl, input.appUrl, input.coverUrl, input.coverAspect, input.episode,
+    VALUES (?,?,?,?, 'active', ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(id, userId, urlId, input.platformId,
       input.filed || input.folders.length ? 1 : 0, now, now,
       input.schedule.mode, JSON.stringify(input.schedule.days),
       input.schedule.next, input.schedule.source, now, input.color ?? null);
@@ -422,9 +432,14 @@ async function takeWork(userId: string, src: Work, folderIds: string[]):
   Promise<{ already: boolean; id: string }> {
   /* 살아 있는 것만 본다 — upsertWork 와 같은 잣대다. 휴지통에 내려둔 것이 있다고
      담아가기가 막히면, 화면에는 「이미 담겨 있습니다」라는데 어디에도 안 보인다. */
+  const urlId = findOrMakeUrl({
+    platformId: src.platformId, seriesId: src.seriesId, listUrl: src.listUrl,
+    appUrl: src.appUrl, mediaType: src.mediaType, title: src.title,
+    coverUrl: src.coverUrl, coverAspect: src.coverAspect, episode: src.episode,
+  });
   const had = db.prepare(
-    "SELECT id FROM work WHERE user_id = ? AND platform_id = ? AND series_id = ? AND state = 'active'")
-    .get(userId, src.platformId, src.seriesId) as { id: string } | undefined;
+    "SELECT id FROM work WHERE user_id = ? AND url_id = ? AND state = 'active'")
+    .get(userId, urlId) as { id: string } | undefined;
 
   /* 이미 담아 둔 것은 건드리지 않는다 — 제목을 내가 고쳐 뒀을 수도 있고, 보관함에
      내려둔 것을 말없이 되살릴 일도 아니다. 폴더에만 함께 넣어 준다. */
@@ -439,13 +454,27 @@ async function takeWork(userId: string, src: Work, folderIds: string[]):
   const id = newId("w");
   const now = Date.now();
   const cover = await copyCover(src.coverUrl, id);
+
+  /* **친구가 고쳐 둔 값만 물려받는다.** src 는 이미 합쳐진 모양이라(친구 덮어쓰기 ?? 공용),
+     공용 줄과 같은 값이면 덮어쓸 것이 없다 — 비워 두면 공용 것을 그대로 보게 되고,
+     나중에 공용 줄이 나아지면 그것도 따라온다. 다른 값일 때만 내 쪽에 적는다.
+     표지는 친구 것을 내 파일로 떠 왔으므로(copyCover) 늘 내 값이다. */
+  const u = db.prepare("SELECT title, cover_url, cover_aspect, episode FROM url WHERE id = ?")
+    .get(urlId) as { title: string; cover_url: string | null;
+                     cover_aspect: number | null; episode: string | null };
+  const mine = <T>(v: T, base: T): T | null => (v === base ? null : v);
+
   db.prepare(`INSERT INTO work
-      (id, user_id, platform_id, series_id, title, media_type, list_url, app_url, cover_url,
-       cover_aspect, episode, state, filed, visits, last_at, added_at,
+      (id, user_id, url_id, platform_id, title, cover_url, cover_aspect, episode,
+       state, filed, visits, last_at, added_at,
        sched_mode, sched_days, sched_next, sched_source, sched_from, color)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?, 'active', 1, 0, ?, ?, ?, ?, ?, ?, ?, NULL)`)
-    .run(id, userId, src.platformId, src.seriesId, src.title, src.mediaType,
-      src.listUrl, src.appUrl, cover, src.coverAspect, src.episode, now, now,
+    VALUES (?,?,?,?,?,?,?,?, 'active', 1, 0, ?, ?, ?, ?, ?, ?, ?, NULL)`)
+    .run(id, userId, urlId, src.platformId,
+      mine(src.title, u.title),
+      cover === u.cover_url ? null : cover,
+      mine(src.coverAspect, u.cover_aspect),
+      mine(src.episode, u.episode),
+      now, now,
       src.schedule.mode, JSON.stringify(src.schedule.days),
       src.schedule.next, src.schedule.source, now);
   if (folderIds.length) setWorkFolders(userId, id, folderIds);
@@ -713,7 +742,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     if (target === pid) { json(res, 400, { ok: false, reason: "그 구간의 본래 주소입니다." }); return true; }
 
     // 그 호스트에서 온 작품만 골라 되돌린다 — 원래 주소가 list_url 에 남아 있다
-    const rows = db.prepare("SELECT id, list_url FROM work WHERE user_id = ? AND platform_id = ?")
+    const rows = db.prepare(`SELECT w.id, u.list_url
+      FROM work w JOIN url u ON u.id = w.url_id
+      WHERE w.user_id = ? AND w.platform_id = ?`)
       .all(user.id, pid) as { id: string; list_url: string }[];
     const upd = db.prepare("UPDATE OR IGNORE work SET platform_id = ? WHERE id = ?");
     let moved = 0;
@@ -794,8 +825,16 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
             JSON.stringify(b.schedule.days ?? w.schedule.days),
             b.schedule.next ?? null, Date.now(), id);
       }
-      if (typeof b.title === "string" && b.title.trim())
-        db.prepare("UPDATE work SET title=? WHERE id=?").run(b.title.trim(), id);
+      /* 공용 줄과 **같은 제목이면 덮어쓰기를 비운다.** 그래야 「원래대로 돌려놓았다」가
+         실제로 원래대로가 된다 — 값만 같고 덮어쓰기가 남아 있으면, 나중에 공용 줄의
+         제목이 나아져도 이 사람만 옛것을 계속 본다. */
+      if (typeof b.title === "string" && b.title.trim()) {
+        const want = b.title.trim();
+        const base = db.prepare("SELECT u.title FROM work w JOIN url u ON u.id = w.url_id WHERE w.id = ?")
+          .get(id) as { title: string } | undefined;
+        db.prepare("UPDATE work SET title=? WHERE id=?")
+          .run(base && base.title === want ? null : want, id);
+      }
       // 언제 내렸는지 남긴다 — 캘린더에 "보던 기간" 을 그리는 데 쓴다
       if (typeof b.state === "string" && ["active", "watched", "dropped"].includes(b.state))
         db.prepare("UPDATE work SET state=?, state_at=? WHERE id=?").run(b.state, Date.now(), id);

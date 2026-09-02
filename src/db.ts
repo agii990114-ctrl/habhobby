@@ -98,6 +98,44 @@ function copyLegacy(): void {
 }
 
 
+/* work 표의 정의를 **한 곳에만** 둔다. 켤 때 만드는 자리와 이관에서 다시 세우는
+   자리가 둘 다 이것을 쓴다 — 두 벌로 두면 한쪽만 고쳤을 때 조용히 어긋난다. */
+const SCHEMA_WORK = `
+CREATE TABLE IF NOT EXISTS work (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  url_id       TEXT NOT NULL REFERENCES url(id),
+  /* **내 분류.** 담을 때 url 것을 그대로 물려받지만, 「이 도메인은 따로 떼어내기」로
+     사람마다 옮길 수 있다. 공용에만 두면 한 사람이 떼어낼 때 모두의 분류가 바뀐다. */
+  platform_id  TEXT NOT NULL,
+  /* 아래 셋은 **덮어쓰기**다. NULL 이면 url 것을 쓴다 — 「기본값으로 되돌리기」는
+     이 칸을 비우는 일이라 원래 값이 저절로 돌아온다. */
+  title        TEXT,
+  cover_url    TEXT,
+  cover_aspect REAL,
+  episode      TEXT,
+  state        TEXT NOT NULL DEFAULT 'active',   -- active | watched | dropped
+  filed        INTEGER NOT NULL DEFAULT 0,
+  visits       INTEGER NOT NULL DEFAULT 0,
+  last_at      INTEGER NOT NULL,
+  added_at     INTEGER NOT NULL,
+  sched_mode   TEXT NOT NULL DEFAULT 'unknown',
+  sched_days   TEXT NOT NULL DEFAULT '[]',
+  sched_next   INTEGER,
+  sched_source TEXT NOT NULL DEFAULT 'auto',
+  sched_from   INTEGER,                            -- 이 일정이 적용되기 시작한 시점
+  rating       INTEGER,                            -- 1~5, 안 매겼으면 NULL
+  state_at     INTEGER,                            -- state가 마지막으로 바뀐 때
+  color        TEXT                                -- 캘린더 점 색. 없으면 플랫폼 색
+);
+`;
+
+const SCHEMA_WORK_INDEX = `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_work_live
+  ON work(user_id, url_id) WHERE state = 'active';
+CREATE INDEX IF NOT EXISTS idx_work_url ON work(url_id);
+`;
+
 // 옛 테이블을 먼저 비켜두어야 새 스키마와 인덱스가 만들어진다
 migrateSingleUser();
 
@@ -131,33 +169,31 @@ CREATE TABLE IF NOT EXISTS oauth_state (
   created_at INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS work (
+/* 작품 하나가 두 표에 나뉘어 있다.
+
+   가르는 잣대는 하나다 — **남의 서버에서 받아온 것**이냐, **내가 정하고 고치는 것**이냐.
+   url 은 모두가 함께 쓰고 아무도 고치지 않는다(읽기 전용 캐시). work 는 사람마다 따로다.
+
+   그래서 「누가 공용 줄을 고칠 권한을 갖나」 하는 물음이 아예 생기지 않는다. 주소를
+   잘못 넣었으면 그 줄을 고치는 게 아니라 **내 줄이 다른 url 을 가리키게** 옮긴다. */
+CREATE TABLE IF NOT EXISTS url (
   id           TEXT PRIMARY KEY,
-  user_id      TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
-  platform_id  TEXT NOT NULL,
+  platform_id  TEXT NOT NULL,                      -- 정체를 이루는 값 (아래 UNIQUE)
   series_id    TEXT NOT NULL,
-  title        TEXT NOT NULL,
-  media_type   TEXT NOT NULL DEFAULT 'link',
   list_url     TEXT NOT NULL,
   app_url      TEXT,
+  media_type   TEXT NOT NULL DEFAULT 'link',
+  title        TEXT NOT NULL,                      -- OG 가 준 원본
   cover_url    TEXT,
   cover_aspect REAL,
-  episode      TEXT,
-  state        TEXT NOT NULL DEFAULT 'active',   -- active | watched | dropped
-  filed        INTEGER NOT NULL DEFAULT 0,
-  visits       INTEGER NOT NULL DEFAULT 0,
-  last_at      INTEGER NOT NULL,
-  added_at     INTEGER NOT NULL,
-  sched_mode   TEXT NOT NULL DEFAULT 'unknown',
-  sched_days   TEXT NOT NULL DEFAULT '[]',
-  sched_next   INTEGER,
-  sched_source TEXT NOT NULL DEFAULT 'auto',
-  sched_from   INTEGER,                            -- 이 일정이 적용되기 시작한 시점
-  rating       INTEGER,                            -- 1~5, 안 매겼으면 NULL
-  state_at     INTEGER,                            -- state가 마지막으로 바뀐 때
-  color        TEXT,                               -- 캘린더 점 색. 없으면 플랫폼 색
-  UNIQUE (user_id, platform_id, series_id)
+  episode      TEXT,                               -- 사이트가 알려준 최신 회차 (아직 안 쓴다)
+  fetched_at   INTEGER NOT NULL,
+  /* 주소가 아니라 **어느 사이트의 몇 번 작품인가**가 열쇠다. 같은 작품에 이르는 길은
+     여럿이다 — 단축 주소, m. 붙은 모바일 주소, 쿼리가 덧붙은 주소. */
+  UNIQUE (platform_id, series_id)
 );
+
+${SCHEMA_WORK}
 
 CREATE TABLE IF NOT EXISTS folder (
   id      TEXT PRIMARY KEY,
@@ -247,6 +283,7 @@ CREATE INDEX IF NOT EXISTS idx_work_user   ON work(user_id, state);
 CREATE INDEX IF NOT EXISTS idx_folder_user ON folder(user_id);
 CREATE INDEX IF NOT EXISTS idx_session_exp ON session(expires_at);
 
+
 -- work_folder 의 기본키는 (work_id, folder_id) 라 **작품에서 폴더로** 가는 길만 나 있다.
 -- 그런데 자주 묻는 것은 반대쪽이다: "이 폴더에 무엇이 들어 있나". 비추는 폴더, 함께 쓰는
 -- 폴더, 담아갈 것 고르기가 모두 그 길로 다니는데 색인이 없어 표를 통째로 훑고 있었다
@@ -316,6 +353,21 @@ db.prepare("UPDATE work SET state_at = last_at WHERE state != 'active' AND state
    kv 를 쓸 수 없는 이유는 그것이 사용자에 묶여 있어서다 — 표 전체에 대한 표식이 필요하다. */
 const schemaV = (): number =>
   (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+
+/* **빈 파일에는 옮길 것이 없다.**
+
+   이관들은 옛 데이터를 손보는 코드라, 사람이 하나도 없는 파일에서는 할 일이 없다.
+   그런데 판 번호가 0 이라 전부 돌려고 하고, 그 과정에서 이제는 없는 컬럼을 짚어
+   켜지지도 않는다(실제로 app_url 에서 걸렸다).
+
+   그래서 처음 만들어진 파일은 **끝난 것으로 표시하고 시작한다.** 옮길 줄이 없으니
+   건너뛰는 것이 곧 옳은 결과다. */
+const LATEST_V = 7;
+if (schemaV() === 0) {
+  const empty = !db.prepare("SELECT 1 FROM user LIMIT 1").get();
+  if (empty) db.exec("PRAGMA user_version = " + LATEST_V);
+}
+
 /** 이 판까지 손질이 끝났으면 건너뛴다. 아니면 돌리고 판 번호를 올린다. */
 function once(v: number, fn: () => void): void {
   if (schemaV() >= v) return;
@@ -432,6 +484,38 @@ once(6, () => {
     ON user(LOWER(TRIM(display_name)))
     WHERE display_name IS NOT NULL AND TRIM(display_name) <> ''`);
 });
+
+/* 작품 하나를 url(공용)과 work(내 것)로 가른다.
+
+   **옛 줄은 옮기지 않는다.** 이 이관을 하기 전에 계정을 전부 비웠고(가입 0명), 옮길
+   값이 없다. 옛 표를 그대로 두면 위의 CREATE TABLE IF NOT EXISTS 가 아무 일도 안 해서
+   옛 모양이 살아남는다 — 그래서 버리고 다시 세운다.
+
+   **줄이 남아 있으면 손대지 않는다.** 혹시 데이터가 든 파일에서 이 코드가 돌면 말없이
+   지우는 것보다 멈추는 편이 낫다. */
+once(7, () => {
+  const has = (t: string) =>
+    !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(t);
+  if (!has("work")) return;
+  const cols = (db.prepare("PRAGMA table_info(work)").all() as { name: string }[]).map(c => c.name);
+  if (cols.includes("url_id")) return;                    // 이미 새 모양이다
+
+  const n = (db.prepare("SELECT COUNT(*) c FROM work").get() as { c: number }).c;
+  if (n > 0) {
+    console.log(`  ⚠ work 에 ${n}줄이 남아 있어 url/work 가르기를 건너뜁니다.`);
+    console.log("    비운 뒤 다시 켜거나, 옮기는 코드를 손으로 써 주세요.");
+    return;
+  }
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec("DROP TABLE work");
+  db.exec(SCHEMA_WORK);
+  db.exec("PRAGMA foreign_keys = ON");
+  console.log("  url / work 로 갈랐습니다");
+});
+
+/* work 의 색인은 **이관이 끝난 뒤에** 만든다. 켤 때 도는 스키마 블록에서 만들면
+   옛 파일에서는 아직 url_id 칸이 없어 걸린다(once(7) 이 표를 다시 세우기 전이다). */
+db.exec(SCHEMA_WORK_INDEX);
 
 /* ── 질의문을 다시 쓴다 ────────────────────────────────────
    db.prepare 는 부를 때마다 SQL 을 새로 컴파일한다 — 한 번에 0.1ms 남짓인데, 우리는 같은
@@ -645,6 +729,26 @@ export type Work = {
   schedule: { mode: string; days: number[]; next: number | null; source: string; from: number };
 };
 
+/* 작품 한 줄을 읽는 SQL 은 **여기 하나뿐**이다.
+
+   work(내 것)와 url(공용)을 이어 붙이고, 덮어쓸 수 있는 셋은 내 값이 있으면 그것을,
+   없으면 공용 것을 고른다. 이렇게 합쳐 두면 밖에서 보는 모양(Work)이 쪼개기 전과
+   똑같아서, 판단 로직과 화면 코드는 이 공사를 모른다.
+
+   platform_id 는 COALESCE 하지 않는다 — 그건 덮어쓰기가 아니라 **내 분류**라서
+   담을 때 이미 제 값이 들어 있다. */
+const WORK_COLS = `
+  w.id, w.user_id, w.url_id, w.platform_id, w.state, w.filed, w.visits,
+  w.last_at, w.added_at, w.sched_mode, w.sched_days, w.sched_next,
+  w.sched_source, w.sched_from, w.rating, w.state_at, w.color,
+  COALESCE(w.title, u.title)               AS title,
+  COALESCE(w.cover_url, u.cover_url)       AS cover_url,
+  COALESCE(w.cover_aspect, u.cover_aspect) AS cover_aspect,
+  COALESCE(w.episode, u.episode)           AS episode,
+  u.series_id, u.list_url, u.app_url, u.media_type`;
+
+const WORK_FROM = "FROM work w JOIN url u ON u.id = w.url_id";
+
 function toWork(r: any, folders: string[]): Work {
   return {
     id: r.id, platformId: r.platform_id, seriesId: r.series_id, title: r.title,
@@ -662,7 +766,8 @@ function toWork(r: any, folders: string[]): Work {
 }
 
 export function listWorks(userId: string): Work[] {
-  const rows = db.prepare("SELECT * FROM work WHERE user_id = ? ORDER BY last_at DESC")
+  const rows = db.prepare(
+    `SELECT ${WORK_COLS} ${WORK_FROM} WHERE w.user_id = ? ORDER BY w.last_at DESC`)
     .all(userId) as any[];
   const links = db.prepare(`SELECT wf.work_id, wf.folder_id FROM work_folder wf
       JOIN work w ON w.id = wf.work_id WHERE w.user_id = ?`).all(userId) as
@@ -677,11 +782,35 @@ export function listWorks(userId: string): Work[] {
 
 /** userId를 함께 받는다 — 남의 작품을 id만으로 집어오지 못하게 한다. */
 export function getWork(userId: string, id: string): Work | null {
-  const r = db.prepare("SELECT * FROM work WHERE id = ? AND user_id = ?").get(id, userId);
+  const r = db.prepare(`SELECT ${WORK_COLS} ${WORK_FROM} WHERE w.id = ? AND w.user_id = ?`)
+    .get(id, userId);
   if (!r) return null;
   const fs = db.prepare("SELECT folder_id FROM work_folder WHERE work_id = ?").all(id) as
     { folder_id: string }[];
   return toWork(r, fs.map(f => f.folder_id));
+}
+
+/** 주소로 공용 줄을 찾거나 새로 만든다. **여기가 url 에 쓰는 유일한 길이다.**
+
+    이미 있으면 그대로 쓴다 — 남이 담아 둔 줄을 내가 담는다고 고쳐 쓰면, 그 사람 화면의
+    제목과 표지가 말없이 바뀐다. 사이트가 준 값이 달라졌더라도 그건 공용 줄의 문제이지
+    지금 담는 사람이 정할 일이 아니다. */
+export function findOrMakeUrl(p: {
+  platformId: string; seriesId: string; listUrl: string; appUrl: string | null;
+  mediaType: string; title: string; coverUrl: string | null; coverAspect: number | null;
+  episode: string | null;
+}): string {
+  const had = db.prepare("SELECT id FROM url WHERE platform_id = ? AND series_id = ?")
+    .get(p.platformId, p.seriesId) as { id: string } | undefined;
+  if (had) return had.id;
+  const id = newId("u");
+  db.prepare(`INSERT INTO url
+      (id, platform_id, series_id, list_url, app_url, media_type,
+       title, cover_url, cover_aspect, episode, fetched_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(id, p.platformId, p.seriesId, p.listUrl, p.appUrl, p.mediaType,
+      p.title, p.coverUrl, p.coverAspect, p.episode, Date.now());
+  return id;
 }
 
 /* 내 폴더에만 넣을 수 있는 것이 아니다 — **함께 고치는 폴더**에도 넣는다.
@@ -839,9 +968,11 @@ function dropContributions(folderId: string, userIds: string[]): number {
    첫 질의가 이미 줄 전체를 들고 있으니 그것으로 만든다. */
 export function contributedWorks(folderId: string, who: { not?: string; only?: string }):
   (Work & { owner: string; ownerName: string })[] {
-  const rows = db.prepare(`SELECT w.*, u.display_name AS who FROM work w
+  /* 사람 표의 별칭이 usr 인 이유: u 는 url 표가 쓴다(WORK_COLS 가 그렇게 부른다). */
+  const rows = db.prepare(`SELECT ${WORK_COLS}, usr.display_name AS who
+    ${WORK_FROM}
     JOIN work_folder wf ON wf.work_id = w.id
-    JOIN user u ON u.id = w.user_id
+    JOIN user usr ON usr.id = w.user_id
     WHERE wf.folder_id = ? AND w.state = 'active' AND w.user_id ${who.only ? "=" : "<>"} ?
     ORDER BY w.added_at DESC`).all(folderId, who.only ?? who.not) as any[];
   /* 폴더 목록은 비워 둔다 — 부르는 쪽이 제 폴더 번호를 달아 주므로, 여기서 물어봐야
@@ -1113,7 +1244,8 @@ export function sharedView(ownerId: string, viewerId: string): { folders: Folder
   const shared = folders.filter(f => canEdit(f.take)).map(f => f.id);
   const sMarks = shared.map(() => "?").join(",");
   const rows = db.prepare(`
-    SELECT DISTINCT w.* FROM work w
+    SELECT DISTINCT ${WORK_COLS}
+    ${WORK_FROM}
     JOIN work_folder wf ON wf.work_id = w.id
     WHERE w.state = 'active' AND wf.folder_id IN (${marks})
       AND (w.user_id = ?${shared.length ? ` OR wf.folder_id IN (${sMarks})` : ""})

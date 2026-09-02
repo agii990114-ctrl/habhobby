@@ -97,25 +97,46 @@ function applyMerge(u: string, id: string): string {
 }
 
 /** 그 구간에 실제로 담겨 있는 호스트들 — 작품의 주소에서 읽는다 */
-function hostsIn(userId: string, platformId: string): string[] {
-  const rows = db.prepare("SELECT list_url FROM work WHERE user_id = ? AND platform_id = ?")
-    .all(userId, platformId) as { list_url: string }[];
-  const set = new Set<string>();
+/** 구간 하나를 그리는 데 필요한, **사람마다 한 번이면 되는** 값들.
+
+    앱을 열면 구간이 열일곱 가지쯤 온다. 그 하나하나가 제 손으로 덮어쓴 값(overrides)과
+    사이트 이름(siteNames)을 다시 읽고 호스트를 다시 셌다 — 같은 값을 열일곱 번 읽고
+    열일곱 번 파싱한 셈이라 요청 하나에 질의가 서른 번 넘게 늘었다. 한 번 모아 돌려 쓴다. */
+type PlatCtx = {
+  ov: Record<string, Override>;
+  auto: Record<string, string>;
+  hosts: Map<string, string[]>;
+};
+
+function platformCtx(userId: string): PlatCtx {
+  const rows = db.prepare("SELECT platform_id, list_url FROM work WHERE user_id = ?")
+    .all(userId) as { platform_id: string; list_url: string }[];
+  const sets = new Map<string, Set<string>>();
   for (const r of rows) {
-    try { set.add(new URL(r.list_url).hostname.replace(/^www\./, "").replace(/^m\./, "")); }
-    catch { /* 읽을 수 없는 주소는 셈에서 뺀다 */ }
+    try {
+      const h = new URL(r.list_url).hostname.replace(/^www./, "").replace(/^m./, "");
+      let set = sets.get(r.platform_id);
+      if (!set) sets.set(r.platform_id, set = new Set());
+      set.add(h);
+    } catch { /* 읽을 수 없는 주소는 셈에서 뺀다 */ }
   }
-  return [...set].sort();
+  const hosts = new Map<string, string[]>();
+  for (const [k, v] of sets) hosts.set(k, [...v].sort());
+  return { ov: getOverrides(userId), auto: getSiteNames(userId), hosts };
+}
+
+function hostsIn(userId: string, platformId: string): string[] {
+  return platformCtx(userId).hosts.get(platformId) ?? [];
 }
 const firstChar = (s: string) => [...s][0] ?? "?";
 
 /** 내장 플랫폼과 도메인 플랫폼을 같은 방식으로 다룬다 — 표시 설정은 둘 다 바꿀 수 있다. */
-function platformView(userId: string, id: string) {
+function platformView(userId: string, id: string, ctx: PlatCtx = platformCtx(userId)) {
   const base = platformById(id);
-  const o = getOverrides(userId)[id];
+  const o = ctx.ov[id];
   const isDomain = base.id.startsWith(DOMAIN_PREFIX);
   // 사이트가 밝힌 이름은 주소보다 낫지만, 사용자가 직접 지은 이름보다는 아래다
-  const auto = isDomain ? getSiteNames(userId)[id] || null : null;
+  const auto = isDomain ? ctx.auto[id] || null : null;
   const color = o?.color ?? base.color;
   return {
     id: base.id,
@@ -130,7 +151,7 @@ function platformView(userId: string, id: string) {
     host: isDomain ? base.id.slice(DOMAIN_PREFIX.length) : null,
     // 화면이 "이 도메인 아래 전부"와 "분리" 를 그리는 데 쓴다
     domainBase: isDomain ? registrableDomain(base.id.slice(DOMAIN_PREFIX.length)) : null,
-    hosts: isDomain ? hostsIn(userId, base.id) : [],
+    hosts: isDomain ? ctx.hosts.get(base.id) ?? [] : [],
     overridden: !!o,
     // 되돌리기의 기준도 사이트가 밝힌 이름이다 — 주소로 돌아가는 건 후퇴다
     baseName: auto ?? base.name,
@@ -139,6 +160,12 @@ function platformView(userId: string, id: string) {
     baseFg: readableOn(color),
   };
 }
+
+/** 구간 여럿을 한꺼번에. 모으기는 한 번뿐이다. */
+const platformViews = (userId: string, ids: Iterable<string>) => {
+  const ctx = platformCtx(userId);
+  return Object.fromEntries([...ids].map(id => [id, platformView(userId, id, ctx)]));
+};
 
 /** 아직 사이트 이름을 물어보지 않은 도메인들 */
 function pendingSiteNames(userId: string): { id: string; host: string }[] {
@@ -277,7 +304,7 @@ function stateSnapshot(user: User) {
     works,
     folders,
     settings: getSettings(user.id),
-    platforms: Object.fromEntries([...ids].map(id => [id, platformView(user.id, id)])),
+    platforms: platformViews(user.id, ids),
     me: { id: user.id, provider: user.provider, name: user.name,
           email: user.email, avatar: user.avatar,
           displayName: user.displayName },
@@ -1061,7 +1088,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
         ok: true,
         friend: { id: owner.id, displayName: owner.displayName ?? "이름 없음" },
         folders, works,
-        platforms: Object.fromEntries([...ids].map(id => [id, platformView(user.id, id)])),
+        platforms: platformViews(user.id, ids),
       });
       return true;
     }

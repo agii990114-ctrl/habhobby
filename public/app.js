@@ -2637,30 +2637,38 @@ function openFolderForm(existing, after) {
        여기서 몇 글자 치면 고르개가 그만큼 짧아진다. */
     let query = "";
 
-    const paintWho = () => {
+    /* 찾기 칸은 **한 번만 그리고 그대로 둔다.** 글자마다 통째로 다시 그리던 때는 치는
+       도중에 칸이 사라졌다 새로 생겨서, 한글처럼 **모아 쓰는 글자가 깨졌다** — 초성을
+       치는 순간 조합하던 칸이 없어지니 이어 붙을 자리가 없다. 커서를 되돌려 놓는 것으로는
+       못 막는다. 갈아 끼우는 것은 아래 목록뿐이다. */
+    const paintList = () => {
       const q = query.trim().toLowerCase();
       const left = friends
         .filter(f => !share.with.includes(f.id))
         .filter(f => !q || f.displayName.toLowerCase().includes(q));
       const got = share.with.map(id => friends.find(f => f.id === id)).filter(Boolean);
       const none = q ? "찾는 이름이 없습니다" : left.length ? "친구 고르기…" : "모두 골랐습니다";
-      whoBox.innerHTML = `
-        ${friends.length ? `
-          ${friends.length > 8 ? searchHtml("이름으로 좁히기", query, "margin-bottom:8px") : ""}
-          <select data-who-add aria-label="공개할 친구 고르기">
-            <option value="">${none}</option>
-            ${left.map(f => `<option value="${esc(f.id)}">${
-              f.starred ? "★ " : ""}${esc(f.displayName)}</option>`).join("")}
-          </select>`
-          : `<div class="rest" style="text-align:left;padding:2px">아직 친구가 없습니다.</div>`}
+      whoBox.querySelector("[data-who-body]").innerHTML = `
+        <select data-who-add aria-label="공개할 친구 고르기">
+          <option value="">${none}</option>
+          ${left.map(f => `<option value="${esc(f.id)}">${
+            f.starred ? "★ " : ""}${esc(f.displayName)}</option>`).join("")}
+        </select>
         ${got.length ? `<div class="pickers" style="margin-top:10px">${got.map(f =>
             `<button class="pick on" data-w="${esc(f.id)}" title="빼기"
               >${esc(f.displayName)} <i>✕</i></button>`).join("")}</div>`
-          : friends.length ? `<div class="rest" style="text-align:left;padding:10px 2px 0">
-              고른 사람이 없어 아무에게도 보이지 않습니다.</div>` : ""}`;
-      // 치는 자리를 지킨다 — 글자마다 다시 그리므로 커서를 되돌려 놓아야 한다
-      const qEl = whoBox.querySelector(".arch-q");
-      if (qEl && query) { qEl.focus(); qEl.setSelectionRange(query.length, query.length); }
+          : `<div class="rest" style="text-align:left;padding:10px 2px 0">
+              고른 사람이 없어 아무에게도 보이지 않습니다.</div>`}`;
+    };
+
+    const paintWho = () => {
+      if (!friends.length) {
+        whoBox.innerHTML = `<div class="rest" style="text-align:left;padding:2px">아직 친구가 없습니다.</div>`;
+        return;
+      }
+      whoBox.innerHTML = `${friends.length > 8
+        ? searchHtml("이름으로 좁히기", "", "margin-bottom:8px") : ""}<div data-who-body></div>`;
+      paintList();
     };
 
     // "고른 친구에게만" 을 골랐을 때 처음 한 번만 불러온다 — 그 전에는 쓸 일이 없다
@@ -2690,24 +2698,66 @@ function openFolderForm(existing, after) {
     whoBox.addEventListener("input", e => {
       if (!e.target.closest(".arch-q")) return;
       query = e.target.value;                // 고르개에 올릴 이름만 좁힌다
-      paintWho();
+      paintList();                           // 치던 칸은 그대로 둔다
     });
     whoBox.addEventListener("change", e => {
       const sel = e.target.closest("[data-who-add]"); if (!sel?.value) return;
       share.with = [...share.with, sel.value];
-      query = "";                            // 담았으면 찾던 것은 지운다 — 다음 사람을 찾게
-      paintWho();                            // 고르개에서 빠지고 아래에 이름이 붙는다
+      // 담았으면 찾던 것은 지운다 — 다음 사람을 찾을 차례다
+      const qEl = whoBox.querySelector(".arch-q");
+      if (qEl) qEl.value = "";
+      query = "";
+      paintList();                           // 고르개에서 빠지고 아래에 이름이 붙는다
     });
     whoBox.addEventListener("click", e => {
       const b = e.target.closest("[data-w]"); if (!b) return;
       share.with = share.with.filter(x => x !== b.dataset.w);
-      paintWho();
+      paintList();
     });
   }
+  /* 공개를 거두는 설정은 **남의 화면에서 무언가를 없앤다.** 저장하기 전에 한 번 묻는다 —
+     이름을 고치러 들어왔다가 옆 칸을 잘못 건드려 남의 폴더를 비워 버리면 되돌릴 길이 없다. */
+  const revoking = () => {
+    if (!existing) return null;
+    const wasTeam = existing.take === "edit";
+    const stillTeam = take === "edit" && share.mode === "some";
+    const gone = wasTeam ? existing.share.with.filter(id => !share.with.includes(id)) : [];
+    if (wasTeam && !stillTeam) {
+      const n = works.filter(w => w.mirror && w.folders.includes(existing.id)).length;
+      return { title: "함께 쓰기를 그만둘까요?",
+        body: `함께 쓰던 사람들이 이 폴더를 더 볼 수 없게 됩니다.${
+          n ? ` 그 사람들이 넣어 둔 ${n}편도 이 폴더에서 빠집니다 — 작품은 각자 목록에 남습니다.` : ""}`,
+        ok: "그만두기" };
+    }
+    if (wasTeam && gone.length) {
+      const names = gone.map(id => (friends ?? []).find(f => f.id === id)?.displayName)
+        .filter(Boolean);
+      return { title: `${gone.length}명을 명단에서 뺄까요?`,
+        body: `${esc(names.join(", ") || "고른 사람")}${names.length ? "님" : ""}이 이 폴더를 더 볼 수 없게 되고,
+          넣어 둔 작품도 이 폴더에서 빠집니다 — 작품은 그 사람 목록에 남습니다.`,
+        ok: "빼기" };
+    }
+    /* 비추던 사람도 마찬가지다. 몇 명이 비추고 있는지는 여기서 알 수 없으므로 세지 않는다 —
+       "있을 수 있다" 는 것만 알려도 손이 멈춘다. */
+    if (canMirror(existing.take) && !canMirror(take) && existing.share.mode !== "none") {
+      return { title: "미러링을 끊을까요?",
+        body: "이 폴더를 비추고 있는 친구가 있다면 그 사람의 폴더가 비게 됩니다. 폴더 줄은 남고 왜인지가 적힙니다.",
+        ok: "끊기" };
+    }
+    if (existing.share.mode !== "none" && share.mode === "none") {
+      return { title: "공개를 거둘까요?",
+        body: "이 폴더를 보던 친구들이 더 볼 수 없게 됩니다. 비추고 있던 사람의 폴더도 비게 됩니다.",
+        ok: "거두기" };
+    }
+    return null;
+  };
+
   wireHead({
     save: guard(async () => {
       const name = nameEl.value.trim();
       if (!name) { nameEl.focus(); return; }
+      const warn = revoking();
+      if (warn && !await askSure({ ...warn, back: () => openFolderForm(existing, after) })) return;
       let folder;
       if (existing) {
         await api("PATCH", `/api/folders/${existing.id}`, { name, emoji, share, take });

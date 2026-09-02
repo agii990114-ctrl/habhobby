@@ -928,11 +928,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     if (seg[3] === "shared" && m === "GET") {
       const owner = getUser(other)!;
       const view = sharedView(other, user.id);
-      const ids = new Set<string>(view.works.map(w => w.platformId));
+      /* **함께 쓰는 폴더는 여기 두지 않는다.** 그건 이미 내 폴더 탭에 제 줄로 서 있다 —
+         남의 폴더를 구경하는 자리에 또 나오면 같은 폴더가 두 곳에 있는 셈이고, 어느 쪽에서
+         넣어야 하는지 알 수 없다. 안쪽 sharedView 는 그대로 둔다: 비추는 폴더를 채우고
+         담아갈 것을 고르는 데 그 목록이 쓰인다. */
+      const folders = view.folders.filter(f => !canEdit(f.take));
+      const keep = new Set(folders.map(f => f.id));
+      const works = view.works.filter(w => w.folders.some(id => keep.has(id)));
+      const ids = new Set<string>(works.map(w => w.platformId));
       json(res, 200, {
         ok: true,
         friend: { id: owner.id, displayName: owner.displayName ?? "이름 없음" },
-        folders: view.folders, works: view.works,
+        folders, works,
         platforms: Object.fromEntries([...ids].map(id => [id, platformView(user.id, id)])),
       });
       return true;

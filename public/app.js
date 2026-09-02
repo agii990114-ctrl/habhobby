@@ -889,87 +889,79 @@ function drawDayList(t) {
    되고 "고르개에서 체크를 풀면 빠지나" 를 사람이 헷갈린다. 여기 서는 것은 넣을 수
    있는 것들뿐이고, 고른 것은 더해지기만 한다. */
 function openFolderAdd(f, back) {
-  let picked = new Set(), q = "";
+  let picked = new Set(), q = "", detail = null;   // detail = 펼쳐 본 구간, 없으면 슬라이드 화면
 
   /* 넣을 수 있는 것 — **내 작품**이고, 아직 이 폴더에 없는 것. 비쳐 온 작품(w.mirror)은
      내 것이 아니라 넣을 수 없다: 남의 목록에 있는 것을 내가 다른 데 걸 수는 없다. */
   const pool = () => activeWorks().filter(w => !w.mirror && !w.folders.includes(f.id));
-
   const shown = () => {
-    const s = q.trim().toLowerCase();
-    return s ? pool().filter(w => w.title.toLowerCase().includes(s)) : pool();
+    const t = q.trim().toLowerCase();
+    return byRecent(t ? pool().filter(w => w.title.toLowerCase().includes(t)) : pool());
   };
 
   /* 구간(도메인)별로 묶는다. 폴더에 넣을 것을 고를 때 사람이 떠올리는 단위가 그것이라 —
-     "네이버웹툰 것들을 넣자" 이지 "제목이 ㄱ 인 것들" 이 아니다. */
+     "네이버웹툰 것들을 넣자" 이지 "제목이 ㄱ 인 것들" 이 아니다.
+     최근 순으로 들어오므로 Map 에 담긴 차례가 곧 최근 구간 순이다 (railsHtml 과 같은 결). */
   const groups = () => {
     const by = new Map();
-    for (const w of byRecent(shown())) {
+    for (const w of shown()) {
       if (!by.has(w.platformId)) by.set(w.platformId, []);
       by.get(w.platformId).push(w);
     }
     return [...by];
   };
 
+  /* 고르는 것도 **페이지 탭과 같은 카드**로 한다 — 같은 작품이 화면마다 다른 모양으로
+     서면 어느 것이 무엇인지 다시 익혀야 한다. 다른 것은 눌렀을 때 열리는 대신 켜진다는
+     것뿐이고, 켜진 것은 표지 위 체크로 말한다. */
+  const card = w => `<button class="work pick-work${picked.has(w.id) ? " on" : ""}"
+    data-add="${esc(w.id)}" aria-pressed="${picked.has(w.id)}">
+    <div class="cover" style="${coverStyle(w)}">${coverChar(w)}
+      ${w.episode ? `<span class="ep">${esc(w.episode)}</span>` : ""}
+      <span class="tick">✓</span>
+    </div>
+    <h4>${esc(w.title)}</h4><time>${ago(w.lastAt)}</time>
+  </button>`;
+
   const body = () => {
     const gs = groups();
     if (!gs.length)
       return `<div class="empty">${q ? "찾는 작품이 없습니다."
         : "넣을 수 있는 작품이 없습니다.<br>이 폴더에 이미 다 들어 있어요."}</div>`;
+
+    // 한 구간을 펼쳐 본 화면 — 그 구간의 것을 격자로 다 늘어놓는다
+    if (detail) {
+      const items = gs.find(([pid]) => pid === detail)?.[1] ?? [];
+      const p = platformOf(detail);
+      const all = items.length && items.every(w => picked.has(w.id));
+      return `<div class="plat-h" style="margin-bottom:12px">
+          <button class="icon-btn" data-back-rails aria-label="구간 목록으로">‹</button>
+          <span class="pmark" style="background:${p.color};color:${p.fg}">${esc(p.initial)}</span>
+          <b>${esc(p.name)}</b><span>${items.length}편</span>
+          ${items.length ? `<button class="mini-btn" data-gall="${esc(detail)}">${
+            all ? "구간 해제" : "구간 선택"}</button>` : ""}
+        </div>
+        ${items.length ? `<div class="grid">${items.map(card).join("")}</div>`
+          : `<div class="empty">비어 있습니다.</div>`}`;
+    }
+
     return gs.map(([pid, items]) => {
       const p = platformOf(pid);
       const all = items.every(w => picked.has(w.id));
       return `<section class="plat">
         <div class="plat-h">
           <span class="pmark" style="background:${p.color};color:${p.fg}">${esc(p.initial)}</span>
-          <b>${esc(p.name)}</b><span class="rest">${items.length}개</span>
-          ${/* 구간마다 전체 고르기 — 도메인 단위로 담는 것이 이 창의 쓰임이다 */""}
-          <button class="mini-btn" data-gall="${esc(pid)}">${all ? "구간 해제" : "구간 선택"}</button>
+          <b${p.isDomain && !p.overridden ? ' class="dom"' : ""}>${esc(p.name)}</b>
+          <span>${items.length}편</span>
+          <span class="plat-act">
+            <button class="mini-btn" data-gall="${esc(pid)}">${all ? "구간 해제" : "구간 선택"}</button>
+            ${/* 페이지 탭과 같은 자리, 같은 아이콘 — 레일에 다 안 들어가면 여기서 펼친다 */""}
+            <button class="edit-dom" data-more="${esc(pid)}" title="전체 목록" aria-label="전체 목록">☰</button>
+          </span>
         </div>
-        ${items.map(w => `<label class="arch">
-          <span class="arch-pick"><input type="checkbox" data-add="${esc(w.id)}"
-            ${picked.has(w.id) ? "checked" : ""} aria-label="${esc(w.title)} 선택"></span>
-          <span class="thumb" style="${coverStyle(w)}">${coverChar(w)}</span>
-          <span class="rt"><b>${esc(w.title)}</b><span>${
-            w.folders.length ? `폴더 ${w.folders.length}곳` : "미분류"} · ${ago(w.lastAt)}</span></span>
-        </label>`).join("")}
+        <div class="rail">${items.map(card).join("")}</div>
       </section>`;
     }).join("");
-  };
-
-  const draw = (keepQuery = false) => {
-    if (!keepQuery) {
-      openSheet(`
-        ${headHtml("작품 넣기", { back: true, save: "넣기",
-          sub: `${f.emoji} ${esc(f.name)}` })}
-        ${searchHtml("제목으로 좁히기", "", "margin-bottom:10px")}
-        <div data-add-bulk></div>
-        <div data-add-body></div>`);
-      wireHead({ save: put, cancel: back, back });
-      const box = sheet.querySelector(".sheet-body");
-      // 치는 칸은 다시 그리지 않는다 — 한글이 조합 중에 깨진다
-      box.addEventListener("input", e => {
-        if (!e.target.closest(".arch-q")) return;
-        q = e.target.value;
-        paint();
-      });
-      box.addEventListener("click", e => {
-        const g = e.target.closest("[data-gall]");
-        if (g) {
-          const items = groups().find(([pid]) => pid === g.dataset.gall)?.[1] ?? [];
-          const all = items.every(w => picked.has(w.id));
-          for (const w of items) all ? picked.delete(w.id) : picked.add(w.id);
-          return paint();
-        }
-        const c = e.target.closest("[data-add]");
-        if (c) {
-          // 체크 상자 자체는 브라우저가 켜고 끈다 — 여기서는 셈만 맞춘다
-          c.checked ? picked.add(c.dataset.add) : picked.delete(c.dataset.add);
-          return paintBulk();
-        }
-      });
-    }
-    paint();
   };
 
   const paintBulk = () => {
@@ -988,7 +980,7 @@ function openFolderAdd(f, back) {
     if (!picked.size) { toast("넣을 작품을 골라 주세요"); return; }
     const { added } = await api("POST", `/api/folders/${f.id}/works`, { works: [...picked] });
     await reload(); render();
-    /* 몇 편이 들었는지 그대로 말한다 — 골랏는데 일부만 들어가는 경우가 있다(함께 쓰는
+    /* 몇 편이 들었는지 그대로 말한다 — 골랐는데 일부만 들어가는 경우가 있다(함께 쓰는
        폴더에서 수락을 물린 뒤라든가). "넣었습니다" 만 말하면 없는 편을 찾으러 다니게 된다. */
     toast(added === picked.size ? `${added}편을 넣었습니다`
       : added ? `${picked.size}편 중 ${added}편만 들어갔습니다`
@@ -996,7 +988,60 @@ function openFolderAdd(f, back) {
     back();
   });
 
-  draw();
+  /* 전체 화면 시트다 — 레일이 옆으로 흐르고 목록이 길어서 낮은 창에는 담기지 않는다.
+     전체 화면에는 제 제목줄(.sheet-head)이 따로 있으므로 headHtml 의 빵부스러기 대신
+     그 줄 오른쪽에 버튼을 단다. .crumb-act 를 쓰지 않는 이유는 그것이 **마우스에서
+     숨겨지기** 때문이다 — 낮은 창은 아래 버튼줄이 대신 서지만 여기는 그것도 없다. */
+  openSheet(`
+    ${searchHtml("제목으로 좁히기", "", "margin-bottom:10px")}
+    <div data-add-bulk></div>
+    <div data-add-body></div>`,
+    { full: true, title: "작품 넣기", sub: `${f.emoji} ${esc(f.name)}` });
+
+  const acts = document.createElement("span");
+  acts.className = "head-act";
+  acts.innerHTML = `<button class="mini-btn" data-cancel>취소</button>
+    <button class="mini-btn on" data-done>넣기</button>`;
+  sheet.querySelector(".sheet-head").append(acts);
+  wireHead({ save: put, cancel: back, back });
+
+  const box = sheet.querySelector(".sheet-body");
+  // 치는 칸은 다시 그리지 않는다 — 한글이 조합 중에 깨진다
+  box.addEventListener("input", e => {
+    if (!e.target.closest(".arch-q")) return;
+    q = e.target.value;
+    detail = null;                 // 좁히면 구간 목록으로 — 펼쳐 둔 구간이 비어 있을 수 있다
+    paint();
+  });
+  box.addEventListener("click", e => {
+    if (e.target.closest("[data-back-rails]")) { detail = null; return paint(); }
+    const more = e.target.closest("[data-more]");
+    if (more) { detail = more.dataset.more; return paint(); }
+    const g = e.target.closest("[data-gall]");
+    if (g) {
+      const items = groups().find(([pid]) => pid === g.dataset.gall)?.[1] ?? [];
+      const all = items.every(w => picked.has(w.id));
+      for (const w of items) all ? picked.delete(w.id) : picked.add(w.id);
+      return paint();
+    }
+    const c = e.target.closest("[data-add]");
+    if (c) {
+      // 카드 하나만 뒤집는다 — 다시 그리면 레일이 맨 앞으로 되감긴다
+      const on = picked.has(c.dataset.add);
+      on ? picked.delete(c.dataset.add) : picked.add(c.dataset.add);
+      c.classList.toggle("on", !on);
+      c.setAttribute("aria-pressed", String(!on));
+      // 구간 버튼 글자는 그 구간이 다 켜졌는지에 따라 바뀐다
+      const sec = c.closest(".plat, .sheet-body");
+      const gb = sec?.querySelector("[data-gall]");
+      if (gb) {
+        const items = groups().find(([pid]) => pid === gb.dataset.gall)?.[1] ?? [];
+        gb.textContent = items.length && items.every(w => picked.has(w.id)) ? "구간 해제" : "구간 선택";
+      }
+      return paintBulk();
+    }
+  });
+  paint();
 }
 
 /* 폴더 안은 팝업으로 연다. 목록을 떠나지 않으므로 여러 폴더를 훑어보기 쉽고,
@@ -1735,12 +1780,17 @@ function render() {
     html += `</div>`;
   } else {
     // 고르는 중에는 진짜 폴더만 남긴다 — 전체·미분류·새 폴더는 지울 수 있는 것이 아니다
-    html += whoseBar() + folderBar() + `<div class="folders">`;
-    if (!folderSel) {
+    html += whoseBar() + kindChips() + folderBar() + `<div class="folders">`;
+    /* 🗂 전체와 🫙 미분류는 폴더가 아니라 **모든 작품을 보는 길**이다. 갈래를 좁힌
+       화면에 그것들이 서 있으면 "일반 폴더" 를 골랐는데 전부가 나오는 셈이라 어긋난다. */
+    if (!folderSel && fkind === "all") {
       html += folderRow("_all", "🗂", "전체");
       if (activeWorks().some(w => !w.folders.length)) html += folderRow("_none", "🫙", "미분류");
     }
-    html += folders.map(f => folderRow(f.id, f.emoji, f.name, f)).join("");
+    const list = kindShown();
+    html += list.map(f => folderRow(f.id, f.emoji, f.name, f)).join("");
+    if (!list.length) html += `<div class="empty">이 갈래의 폴더가 없습니다.</div>`;
+    // 새 폴더는 늘 만들 수 있다 — 갈래는 보는 방식일 뿐이지 만들 수 있는 것을 가르지 않는다
     if (!folderSel) html += `<button class="folder ghost" data-new-folder>＋ 새 폴더</button>`;
     html += `</div>`;
   }
@@ -2800,13 +2850,45 @@ function emojiOnly(v) {
 let folderSel = null;
 
 /** 폴더 목록 머리줄 — 평소엔 "선택", 고르는 중이면 몇 개인지와 처리 버튼 */
+/* 폴더 목록에 세 갈래가 한 줄로 섞여 선다 — 내 것, 함께 쓰는 것, 비추는 것.
+   딱지(.mtag)로 갈리기는 하지만 스무 개가 넘어가면 딱지를 하나씩 읽어야 하고,
+   "내가 만든 것만 보자" 가 안 된다.
+
+   갈래를 가르는 잣대는 **폴더 줄에 이미 붙어 있는 딱지와 같다** — 화면에 보이는 말과
+   거르는 말이 다르면 골랐는데 딴 것이 나온다.
+     · 함께 쓰는 것 — 내가 연 것(take === "edit")과 불려 간 것(canEdit) 둘 다
+     · 비추는 것    — 남의 폴더를 비추는 껍데기 중 함께 쓰지 않는 것
+     · 일반         — 그 밖의 내 폴더 */
+const folderKind = f =>
+  f.take === "edit" || f.canEdit ? "team" : f.mirror ? "mirror" : "plain";
+const FOLDER_KINDS = [["all", "전체"], ["plain", "일반"], ["team", "공유"], ["mirror", "미러링"]];
+let fkind = "all";                       // 화면 상태라 시트 밖에 둔다 — 다시 그려도 남는다
+const kindShown = () => folders.filter(f => fkind === "all" || folderKind(f) === fkind);
+
+/** 갈래 고르개. **두 갈래 넘게 있을 때만** 나온다 — 고를 것이 하나뿐인 고르개는 자리만 먹는다. */
+function kindChips() {
+  const have = new Set(folders.map(folderKind));
+  if (folderSel || have.size < 2) return "";
+  const n = k => (k === "all" ? folders.length : folders.filter(f => folderKind(f) === k).length);
+  return `<div class="chips">${FOLDER_KINDS
+    .filter(([k]) => k === "all" || have.has(k))
+    .map(([k, t]) => `<button class="chip" data-fkind="${k}" aria-pressed="${fkind === k}"
+      >${t} ${n(k)}</button>`).join("")}</div>`;
+}
+
 function folderBar() {
   if (!folders.length) return "";
-  if (!folderSel)
-    return `<div class="fbar"><span>폴더 ${folders.length}개</span>
+  if (!folderSel) {
+    /* 갈래를 좁혀 놓았으면 **보이는 수**를 적는다 — 세 줄만 서 있는데
+       "폴더 15개" 라고 적혀 있으면 나머지가 어디 갔나 찾게 된다. */
+    const vis = kindShown().length;
+    return `<div class="fbar"><span>폴더 ${
+      fkind === "all" ? `${folders.length}개` : `${vis}개 · 전체 ${folders.length}개`}</span>
       <button class="mini-btn" data-fsel>선택</button></div>`;
+  }
 
-  const all = folders.every(f => folderSel.has(f.id));
+  // 갈래로 좁혀 놓았으면 **보이는 것만** 집는다 — 안 보이는 폴더가 함께 지워지면 안 된다
+  const all = kindShown().every(f => folderSel.has(f.id));
   return `<div class="bulk">
     <b>${folderSel.size}개 선택</b>
     <button class="mini-btn" data-fsel-all>${all ? "전체 해제" : "전체 선택"}</button>
@@ -4225,7 +4307,12 @@ screenEl.addEventListener("click", e => {
   const plat = e.target.closest("[data-plat]");
   if (plat) return openPlatformEdit(plat.dataset.plat);
   const w = e.target.closest(".work, .row"); if (w) return openWork(w.dataset.id);
-  const c = e.target.closest(".chip"); if (c) { filter = c.dataset.filter; return render(); }
+  /* 갈래 고르개도 .chip 이다 — **매체 거르개보다 먼저** 봐야 한다.
+     아래가 먼저 잡으면 dataset.filter 가 없어 filter 가 undefined 가 되고,
+     갈래는 갈래대로 안 바뀌면서 목록만 통째로 비어 보인다. */
+  const k = e.target.closest("[data-fkind]");
+  if (k) { fkind = k.dataset.fkind; return render(); }
+  const c = e.target.closest("[data-filter]"); if (c) { filter = c.dataset.filter; return render(); }
   const fe = e.target.closest("[data-folder-edit]");
   if (fe) return openFolderForm(folders.find(x => x.id === fe.dataset.folderEdit),
     () => { closeSheet(); render(); });
@@ -4239,7 +4326,9 @@ screenEl.addEventListener("click", e => {
   if (e.target.closest("[data-fsel]")) { folderSel = new Set(); return render(); }
   if (e.target.closest("[data-fsel-off]")) { folderSel = null; return render(); }
   if (e.target.closest("[data-fsel-all]")) {
-    folderSel = new Set(folders.every(x => folderSel.has(x.id)) ? [] : folders.map(x => x.id));
+    // 갈래로 좁혀 놓았으면 보이는 것만 집는다 — 안 보이는 폴더가 함께 지워지면 안 된다
+    const vis = kindShown();
+    folderSel = new Set(vis.every(x => folderSel.has(x.id)) ? [] : vis.map(x => x.id));
     return render();
   }
   if (e.target.closest("[data-fsel-del]")) return deleteFolders();

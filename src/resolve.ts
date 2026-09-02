@@ -29,6 +29,10 @@ export type Resolved =
           none 과 blocked 는 결과가 같아 보여도 원인이 다르다:
           앞은 사이트가 안 내놓는 것, 뒤는 우리를 막은 것이다. */
       origin: "og" | "none" | "blocked";
+      /** 그 페이지가 **없다**고 확신할 때만 채운다. 못 읽은 것과는 다르다. */
+      dead: "notfound" | "moved" | "generic" | "nohost" | null;
+      /** 그쪽이 돌려준 번호 (0 이면 못 닿음) — 화면이 왜 그런지 말해 줄 때 쓴다 */
+      status: number;
       note?: string;
     }
   | { ok: false; reason: string };
@@ -72,17 +76,23 @@ export function stripSiteSuffix(title: string, ...names: (string | null | undefi
 }
 
 type Og = { read: boolean; title: string | null; image: string | null; siteName: string | null;
-             url: string | null; imgW: number | null; imgH: number | null };
+             url: string | null; imgW: number | null; imgH: number | null;
+             /** 그쪽이 돌려준 번호. 못 닿았으면 0. */
+             status: number;
+             /** 물어본 곳과 **다른 곳**에 닿았으면 그 최종 주소 (없는 작품은 대문으로 튕긴다) */
+             landed: string | null };
 
 async function fetchOg(url: string): Promise<Og> {
   const empty: Og = { read: false, title: null, image: null, siteName: null, url: null,
-                      imgW: null, imgH: null };
+                      imgW: null, imgH: null, status: 0, landed: null };
   try {
     const res = await fetch(url, {
       headers: { "User-Agent": UA, "Accept-Language": "ko-KR,ko;q=0.9" },
       signal: AbortSignal.timeout(TIMEOUT),
     });
-    if (!res.ok) return empty;
+    /* 못 읽었어도 **번호는 넘긴다.** 404 와 403 은 뜻이 아주 다르다 —
+       앞은 그 페이지가 없는 것이고, 뒤는 있는데 우리를 막은 것이다(CGV 가 그렇다). */
+    if (!res.ok) return { ...empty, status: res.status };
     // meta 태그는 <head> 안에 있다. 유튜브처럼 head가 700KB에 달하는 페이지가 있어
     // 고정 길이로 자르면 태그를 놓친다 — </head>까지 읽되 상한을 둔다.
     const MAX = 1_500_000;
@@ -110,6 +120,11 @@ async function fetchOg(url: string): Promise<Og> {
     };
     return {
       read: true,
+      status: res.status,
+      /* 없는 작품 번호를 넣으면 404 가 아니라 **대문으로 튕긴다**(네이버가 그렇다).
+         물어본 곳과 닿은 곳이 다르면 그것이 신호다. 리다이렉트는 이미 따라가고 있어
+         새로 두드릴 것이 없다. */
+      landed: res.url && res.url !== url ? res.url : null,
       title,
       image: pick("og:image") ?? pick("twitter:image"),
       siteName: pick("og:site_name"),
@@ -119,7 +134,13 @@ async function fetchOg(url: string): Promise<Og> {
       imgW: num(pick("og:image:width")),
       imgH: num(pick("og:image:height")),
     };
-  } catch { return empty; }
+  } catch (e) {
+    /* **못 닿은 까닭을 가린다.** 「그런 도메인이 없다」(ENOTFOUND)와 「느리거나 막혔다」는
+       뜻이 아주 다르다 — 앞은 주소를 잘못 친 것이고, 뒤는 그쪽 사정이다.
+       도메인이 없는 것만 -1 로 표시해 두고, 나머지는 0(그냥 못 읽음)으로 둔다. */
+    const code = (e as { cause?: { code?: string } })?.cause?.code;
+    return { ...empty, status: code === "ENOTFOUND" ? -1 : 0 };
+  }
 }
 
 /** 구간 제목으로 쓸 만한 값인지 — 지나치게 길거나 빈 값은 주소만도 못하다. */
@@ -186,7 +207,11 @@ export async function fetchSiteName(host: string): Promise<{ read: boolean; name
     제목과 그림은 멀쩡한 곳까지 잃는다. 대문을 물은 경우(블로그 홈처럼 제목이 곧 사이트
     이름인 곳)는 깊은 주소가 아니라 애초에 걸리지 않는다. */
 function pageIsGeneric(og: Og, askedUrl: string, plat: Platform, title: string): boolean {
-  if (title && (title === plat.name || title === plat.id.replace("domain:", ""))) return true;
+  /* 견줄 때 공백을 지운다. 네이버는 없는 작품 번호에 대문 정보를 주는데, 그 제목이
+     "네이버 웹툰" 이고 우리 쪽 이름은 "네이버웹툰" 이라 띄어쓰기 하나로 안 걸렸다 —
+     없는 작품이 「네이버 웹툰」이라는 제목으로 조용히 담겼다. */
+  const flat = (s: string) => s.replace(/\s+/g, "").toLowerCase();
+  if (title && (flat(title) === flat(plat.name) || flat(title) === flat(plat.id.replace("domain:", "")))) return true;
   /* 이름은 없는데 그림만 있다 — 제 이야기를 하는 페이지는 이름부터 밝힌다. 이름 없이
      그림만 내놓는 곳은 대개 서비스 공용 로고를 준다. 네이버 지도가 그렇다: 가게 페이지를
      브라우저에서 그려서 서버 HTML 에는 상호가 아예 없고, og:image 로는 지도 서비스
@@ -244,8 +269,30 @@ async function resolveOnce(raw: string): Promise<Resolved> {
 
   const generic = pageIsGeneric(og, p.listUrl, plat, cleaned);
 
+  /* **없다고 확신할 수 있는 것만** 가려낸다.
+
+     · notfound — 그쪽이 404·410 이라 했다
+     · moved    — 깊은 주소를 물었는데 대문으로 튕겼다 (없는 작품 번호)
+     · generic  — 받아오긴 했는데 그 작품 이야기가 아니라 대문 정보다
+
+     403·429·5xx·시간 초과는 여기 넣지 않는다. 우리를 막았거나 그쪽이 잠깐 아픈 것이지
+     페이지가 없는 것이 아니다 — CGV 가 403 을 주는데 사람은 멀쩡히 보고 온 페이지다. */
+  const asked = (() => { try { return new URL(p.listUrl); } catch { return null; } })();
+  const land = (() => { try { return og.landed ? new URL(og.landed) : null; } catch { return null; } })();
+  const bare = (s: string) => s.replace(/\/+$/, "");       // 끝의 빗금은 뜻이 없다
+  const wentHome = !!land && !!asked
+    && bare(asked.pathname) !== ""                          // 애초에 대문을 물은 것이 아니고
+    && (bare(land.pathname) === "" || bare(land.pathname) === "/index");  // 대문(에 준하는 곳)으로 갔다
+  const dead: "notfound" | "moved" | "generic" | "nohost" | null =
+    og.status === -1 ? "nohost"                              // 그런 도메인이 없다
+      : og.status === 404 || og.status === 410 ? "notfound"
+        : wentHome ? "moved"
+          : (og.read && generic) ? "generic" : null;
+
   return {
     ok: true,
+    dead,
+    status: og.status,
     platform: { id: plat.id, name: plat.name, color: plat.color, fg: plat.fg, initial: plat.initial },
     seriesId: p.seriesId,
     title: generic ? "" : cleaned,

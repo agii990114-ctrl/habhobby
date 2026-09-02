@@ -80,11 +80,30 @@ const env = (p: string, k: string) => process.env[`${p.toUpperCase()}_${k}`] ?? 
 const clientId = (p: string) => env(p, "CLIENT_ID");
 const clientSecret = (p: string) => env(p, "CLIENT_SECRET");
 
-/** 자격 증명이 채워진 제공자만 화면에 노출한다. */
+/** 자격 증명이 채워진 제공자. **화면에 보일 것과는 다르다** — 아래를 보라. */
 export const configuredProviders = (): { id: string; label: string; color: string; fg: string }[] =>
   Object.values(PROVIDERS)
     .filter(p => clientId(p.id) && (!p.needsSecret || clientSecret(p.id)))
     .map(p => ({ id: p.id, label: p.label, color: p.color, fg: p.fg }));
+
+/* **잠시 꺼 두는 길.** DISABLED_LOGINS="kakao" 처럼 적으면 그 버튼이 사라지고
+   그 길로 들어오는 요청도 막힌다.
+
+   자격 증명은 .env 에 그대로 둔다 — 지워서 끄면 안 되는 까닭이 있다.
+   localFallbackAllowed() 가 "제공자가 하나도 없으면 로컬 계정으로 연다" 인데,
+   키를 지워 0이 되면 로그인 없이 들어온 사람들이 **같은 계정 하나**를 나눠 쓰게 된다
+   (provider_uid 가 "local" 로 고정이라 줄이 하나뿐이다). 끄는 것과 지우는 것은 다르다. */
+const disabledLogins = (): Set<string> =>
+  new Set((process.env.DISABLED_LOGINS ?? "").split(",").map(s => s.trim()).filter(Boolean));
+
+/** 지금 로그인 화면에 세울 것 — 설정되어 있고, 꺼 두지 않은 것. */
+export const availableProviders = (): { id: string; label: string; color: string; fg: string }[] => {
+  const off = disabledLogins();
+  return configuredProviders().filter(p => !off.has(p.id));
+};
+
+/** 그 길이 지금 열려 있나 — 화면을 안 거치고 주소로 바로 들어오는 경우를 막는다. */
+export const loginOpen = (id: string): boolean => !disabledLogins().has(id);
 
 export const redirectUri = (p: string) => `${BASE_URL}/auth/${p}/callback`;
 
@@ -92,6 +111,7 @@ export const redirectUri = (p: string) => `${BASE_URL}/auth/${p}/callback`;
 export function startLogin(providerId: string): string | null {
   const p = PROVIDERS[providerId];
   if (!p || !clientId(providerId)) return null;
+  if (!loginOpen(providerId)) return null;      // 버튼만 감추면 주소로 들어올 수 있다
 
   // state는 서버가 기억한다 — 돌아온 요청이 우리가 보낸 것인지 확인하는 용도(CSRF)
   const state = randomBytes(24).toString("base64url");

@@ -403,6 +403,17 @@ const canCopy = t => t === "copy" || t === "both" || t === "edit";
    하나뿐이어야 하고, 그 길은 이미 미러링이 내고 있다. */
 const canMirror = t => t === "mirror" || t === "both" || t === "edit";
 
+/** 이 **남의 작품**을 담아 올 수 있나.
+
+    한 작품이 여러 폴더에 들어 있을 수 있다 — 친구가 「미러링만」인 폴더와 함께 쓰는
+    폴더에 같은 작품을 넣어 두는 일은 흔하다. 서버는 그중 **하나라도** 담아가기를
+    열어 뒀으면 담게 해 준다(takable). 화면이 줄에 적힌 mirrorTake 하나만 보면 서버보다
+    인색해져, **담을 수 있는데 버튼이 안 뜨는** 자리가 생긴다. 같은 잣대로 가린다. */
+const mayTakeWork = w => !!w.mirror && !!w.listUrl && w.folders.some(id => {
+  const f = folders.find(x => x.id === id);
+  return f && canCopy(f.mirrorTake ?? f.take);
+});
+
 const FALLBACK_PLATFORM = { name: "링크", color: "#655A61", fg: "#fff", initial: "?", isDomain: true };
 const platformOf = id => platforms[id] ?? { ...FALLBACK_PLATFORM, id };
 
@@ -691,14 +702,31 @@ const workBarHtml = any => {
   if (!any || workSelKey === null) return "";
   if (!workSel)
     return `<div class="fr-pick tight"><button class="mini-btn" data-wsel>선택</button></div>`;
+  /* **고른 것에 남의 작품이 섞여 있을 수 있다.** 함께 쓰는 폴더에는 내 작품과 친구
+     작품이 한자리에 서고, 비추는 폴더는 통째로 남의 것이다. 할 수 있는 일이 서로
+     달라서 버튼도 갈라 세운다 — 남의 것은 **담아 오는 것**뿐이고(내 것이 아니라
+     고칠 수 없다), 내 것은 **옮기는 것**뿐이다(담을 것이 없다).
+
+     한때 갈라 두지 않아서, 비추는 폴더에서 남의 작품을 골라 휴지통을 누르면 서버가
+     404 를 돌려줬다. 누르는 사람에게는 아무 일도 안 일어나는 것처럼 보였다.
+
+     「미러링만」으로 열어 둔 폴더는 담아갈 수 없다 — canCopy 가 그것을 가른다. */
+  /* **셈을 갈라 적지 않는다.** 「담아가기 3 · 감상 완료 2」처럼 적어 두면 고르는 사람이
+     제가 무엇을 골랐는지 머릿속으로 갈라 세야 한다. 통째로 골라 누르면 각 버튼이 제
+     몫만 집어 간다 — 담아가기는 남의 것만, 감상 완료·휴지통은 내 것만. */
+  const picked = [...workSel].map(id => works.find(w => w.id === id)).filter(Boolean);
+  const canTake = picked.filter(mayTakeWork);
+  const mine = picked.filter(w => !w.mirror);
   return `<div class="bulk">
     <b>${workSel.size}개 선택</b>
     ${workSel.size ? `<button class="mini-btn" data-wsel-all>전체 해제</button>` : ""}
     <span class="bulk-act">
-      <button class="mini-btn" data-wbulk="watched"${workSel.size ? "" : " disabled"}
+      ${canTake.length ? `<button class="mini-btn on" data-wtake
+        >${icon("plus")} 담아가기</button>` : ""}
+      ${mine.length ? `<button class="mini-btn" data-wbulk="watched"
         >${icon("check")} 감상 완료</button>
-      <button class="mini-btn danger" data-wbulk="dropped"${workSel.size ? "" : " disabled"}
-        >${icon("trash")} 휴지통</button>
+      <button class="mini-btn danger" data-wbulk="dropped"
+        >${icon("trash")} 휴지통</button>` : ""}
       <button class="mini-btn" data-wsel-off>완료</button>
     </span></div>`;
 };
@@ -731,11 +759,42 @@ function wireWorkPick(box, redraw) {
     }
   });
 
+  /* 골라 둔 남의 작품을 한꺼번에 담는다.
+
+     **주인이 여럿일 수 있다** — 함께 쓰는 폴더에는 여러 사람이 넣는다. 담아가는 길은
+     주인마다 따로라(누가 무엇을 열어 두었는지가 사람마다 다르다) 주인별로 묶어 보낸다. */
+  box.addEventListener("click", guard(async e => {
+    if (!e.target.closest("[data-wtake]")) return;
+    const list = [...workSel].map(id => works.find(w => w.id === id)).filter(w => w && mayTakeWork(w));
+    if (!list.length) return;
+    const byOwner = new Map();
+    for (const w of list) {
+      let a = byOwner.get(w.mirror);
+      if (!a) byOwner.set(w.mirror, a = []);
+      a.push(w.id);
+    }
+    let added = 0, already = 0, skipped = 0;
+    for (const [owner, ids] of byOwner) {
+      const r = await api("POST", `/api/friends/${owner}/take`, { works: ids });
+      added += r.added; already += r.already; skipped += r.skipped;
+    }
+    workSel = null;
+    await reload(); render(); redraw();
+    toast(added
+      ? `${added}편 담았습니다${already ? ` · ${already}편은 이미 있었습니다` : ""}`
+      : already ? `${already}편 모두 이미 담겨 있습니다`
+        : "담아갈 수 있는 작품이 없습니다");
+  }));
+
   box.addEventListener("click", guard(async e => {
     const b = e.target.closest("[data-wbulk]"); if (!b) return;
     const to = b.dataset.wbulk, ids = [...workSel];
     if (!ids.length) return;
-    const picked = ids.map(id => works.find(w => w.id === id)).filter(Boolean);
+    /* **내 것만 집는다.** 함께 쓰는 폴더에서 통째로 골랐으면 남의 작품이 섞여 있는데,
+       남의 작품 상태는 내가 못 바꾼다 — 그대로 보내면 서버가 404 를 돌려주고 누른
+       사람에게는 아무 일도 안 일어난 것처럼 보인다. 담아가기가 남의 것만 집는 것과
+       같은 규칙이다. */
+    const picked = ids.map(id => works.find(w => w.id === id)).filter(w => w && !w.mirror);
     if (!picked.length) return;
     const label = STATES[to].label;
 
@@ -5100,11 +5159,19 @@ const takeInvite = () => {
   try {
     await reload(true);          // 앱을 새로 여는 길 — 읽어 둔 소식을 걷고 시작한다
   } catch (e) {
-    // 로그인이 필요하면 제공자 목록을 받아 로그인 화면을 띄운다
+    /* 로그인이 필요하면 제공자 목록을 받아 로그인 화면을 띄운다.
+
+       **이 물음이 답을 받았다는 것 자체가 서버가 살아 있다는 뜻**이다(이 길은 로그인
+       없이도 열려 있다). 그러니 여기까지 왔으면 「연결이 안 된다」가 아니라 「로그인이
+       필요하다」이고, 로그인 화면을 세우는 것이 맞다.
+
+       한때 조건이 "OAuth 버튼이 하나라도 있으면" 이었다. 그런데 로그인 화면에는 버튼
+       말고도 **아이디 로그인과 둘러보기**가 있어서, 버튼을 다 꺼 두면 멀쩡히 로그인할
+       수 있는데도 「서버에 연결하지 못했습니다」가 떴다. */
     try {
       const cfg = await api("GET", "/api/auth/providers");
-      if (cfg.providers.length) { showLogin(cfg.providers, loginError); return; }
-    } catch { /* 서버 자체가 죽은 경우 */ }
+      showLogin(cfg.providers, loginError); return;
+    } catch { /* 서버 자체가 죽은 경우 — 아래로 내려간다 */ }
     screenEl.innerHTML = `<div class="empty">서버에 연결하지 못했습니다.<br>${esc(e.message)}</div>`;
     return;
   }

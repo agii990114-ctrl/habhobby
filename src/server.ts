@@ -19,7 +19,7 @@ import {
   type Work, type User, type ShareMode, type TakeMode,
 } from "./db.ts";
 import {
-  PROVIDERS, configuredProviders, startLogin, completeLogin, createSession,
+  PROVIDERS, configuredProviders, availableProviders, startLogin, completeLogin, createSession,
   userFromToken, destroySession, cookieHeader, readCookie, COOKIE,
   localFallbackAllowed, redirectUri, BASE_URL,
   hashPassword, verifyPassword, validLoginId, validPassword,
@@ -205,8 +205,15 @@ function withMirrors(me: string): { folders: any[]; works: any[] } {
   /* 남의 작품을 **내가** 어떻게 보고 있는지. 붉은 점과 차례를 정하는 값이라 미리 읽어 둔다. */
   const seen = seenByMe(me);
   /* 이미 내가 담아 둔 작품인지 가리는 열쇠 — 같은 곳의 같은 시리즈면 같은 작품이다. */
-  const keyOf = (w: any) => `${w.platformId} ${w.seriesId}`;
-  const mineByKey = new Map<string, any>(works.map(w => [keyOf(w), w]));
+  const keyOf = (w: any) => `${w.platformId}\u0000${w.seriesId}`;
+  /* **살아 있는 것만 담는다.** 휴지통이나 감상 완료에 내려둔 작품이 여기 끼어 있으면,
+     그것이 친구 줄을 밀어내 놓고 저는 화면에서 걸러진다(폴더는 active 만 세운다) —
+     친구 폴더에는 멀쩡히 있는데 내 쪽에서만 조용히 사라지는 구멍이 난다.
+
+     못 본 척하는 것이 옳다: 내가 내 목록에서 내려둔 것은 **내 목록의 결정**이지,
+     친구 폴더를 어떻게 볼지의 결정이 아니다. 되돌리면 다시 여기 들어와 제자리를 찾는다. */
+  const mineByKey = new Map<string, any>(
+    works.filter(w => w.state === "active").map(w => [keyOf(w), w]));
 
   /** 남의 작품 한 줄을 내 목록에 놓을 모양으로 바꾼다 */
   const asGuest = (w: any, folderId: string, owner: string, who: string,
@@ -331,8 +338,12 @@ function upsertWork(userId: string, input: {
   folders: string[]; filed: boolean; color?: string | null;
 }): Work {
   const now = Date.now();
+  /* **살아 있는 것만 본다.** 휴지통에 같은 작품이 있어도 새로 만든다 — 내려둔 것과
+     새로 담는 것은 별개다. 예전에는 여기서 찾아내 state='active' 로 되살렸는데,
+     그러면 그때 매겨 둔 별점과 폴더가 딸려 와 "새로 담았다" 와 다른 것이 생겼다.
+     살아 있는 것끼리의 중복은 여전히 막는다. */
   const existing = db.prepare(
-    "SELECT id FROM work WHERE user_id = ? AND platform_id = ? AND series_id = ?")
+    "SELECT id FROM work WHERE user_id = ? AND platform_id = ? AND series_id = ? AND state = 'active'")
     .get(userId, input.platformId, input.seriesId) as { id: string } | undefined;
 
   if (existing) {
@@ -409,8 +420,10 @@ function takable(me: string, other: string): Map<string, Work> {
 /** 한 편을 담아 간다. 이미 있으면 새로 만들지 않고 폴더에만 넣는다. */
 async function takeWork(userId: string, src: Work, folderIds: string[]):
   Promise<{ already: boolean; id: string }> {
+  /* 살아 있는 것만 본다 — upsertWork 와 같은 잣대다. 휴지통에 내려둔 것이 있다고
+     담아가기가 막히면, 화면에는 「이미 담겨 있습니다」라는데 어디에도 안 보인다. */
   const had = db.prepare(
-    "SELECT id FROM work WHERE user_id = ? AND platform_id = ? AND series_id = ?")
+    "SELECT id FROM work WHERE user_id = ? AND platform_id = ? AND series_id = ? AND state = 'active'")
     .get(userId, src.platformId, src.seriesId) as { id: string } | undefined;
 
   /* 이미 담아 둔 것은 건드리지 않는다 — 제목을 내가 고쳐 뒀을 수도 있고, 보관함에
@@ -576,6 +589,25 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     }
 
     const r = await resolveUrl(String(b.url ?? ""));
+
+    /* **없는 페이지는 담지 않는다.** 여기서 막는 것은 「없다고 확신할 수 있는 것」뿐이다 —
+       그쪽이 404 라 했거나, 깊은 주소를 물었는데 대문으로 튕겼거나(없는 작품 번호),
+       받아온 것이 그 작품 이야기가 아니라 대문 정보이거나.
+
+       못 읽은 것(403·시간 초과)은 막지 않는다. 사람이 눈으로 보고 온 페이지를 우리가
+       못 읽었다고 거절하면 안 된다 — CGV 가 그렇다. 그쪽은 화면에서 경고만 한다. */
+    /* **generic 은 막지 않는다.** 그건 「없다」가 아니라 「우리가 못 읽었다」이다 —
+       카카오페이지는 화면을 브라우저에서 그려서 어느 작품 주소든 같은 대문 태그를 주고,
+       네이버 지도도 그렇다. 멀쩡한 페이지라 사람이 제목을 직접 적어 담으면 되는데,
+       여기서 막으면 그 플랫폼이 통째로 담을 수 없게 된다(실제로 두 곳이 걸렸다). */
+    if (r.ok && r.dead && r.dead !== "generic") {
+      json(res, 400, { ok: false, dead: r.dead, reason:
+        r.dead === "notfound" ? "그 주소에 페이지가 없습니다. 주소를 다시 확인해 주세요."
+          : r.dead === "moved" ? "그 작품을 찾을 수 없습니다 — 주소가 대문으로 넘어갑니다."
+            : r.dead === "generic" ? "그 페이지에서 작품 정보를 찾지 못했습니다. 작품 페이지 주소가 맞나요?"
+            : "그런 주소가 없습니다. 도메인을 다시 확인해 주세요." });
+      return true;
+    }
     if (!r.ok) { json(res, 400, r); return true; }
     const title = String(b.title ?? r.title ?? "").trim();
     if (!title) { json(res, 400, { ok: false, reason: "제목이 필요합니다." }); return true; }
@@ -1099,6 +1131,25 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       const b = await readJson(req);
       const view = sharedView(other, user.id);
 
+      /* **여럿을 한꺼번에.** 폴더 안에서 골라 담을 때 오는 길이다 — 한 편씩 오가면
+         열 편에 열 번을 왕복한다.
+
+         담을 수 없는 것은 조용히 건너뛰고 몇이었는지만 세어 돌려준다. 고른 것 하나가
+         막혀 있다고 나머지까지 되돌릴 일은 아니다 — 함께 쓰는 폴더에는 갈래가 저마다인
+         작품이 섞여 있어, 고르는 사람이 그것을 미리 가릴 길이 없다. */
+      if (Array.isArray(b.works)) {
+        const can = takable(user.id, other);
+        let added = 0, already = 0, skipped = 0;
+        for (const raw of b.works.slice(0, 300)) {
+          const src = can.get(String(raw));
+          if (!src) { skipped++; continue; }
+          const r = await takeWork(user.id, src, []);
+          if (r.already) already++; else added++;
+        }
+        json(res, 200, { ok: true, added, already, skipped });
+        return true;
+      }
+
       if (b.work) {
         /* 한 작품이 여러 폴더에 들어 있을 수 있는데, 그중 **하나라도** 담아가기를
            허락하면 담을 수 있다 — 주인이 그 작품을 가져가도 좋다고 한 것이다. */
@@ -1356,7 +1407,7 @@ const server = createServer(async (req, res) => {
 
     // 로그인 화면이 어떤 버튼을 그릴지 알려준다 — 인증 없이 열려 있어야 한다
     if (url.pathname === "/api/auth/providers") {
-      json(res, 200, { providers: configuredProviders(), localFallback: localFallbackAllowed(),
+      json(res, 200, { providers: availableProviders(), localFallback: localFallbackAllowed(),
         password: true });
       return;
     }
@@ -1422,6 +1473,13 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`HabHobby → http://localhost:${PORT}`);
   const users = (db.prepare("SELECT COUNT(*) c FROM user").get() as { c: number }).c;
-  const provs = configuredProviders().map(p => p.id);
-  console.log(`  가입 ${users}명 · 로그인 ${provs.length ? provs.join(", ") : "미설정 (로컬 계정으로 동작)"}`);
+  const provs = availableProviders().map(p => p.id);
+  const off = configuredProviders().filter(p => !provs.includes(p.id)).map(p => p.id);
+  /* 「로컬 계정으로 동작」은 **정말 그럴 때만** 적는다. 꺼 둔 것이 있을 뿐이면
+     자격 증명은 남아 있어 대체 계정이 열리지 않는다 — 여기서 거짓을 적으면
+     운영하는 사람이 열려 있는 줄 알고 지나친다. */
+  const how = provs.length ? provs.join(", ")
+    : localFallbackAllowed() ? "미설정 (로컬 계정으로 동작)"
+      : "아이디 로그인만";
+  console.log(`  가입 ${users}명 · 로그인 ${how}` + (off.length ? ` · 꺼 둠 ${off.join(", ")}` : ""));
 });

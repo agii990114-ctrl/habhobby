@@ -7,7 +7,7 @@ import { DOMAIN_PREFIX } from "./platforms.ts";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-export const DB_PATH = resolve(process.cwd(), "data/habhobby.db");
+const DB_PATH = resolve(process.cwd(), "data/habhobby.db");
 mkdirSync(dirname(DB_PATH), { recursive: true });
 
 export const db = new DatabaseSync(DB_PATH);
@@ -217,6 +217,15 @@ CREATE TABLE IF NOT EXISTS folder_share (
 CREATE INDEX IF NOT EXISTS idx_work_user   ON work(user_id, state);
 CREATE INDEX IF NOT EXISTS idx_folder_user ON folder(user_id);
 CREATE INDEX IF NOT EXISTS idx_session_exp ON session(expires_at);
+
+-- work_folder 의 기본키는 (work_id, folder_id) 라 **작품에서 폴더로** 가는 길만 나 있다.
+-- 그런데 자주 묻는 것은 반대쪽이다: "이 폴더에 무엇이 들어 있나". 비추는 폴더, 함께 쓰는
+-- 폴더, 담아갈 것 고르기가 모두 그 길로 다니는데 색인이 없어 표를 통째로 훑고 있었다
+-- (EXPLAIN QUERY PLAN 이 SCAN work_folder 라 답했다). 되짚는 길을 낸다.
+CREATE INDEX IF NOT EXISTS idx_wf_folder    ON work_folder(folder_id);
+-- folder_share 도 같다. 기본키는 (folder_id, viewer_id) 인데 "나에게 온 초대" 는
+-- viewer_id 로 묻고, 그건 앱을 열 때마다 도는 질의다.
+CREATE INDEX IF NOT EXISTS idx_share_viewer ON folder_share(viewer_id);
 `);
 
 copyLegacy();
@@ -269,6 +278,19 @@ try { db.exec("ALTER TABLE folder_share ADD COLUMN state TEXT NOT NULL DEFAULT '
    캘린더에 남길 구간의 끝을 정하는 값이라 비워두면 아예 안 보인다. */
 db.prepare("UPDATE work SET state_at = last_at WHERE state != 'active' AND state_at IS NULL").run();
 
+/* 아래 손질들은 **한 번 하면 끝나는 일**이다. 그런데 표식이 없는 것들이 있어 켤 때마다
+   다시 돌았다 — 작품 표를 통째로 훑고, 주소를 하나씩 뜯어보고, 고칠 것이 없다는 결론을
+   매번 새로 냈다. DB 자체의 판 번호를 표식 삼아 지나간 것은 건너뛴다.
+   kv 를 쓸 수 없는 이유는 그것이 사용자에 묶여 있어서다 — 표 전체에 대한 표식이 필요하다. */
+const schemaV = (): number =>
+  (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+/** 이 판까지 손질이 끝났으면 건너뛴다. 아니면 돌리고 판 번호를 올린다. */
+function once(v: number, fn: () => void): void {
+  if (schemaV() >= v) return;
+  fn();
+  db.exec("PRAGMA user_version = " + v);
+}
+
 /* 한때 하위 도메인을 등록 단위로 합쳐 저장한 적이 있다. 기준을 호스트로 되돌렸으므로
    그때 옮겨진 항목을 제 호스트로 돌려놓는다. 원래 호스트는 list_url 에 남아 있다.
 
@@ -302,55 +324,66 @@ function restoreHostGrouping(): void {
   }
   if (moved) console.log(`  도메인 구간을 호스트 기준으로 되돌림: ${moved}편`);
 }
-restoreHostGrouping();
-
 /* 한때 작품 페이지가 밝힌 og:site_name 을 구간 이름으로 삼았는데, 남의 메타 태그를 베껴 둔
    페이지가 있어 엉뚱한 이름이 박혔다(교보문고 전자책 → "IMDb"). 이제 도메인 대문에만
    물어보므로, 그때 저장된 이름은 한 번 비워 다시 받게 한다. 사용자가 직접 지은 이름은
    overrides 에 따로 있으므로 영향이 없다. */
-{
-  // 한 번만 돌아야 하므로 DB 자체의 버전 칸을 쓴다. kv 는 사용자에 묶여 있어 표식을 둘 수 없다.
-  const cur = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
-  if (cur < 1) {
-    const n = db.prepare("DELETE FROM kv WHERE k = 'siteNames'").run().changes;
-    db.exec("PRAGMA user_version = 1");
-    if (n) console.log(`  구간 이름 재조회 예약: ${n}명분`);
-  }
-}
+once(1, () => {
+  const n = db.prepare("DELETE FROM kv WHERE k = 'siteNames'").run().changes;
+  if (n) console.log(`  구간 이름 재조회 예약: ${n}명분`);
+});
 
 /* 줄바꿈과 들여쓰기를 og:title 에 그대로 넣어 둔 페이지가 있어, 제목에 공백이 수십 칸씩
    들어간 것들이 저장돼 있다. 이제 받을 때 줄이지만 이미 담긴 것은 여기서 편다. */
-{
-  const cur = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
-  if (cur < 2) {
-    const rows = db.prepare("SELECT id, title FROM work").all() as { id: string; title: string }[];
-    const upd = db.prepare("UPDATE work SET title = ? WHERE id = ?");
-    let n = 0;
-    for (const r of rows) {
-      const t = r.title.replace(/\s+/g, " ").trim();
-      if (t && t !== r.title) { upd.run(t, r.id); n++; }
-    }
-    db.exec("PRAGMA user_version = 2");
-    if (n) console.log(`  제목의 군더더기 공백 정리: ${n}편`);
+once(2, () => {
+  const rows = db.prepare("SELECT id, title FROM work").all() as { id: string; title: string }[];
+  const upd = db.prepare("UPDATE work SET title = ? WHERE id = ?");
+  let n = 0;
+  for (const r of rows) {
+    const t = r.title.replace(/\s+/g, " ").trim();
+    if (t && t !== r.title) { upd.run(t, r.id); n++; }
   }
-}
+  if (n) console.log(`  제목의 군더더기 공백 정리: ${n}편`);
+});
 
 /* 네이버웹툰 앱 스킴을 짐작으로 적어 두었던 때가 있다(naverwebtoon://). 그 주소로는
    앱이 열리지 않는다 — 이미 담긴 작품들의 주소도 바른 것으로 바꾼다. */
-{
+once(3, () => {
   const n = db.prepare(
     `UPDATE work SET app_url = 'webtoonkr://contentList?version=2&league=WEBTOON&titleId='
        || substr(app_url, length('naverwebtoon://contentList?titleId=') + 1)
      WHERE app_url LIKE 'naverwebtoon://contentList?titleId=%'`).run().changes;
   if (n) console.log(`  네이버웹툰 앱 주소 정리: ${n}편`);
-}
+});
 
 /* 글(블로그) 매체에 회차를 붙여 저장하던 때가 있다. 그 자리에 담긴 건 회차가 아니라
    글 번호이므로 비운다. 매체를 보고 가르므로 플랫폼이 늘어도 그대로 적용된다. */
-{
+once(4, () => {
   const n = db.prepare("UPDATE work SET episode = NULL WHERE media_type = 'text' AND episode IS NOT NULL")
     .run().changes;
   if (n) console.log(`  글 매체의 회차 표기 정리: ${n}편`);
+});
+
+/* 도메인 되돌리기도 한 번이면 된다 — 주소를 한 줄씩 뜯어보는 일이라 가장 비쌌다. */
+once(5, restoreHostGrouping);
+
+/* ── 질의문을 다시 쓴다 ────────────────────────────────────
+   db.prepare 는 부를 때마다 SQL 을 새로 컴파일한다 — 한 번에 0.1ms 남짓인데, 우리는 같은
+   문장을 요청마다 되풀이해 부르므로 그것만으로 질의 값의 3분의 1을 썼다. 한 번 만든 것을
+   글자 그대로 기억해 두었다가 다시 쓴다.
+
+   **놓는 자리가 여기여야 한다.** 위의 ALTER TABLE 들이 다 끝난 뒤다 — 기억해 둔
+   SELECT * 는 준비하던 때의 칸만 알기 때문에, 칸이 늘기 전에 만든 문장을 그대로 쓰면
+   새 칸이 빠진다. 켤 때 스키마가 자리를 잡고 나면 그 뒤로는 바뀌지 않는다. */
+{
+  const compile = db.prepare.bind(db);
+  const kept = new Map<string, ReturnType<typeof compile>>();
+  db.prepare = (sql: string) => {
+    let st = kept.get(sql);
+    // 폴더 수만큼 ? 를 붙여 만드는 문장이 있어 종류가 끝없이 늘 수 있다 — 빗장을 둔다
+    if (!st) { st = compile(sql); if (kept.size < 500) kept.set(sql, st); }
+    return st;
+  };
 }
 
 
@@ -426,7 +459,7 @@ export function linkGuest(guestId: string, p: {
 /* ── 아이디·비밀번호 계정 ──────────────────────────────────
    되찾을 길(메일 인증 같은 것)을 두지 않았으므로, 비밀번호를 잊으면 그 계정에는
    다시 못 들어간다. 화면에서 그렇게 알린다 — 있는 척하는 것보다 낫다. */
-export const PW_PROVIDER = "password";
+const PW_PROVIDER = "password";
 
 /** 그 아이디가 이미 쓰이고 있으면 null */
 export function createPasswordUser(loginId: string, hash: string): User | null {
@@ -566,7 +599,7 @@ export const canEdit = (t: TakeMode): boolean => t === "edit";
 
     함께 고치기는 "볼 수 있는 사람 = 고칠 수 있는 사람" 이다. 볼 사람을 이미 골라 두었는데
     고칠 사람을 또 고르게 하면 두 목록이 어긋날 자리가 생긴다. */
-export function folderMembers(folderId: string): { owner: string; all: string[] } | null {
+function folderMembers(folderId: string): { owner: string; all: string[] } | null {
   const f = db.prepare(`SELECT user_id, share_mode, take_mode
     FROM folder WHERE id = ?`).get(folderId) as any;
   if (!f || !canEdit((f.take_mode ?? "copy") as TakeMode)) return null;
@@ -585,7 +618,7 @@ export function folderMembers(folderId: string): { owner: string; all: string[] 
 }
 
 /** 내가 이 폴더에 작품을 넣고 뺄 수 있는가 */
-export const mayFile = (userId: string, folderId: string): boolean => {
+const mayFile = (userId: string, folderId: string): boolean => {
   const f = db.prepare("SELECT user_id, mirror_owner FROM folder WHERE id = ?").get(folderId) as any;
   if (!f) return false;
   /* **비추는 폴더에는 담지 않는다.** 그건 남의 폴더를 보여 주는 껍데기일 뿐이라,
@@ -620,21 +653,24 @@ function folderRows(where: string, ...args: unknown[]): Folder[] {
   const pairs = db.prepare(
     `SELECT folder_id, viewer_id, state FROM folder_share WHERE folder_id IN (${marks})`)
     .all(...rows.map(r => r.id)) as { folder_id: string; viewer_id: string; state: string }[];
-  const by = new Map<string, string[]>();
-  for (const x of pairs) (by.get(x.folder_id) ?? by.set(x.folder_id, []).get(x.folder_id)!).push(x.viewer_id);
+  /* 이름만 필요한 곳(share.with)과 상태까지 필요한 곳(people)이 있는데 밑감은 같은 줄이다.
+     한 번만 모으고 이름 쪽은 거기서 뽑아 쓴다. */
   const st = new Map<string, { id: string; state: string }[]>();
   for (const x of pairs)
     (st.get(x.folder_id) ?? st.set(x.folder_id, []).get(x.folder_id)!)
       .push({ id: x.viewer_id, state: x.state ?? "ok" });
-  return rows.map(r => ({
-    id: r.id, name: r.name, emoji: r.emoji, ord: r.ord,
-    share: { mode: (r.share_mode ?? "none") as ShareMode, with: by.get(r.id) ?? [] },
-    take: (r.take_mode ?? "copy") as TakeMode,
+  return rows.map(r => {
     /* 함께 고치는 폴더의 참여자와 그 상태. 주인이 「공유자」 창에서 보는 값이다. */
-    people: st.get(r.id) ?? [],
-    mirror: r.mirror_owner && r.mirror_folder
-      ? { owner: r.mirror_owner, folder: r.mirror_folder } : null,
-  }));
+    const people = st.get(r.id) ?? [];
+    return {
+      id: r.id, name: r.name, emoji: r.emoji, ord: r.ord,
+      share: { mode: (r.share_mode ?? "none") as ShareMode, with: people.map(p => p.id) },
+      take: (r.take_mode ?? "copy") as TakeMode,
+      people,
+      mirror: r.mirror_owner && r.mirror_folder
+        ? { owner: r.mirror_owner, folder: r.mirror_folder } : null,
+    };
+  });
 }
 
 export const listFolders = (userId: string): Folder[] => folderRows("user_id = ?", userId);
@@ -662,11 +698,28 @@ export function createFolder(userId: string, p: {
    작품은 그 사람 목록에 그대로 남는다 — 빠지는 것은 이 묶음과의 이음줄뿐이다.
    그러지 않으면 주인은 이제 남이 된 사람의 작품을 계속 보게 되고, 나간 사람은 뺄
    권한이 없어 치우지도 못한다. 둘 다 손댈 수 없는 줄이 남는 셈이다. */
-export function dropContributions(folderId: string, userIds: string[]): number {
+function dropContributions(folderId: string, userIds: string[]): number {
   if (!userIds.length) return 0;
   const marks = userIds.map(() => "?").join(",");
   return db.prepare(`DELETE FROM work_folder WHERE folder_id = ? AND work_id IN (
       SELECT id FROM work WHERE user_id IN (${marks}))`).run(folderId, ...userIds).changes;
+}
+
+/* 함께 쓰는 폴더에 **남이 걸어 둔 작품**을 통째로 읽는다.
+
+   한때 부르는 쪽에서 번호만 뽑아 놓고 한 줄씩 getWork 로 다시 물었다 — 작품 한 편에
+   질의 두 번이고, 그렇게 얻은 폴더 목록은 곧바로 덮어써 버려 온전히 버려지는 일이었다.
+   첫 질의가 이미 줄 전체를 들고 있으니 그것으로 만든다. */
+export function contributedWorks(folderId: string, who: { not?: string; only?: string }):
+  (Work & { owner: string; ownerName: string })[] {
+  const rows = db.prepare(`SELECT w.*, u.display_name AS who FROM work w
+    JOIN work_folder wf ON wf.work_id = w.id
+    JOIN user u ON u.id = w.user_id
+    WHERE wf.folder_id = ? AND w.state = 'active' AND w.user_id ${who.only ? "=" : "<>"} ?
+    ORDER BY w.added_at DESC`).all(folderId, who.only ?? who.not) as any[];
+  /* 폴더 목록은 비워 둔다 — 부르는 쪽이 제 폴더 번호를 달아 주므로, 여기서 물어봐야
+     그 자리에서 버려질 값이다. */
+  return rows.map(r => ({ ...toWork(r, []), owner: r.user_id, ownerName: r.who ?? "이름 없음" }));
 }
 
 /** 그 폴더에 무언가 걸어 둔 사람들 — 주인은 빼고 */
@@ -774,11 +827,17 @@ export type Friend = { id: string; displayName: string; since: number;
                        sharedFolders: number; starred: boolean };
 
 export function listFriends(userId: string): Friend[] {
-  // 세는 것은 "그 친구가 공개한 폴더" 가 아니라 **내게 보이는 폴더** 다 —
-  // 고른 친구에게만 연 폴더는 나에게 안 보일 수 있다.
+  /* 세는 것은 "그 친구가 공개한 폴더" 가 아니라 **내가 열어 봤을 때 실제로 서는 폴더** 다.
+     조건이 sharedView 와 「친구 폴더 보기」 길목의 그것과 한 줄씩 맞아야 한다 —
+     어긋나면 목록에는 5개라 적어 놓고 눌러 보면 4개가 나온다.
+
+     ① 고른 친구에게만 연 폴더는 짝이 있는 사람에게만 보이고,
+     ② 비추고 있는 폴더는 다시 공개하지 않으며(받은 것을 또 남에게 넘기지 않는다),
+     ③ 함께 쓰는 폴더는 이미 상대의 폴더 탭에 제 줄로 서 있어 여기 또 나오지 않는다. */
   return (db.prepare(`
     SELECT u.id, u.display_name, f.created_at, f.starred,
-           (SELECT COUNT(*) FROM folder fo WHERE fo.user_id = u.id AND (
+           (SELECT COUNT(*) FROM folder fo WHERE fo.user_id = u.id
+              AND fo.mirror_folder IS NULL AND fo.take_mode <> 'edit' AND (
               fo.share_mode = 'all'
               OR (fo.share_mode = 'some'
                   AND EXISTS (SELECT 1 FROM folder_share fs

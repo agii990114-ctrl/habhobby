@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { extname, join, normalize, resolve as pathResolve } from "node:path";
 import {
   db, kvGet, kvSet, listWorks, getWork, setWorkFolders, listFolders, newId,
-  deleteUser, upsertUser, LOCAL_USER, listFriends, countFriends, starFriend,
+  deleteUser, upsertUser, listFriends, countFriends, starFriend, contributedWorks,
   addFriend, removeFriend, areFriends,
   createGuest, linkGuest, isGuest,
   createPasswordUser, passwordUser, linkGuestPassword, markLogin,
@@ -194,18 +194,11 @@ function withMirrors(me: string): { folders: any[]; works: any[] } {
   /* 내가 주인인 **함께 고치는 폴더**에는 친구들이 넣은 작품도 들어 있다.
      내 표에는 없으므로 따로 모아 온다 — 남의 것이라 고칠 수 없고 달력에도 올리지 않는다. */
   for (const f of folders.filter(x => !x.mirror && canEdit(x.take))) {
-    const rows = db.prepare(`SELECT w.*, u.display_name AS who FROM work w
-      JOIN work_folder wf ON wf.work_id = w.id
-      JOIN user u ON u.id = w.user_id
-      WHERE wf.folder_id = ? AND w.user_id <> ? AND w.state = 'active'
-      ORDER BY w.added_at DESC`).all(f.id, me) as any[];
-    for (const r of rows) {
-      const w = getWork(r.user_id, r.id);
-      if (!w) continue;
+    for (const w of contributedWorks(f.id, { not: me })) {
       // 내가 이미 담아 둔 것이면 내 것이 이긴다 — 비추는 폴더와 같은 규칙이다
       const mine = mineByKey.get(keyOf(w));
       if (mine) { if (!mine.folders.includes(f.id)) mine.folders = [...mine.folders, f.id]; continue; }
-      works.push(asGuest(w, f.id, r.user_id, r.who ?? "이름 없음", f.take, true));
+      works.push(asGuest(w, f.id, w.owner, w.ownerName, f.take, true));
     }
   }
 
@@ -372,14 +365,12 @@ async function copyCover(srcUrl: string | null, mineId: string): Promise<string 
 function takable(me: string, other: string): Map<string, Work> {
   const out = new Map<string, Work>();
   const view = sharedView(other, me);
-  for (const w of view.works) {
-    if (view.folders.some(f => w.folders.includes(f.id) && canCopy(f.take))) out.set(w.id, w);
-  }
-  for (const f of listFolders(me).filter(x => !x.mirror && canEdit(x.take))) {
-    const rows = db.prepare(`SELECT w.id FROM work w JOIN work_folder wf ON wf.work_id = w.id
-      WHERE wf.folder_id = ? AND w.user_id = ? AND w.state = 'active'`).all(f.id, other) as any[];
-    for (const r of rows) { const w = getWork(other, r.id); if (w) out.set(w.id, w); }
-  }
+  // 담아가도 좋다고 열어 둔 폴더를 먼저 갈라 둔다 — 작품마다 폴더 목록을 훑지 않게
+  const open = new Set(view.folders.filter(f => canCopy(f.take)).map(f => f.id));
+  for (const w of view.works) if (w.folders.some(id => open.has(id))) out.set(w.id, w);
+
+  for (const f of listFolders(me).filter(x => !x.mirror && canEdit(x.take)))
+    for (const w of contributedWorks(f.id, { only: other })) out.set(w.id, w);
   return out;
 }
 
@@ -445,27 +436,42 @@ async function assetVersion(): Promise<string> {
   return (assetV = h.digest("hex").slice(0, 8));
 }
 
+/* 화면을 이루는 파일들은 이미지에 구워져 있어 도는 동안 바뀌지 않는다. 그런데 부를 때마다
+   stat 하고 readFile 하고 있었다 — app.js 만 160KB 라, 사람이 앱을 한 번 열 때마다 그만큼을
+   디스크에서 다시 퍼 올린 셈이다. 판 번호(assetV)를 한 번만 셈하는 것과 같은 이치로,
+   내용도 한 번만 읽어 들고 있는다.
+
+   index.html 은 판 번호를 박아 넣은 뒤의 모습으로 갈무리한다 — 그 치환도 매번 할 일이 아니다.
+   data/ 아래 표지 그림은 사용자가 올리고 지우는 것이라 여기 오지 않는다(따로 다룬다). */
+const served = new Map<string, { body: Buffer; type: string }>();
+
 async function serveStatic(req: IncomingMessage, res: ServerResponse, urlPath: string): Promise<boolean> {
   const rel = normalize(decodeURIComponent(urlPath)).replace(/^([/\\])+/, "");
   const file = join(PUBLIC, rel === "" ? "index.html" : rel);
   if (!file.startsWith(PUBLIC)) return false;           // 경로 탈출 차단
-  try {
-    const s = await stat(file);
-    if (!s.isFile()) return false;
-    let body = await readFile(file);
-    if (extname(file) === ".html") {
-      const v = await assetVersion();
-      body = Buffer.from(body.toString("utf8")
-        .replace(/\/(app\.js|styles\.css)"/g, `/$1?v=${v}"`), "utf8");
-    }
-    res.writeHead(200, {
-      "Content-Type": MIME[extname(file)] ?? "application/octet-stream",
-      "Content-Length": body.length,
-      "Cache-Control": "no-cache",
-    });
-    res.end(body);
-    return true;
-  } catch { return false; }
+
+  let hit = served.get(file);
+  if (!hit) {
+    try {
+      const s = await stat(file);
+      if (!s.isFile()) return false;
+      let body = await readFile(file);
+      if (extname(file) === ".html") {
+        const v = await assetVersion();
+        body = Buffer.from(body.toString("utf8")
+          .replace(/\/(app\.js|styles\.css)"/g, `/$1?v=${v}"`), "utf8");
+      }
+      hit = { body, type: MIME[extname(file)] ?? "application/octet-stream" };
+      served.set(file, hit);
+    } catch { return false; }
+  }
+  res.writeHead(200, {
+    "Content-Type": hit.type,
+    "Content-Length": hit.body.length,
+    "Cache-Control": "no-cache",
+  });
+  res.end(hit.body);
+  return true;
 }
 
 async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: User): Promise<boolean> {

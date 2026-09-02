@@ -1267,7 +1267,6 @@ function openFolderSheet(id) {
 
   if (f) {
     // 전체·미분류는 진짜 폴더가 아니라 고칠 것이 없다
-    const head = sheet.querySelector(".sheet-head");
     const mk = (name, label, cls, onclick) => {
       const b = document.createElement("button");
       b.className = "icon-btn" + (cls ? " " + cls : "");
@@ -1291,18 +1290,47 @@ function openFolderSheet(id) {
       sheet.querySelector(".sh-t h3").append(" ", who);
     }
 
-    /* 오른쪽에는 **이 폴더에 하는 일** 둘. 넣기가 먼저, 고치기가 뒤 —
-       자주 하는 쪽이 앞이다. */
-    /* 비추기만 하는 폴더에는 넣을 수 없다 — 그건 남의 폴더를 보여 주는 껍데기다.
-       함께 쓰는 폴더만 예외다(canEdit): 그때는 원본 폴더에 걸린다.
-       누를 수 있는데 아무 일도 안 일어나는 버튼은 두지 않는다. */
+    /* 즐겨찾기는 **폴더를 열어 놓고** 켠다. 자주 여는 폴더인지는 들어와 보고 아는 것이지
+       목록을 훑으며 정하는 것이 아니고, 목록의 줄마다 별을 달면 이름 쓸 자리가 좁아진다.
+       자리는 닫기 버튼 옆 — 없는 기기(손가락)에서는 그 자리를 그대로 물려받는다. */
+    const fav = document.createElement("button");
+    fav.className = "star sheet-fav";
+    fav.title = "즐겨찾기";
+    fav.setAttribute("aria-label", "즐겨찾기");
+    const paintFav = () => {
+      fav.setAttribute("aria-pressed", !!f.starred);
+      fav.innerHTML = icon("star", f.starred ? "on" : "");
+    };
+    paintFav();
+    fav.onclick = () => {
+      f.starred = !f.starred;
+      paintFav(); render();                  // 목록의 차례가 바로 바뀐다
+      api("PUT", `/api/folders/${f.id}/star`, { starred: f.starred })
+        .catch(err => { f.starred = !f.starred; paintFav(); render(); toast(err.message); });
+    };
+    sheet.querySelector(".sheet-top").append(fav);
+
+    /* **이 폴더에 하는 일** 둘은 아래 좌우로 내린다 — 캘린더 탭의 ＋ 와 추가 목록이 앉는
+       그 자리다. 손이 닿기 쉽고, 앱 전체에서 같은 자리에 같은 뜻이 선다.
+
+       비추기만 하는 폴더에는 넣을 수 없다 — 그건 남의 폴더를 보여 주는 껍데기다.
+       함께 쓰는 폴더만 예외다(canEdit): 그때는 원본 폴더에 걸린다. */
+    const fab = (name, label, cls, onclick) => {
+      const b = document.createElement("button");
+      b.className = "fab in-sheet" + (cls ? " " + cls : "");
+      b.title = label;
+      b.setAttribute("aria-label", label);
+      b.innerHTML = icon(name);
+      b.onclick = onclick;
+      sheet.append(b);
+    };
     if (!f.mirror || f.canEdit)
-      head.append(mk("plus", "작품 넣기", "", () => openFolderAdd(f, () => openFolderSheet(id))));
-    head.append(mk("sliders", "폴더 설정", "", () => openFolderForm(f, f2 => {
+      fab("plus", "작품 넣기", "", () => openFolderAdd(f, () => openFolderSheet(id)));
+    fab("sliders", "폴더 설정", "right", () => openFolderForm(f, f2 => {
       closeSheet();
       render();
       if (f2) openFolderSheet(f2.id);        // 고치고 나면 보던 폴더로 돌아온다
-    })));
+    }));
   }
 
   wireWorkPick(sheet.querySelector(".sheet-body"), () => openFolderSheet(id));
@@ -1872,11 +1900,6 @@ function folderRow(fid, emoji, name, f) {
           : f?.take === "edit" ? ` <i class="mtag">공유폴더 · 오너</i>` : ""}</b><span>${
         f?.broken ? esc(f.broken) : `${worksIn(fid).length}개`}</span></span>
       ${real ? "" : `<span class="chev">${icon("right")}</span>`}</button>
-    ${/* 자주 여는 폴더에 별을 켠다 — 켠 것은 목록 맨 위로 온다. 비추는 폴더에도 켤 수
-         있다: 그건 주인의 값이 아니라 **내 목록의 차례**를 정하는 나만의 표시다. */""}
-    ${real && !folderSel ? `<button class="star" data-fstar="${fid}"
-      aria-pressed="${!!f?.starred}" title="즐겨찾기"
-      aria-label="${esc(name)} 즐겨찾기">${icon("star", f?.starred ? "on" : "")}</button>` : ""}
     ${real && !folderSel ? `<button class="folder-more" data-folder-edit="${fid}"
       title="폴더 설정" aria-label="${esc(name)} 설정">${icon("dots")}</button>` : ""}
   </div>`;
@@ -3284,7 +3307,11 @@ function openFolderForm(existing, after) {
     }
     const b = e.target.closest("button[data-e]"); if (!b) return;
     emoji = b.dataset.e;
-    emoIn.value = "";                              // 견본을 골랐으니 직접 넣은 값은 비운다
+    /* 견본을 골랐으면 직접 넣던 칸은 닫는다 — 값을 비워 두고 칸만 열어 두면
+       무엇이 골라져 있는지 두 곳을 견줘 봐야 한다. */
+    emoIn.value = "";
+    ownBox.hidden = true;
+    moreBtn.setAttribute("aria-pressed", false);
     markEmoji();
   });
 
@@ -4772,17 +4799,6 @@ screenEl.addEventListener("click", e => {
   /* 갈래 고르개도 .chip 이다 — **매체 거르개보다 먼저** 봐야 한다.
      아래가 먼저 잡으면 dataset.filter 가 없어 filter 가 undefined 가 되고,
      갈래는 갈래대로 안 바뀌면서 목록만 통째로 비어 보인다. */
-  const fs2 = e.target.closest("[data-fstar]");
-  if (fs2) {
-    const f = folders.find(x => x.id === fs2.dataset.fstar);
-    if (!f) return;
-    f.starred = !f.starred;
-    /* 서버를 기다리지 않고 먼저 보여 준다. 실패하면 되돌린다 — 별 하나에 화면이
-       멈춰 있을 이유가 없다. */
-    render();
-    return api("PUT", `/api/folders/${f.id}/star`, { starred: f.starred })
-      .catch(err => { f.starred = !f.starred; render(); toast(err.message); });
-  }
   const k = e.target.closest("[data-fkind]");
   if (k) { fkind = k.dataset.fkind; return render(); }
   const c = e.target.closest("[data-filter]"); if (c) { filter = c.dataset.filter; return render(); }

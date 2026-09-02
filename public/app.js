@@ -3904,14 +3904,20 @@ async function openFriends() {
   if (!me.displayName) { openNameForm(openFriends); return; }
   try { await loadFriends(); } catch (e) { toast(e.message); return; }
   let query = "", onlyStar = false;
+  /* 여럿을 한 번에 끊는 자리. null 이면 그냥 보는 중이고, Set 이면 고르는 중이다 —
+     폴더 목록의 folderSel 과 같은 규칙이라 두 화면이 같은 손짓으로 움직인다. */
+  let sel = null;
 
   const row = f => `<div class="uf-row">
+    ${sel ? `<label class="arch-pick"><input type="checkbox" data-fpick="${esc(f.id)}"
+      ${sel.has(f.id) ? "checked" : ""} aria-label="${esc(f.displayName)} 선택"></label>` : ""}
     <button class="uf-item" data-friend="${esc(f.id)}">
       <span class="thumb ph">${esc(f.displayName.slice(0, 1))}</span>
       <span class="ub"><b>${esc(f.displayName)}</b>
         <span>${f.sharedFolders ? `나에게 공개한 폴더 ${f.sharedFolders}개` : "나에게 공개한 폴더 없음"}</span></span>
-      <span class="chev">${icon("right")}</span></button>
-    ${starHtml(f)}</div>`;
+      ${/* 고르는 중에는 화살표도 별도 치운다 — 지금 할 수 있는 일은 고르는 것뿐이다 */""}
+      ${sel ? "" : `<span class="chev">${icon("right")}</span>`}</button>
+    ${sel ? "" : starHtml(f)}</div>`;
 
   /* 목록은 **첫소리 차례**다. 오른쪽 ㄱㄴㄷ 띠를 짚어 뛰려면 차례가 그 띠와 같아야 한다 —
      별 켠 사람을 위로 올리던 것은 여기서 놓는다. 자주 보는 사람만 보려면 ★ 단추가 있다. */
@@ -3941,6 +3947,45 @@ async function openFriends() {
 
   const starred = () => friends.filter(f => f.starred).length;
 
+  /* 지금 **화면에 서 있는** 사람들. 찾기나 즐겨찾기로 좁혀 놓았으면 그만큼만이다 —
+     「전체 선택」이 안 보이는 사람까지 집으면 못 본 채로 끊게 된다. */
+  const shown = () => {
+    const q = query.trim().toLowerCase();
+    let list = onlyStar ? friends.filter(f => f.starred) : friends;
+    return q ? list.filter(f => f.displayName.toLowerCase().includes(q)) : list;
+  };
+
+  /** 목록 위 줄 — 찾기와 즐겨찾기는 늘 있고, 고르는 중에는 셈과 실행이 아래 붙는다.
+
+      **고르는 중에도 찾기를 남긴다.** 좁혀 놓은 채로 고르기에 들어가면 목록이 짧은데,
+      그 까닭인 찾기 칸까지 사라지면 왜 두 명뿐인지 알 길이 없다. 스물다섯 명에서 한 명을
+      끊으려고 이름을 치는 것도 여기서 하는 일이다. */
+  const barHtml = () => {
+    if (!friends.length) return "";
+    const top = `<div class="fr-bar">
+      ${friends.length > 6 ? searchHtml("이름으로 찾기", query) : ""}
+      <button class="mini-btn" data-only-star aria-pressed="${onlyStar}"
+        >${icon("star")} 즐겨찾기</button>
+      ${sel ? "" : `<button class="mini-btn" data-fsel>선택</button>`}
+    </div>`;
+    return top + `<div data-fr-bulk>${bulkHtml()}</div>`;
+  };
+
+  /* 셈이 바뀔 때 갈아 끼우는 것은 **이 조각뿐**이다 — 위의 찾기 칸까지 함께 다시 그리면
+     이름을 치다가 네모칸을 하나 누른 순간 치던 글자가 끊긴다. */
+  const bulkHtml = () => {
+    if (!sel) return "";
+    const vis = shown();
+    const all = vis.length > 0 && vis.every(f => sel.has(f.id));
+    return `<div class="bulk">
+      <b>${sel.size}명 선택</b>
+      ${vis.length ? `<button class="mini-btn" data-fsel-all>${all ? "전체 해제" : "전체 선택"}</button>` : ""}
+      <span class="bulk-act">
+        <button class="mini-btn danger" data-fsel-del${sel.size ? "" : " disabled"}>친구 끊기</button>
+        <button class="mini-btn" data-fsel-off>완료</button>
+      </span></div>`;
+  };
+
   /* 초대 링크는 맨 위에 둔다. 아래에 있으면 친구가 쌓일수록 손이 멀어지는데,
      이 화면에서 새로 하는 일은 그것 하나뿐이다. */
   openSheet(`
@@ -3949,10 +3994,7 @@ async function openFriends() {
     <button class="btn primary" style="width:100%" data-invite>초대 링크 만들기</button>
     <div class="rest" style="text-align:left;padding:7px 2px 12px">
       링크를 받은 사람만 친구가 될 수 있습니다. 아이디로 검색해 아무나 추가하는 방식이 아닙니다.</div>
-    ${friends.length ? `<div class="fr-bar">
-      ${friends.length > 6 ? searchHtml("이름으로 찾기") : ""}
-      <button class="mini-btn" data-only-star aria-pressed="false">${icon("star")} 즐겨찾기</button>
-    </div>` : ""}
+    <div data-fr-bar>${barHtml()}</div>
     <div class="fr-wrap">
       <div class="fr-list" data-fr-list>${rows()}</div>
       ${friends.length > 12 ? railHtml() : ""}
@@ -3986,6 +4028,76 @@ async function openFriends() {
   const repaint = () => { list.innerHTML = rows(); fitPad(); };
   fitPad();
 
+  /* 줄 위 칸을 다시 그린다. **찾기 칸을 살려 두려면** 고르는 중일 때만 통째로 갈고,
+     평소에는 손대지 않는다 — 치는 도중에 칸이 사라지면 한글이 깨진다. */
+  const bar = sheet.querySelector("[data-fr-bar]");
+  // 갈래가 바뀔 때만 통째로. 셈만 바뀌면 아래쪽 조각만 간다.
+  const repaintBar = () => { bar.innerHTML = barHtml(); wireBar(); };
+  const repaintBulk = () => {
+    const box = bar.querySelector("[data-fr-bulk]");
+    if (!box) return;
+    box.innerHTML = bulkHtml();
+    wireBulk();
+  };
+
+  function wireBulk() {
+    const off = bar.querySelector("[data-fsel-off]");
+    if (off) off.onclick = () => { sel = null; repaintBar(); repaint(); };
+    const all = bar.querySelector("[data-fsel-all]");
+    if (all) all.onclick = () => {
+      const vis = shown();
+      if (vis.every(f => sel.has(f.id))) for (const f of vis) sel.delete(f.id);
+      else for (const f of vis) sel.add(f.id);
+      repaintBulk(); repaint();
+    };
+    const del = bar.querySelector("[data-fsel-del]");
+    if (del) del.onclick = cutFriends;
+  }
+
+  function wireBar() {
+    wireBulk();
+    const on = bar.querySelector("[data-fsel]");
+    if (on) on.onclick = () => { sel = new Set(); repaintBar(); repaint(); };
+
+    /* 찾기 칸을 치는 동안에는 **줄 위 칸을 다시 그리지 않는다** — 갈아 끼우면 치던 칸이
+       사라졌다 새로 생겨서 한글처럼 모아 쓰는 글자가 깨진다. 갈아 끼우는 것은 목록뿐이다. */
+    const q2 = bar.querySelector(".arch-q");
+    if (q2) q2.addEventListener("input", () => { query = q2.value; repaint(); });
+
+    const st = bar.querySelector("[data-only-star]");
+    if (st) {
+      const paintStar = () => {
+        st.classList.toggle("on", onlyStar);
+        st.setAttribute("aria-pressed", onlyStar);
+        st.innerHTML = onlyStar ? icon("star", "on") + ` 즐겨찾기 ${starred()}명`
+          : icon("star") + " 즐겨찾기";
+      };
+      paintStar();
+      // 제 글자만 고쳐 쓴다 — 옆의 찾기 칸을 함께 갈아 끼울 이유가 없다
+      st.onclick = () => { onlyStar = !onlyStar; paintStar(); repaint(); };
+    }
+  }
+
+  /** 고른 사람들을 한꺼번에 끊는다 */
+  const cutFriends = guard(async () => {
+    const ids = [...sel];
+    if (!ids.length) return;
+    const names = ids.map(id => friends.find(f => f.id === id)?.displayName).filter(Boolean);
+    const yes = await askSure({
+      title: `${ids.length}명과 친구를 끊을까요?`,
+      ok: "친구 끊기", back: openFriends,
+      body: `${esc(names.slice(0, 3).join(", "))}${names.length > 3 ? ` 외 ${names.length - 3}명` : ""}과
+        서로의 공개 폴더가 보이지 않게 됩니다. 담아 둔 작품은 그대로 남습니다.`,
+    });
+    if (!yes) return;
+    for (const id of ids) await api("DELETE", `/api/friends/${id}`);
+    // 보고 있던 사람을 끊었으면 그 폴더를 계속 둘 수 없다
+    if (viewing && ids.includes(viewing.id)) viewing = null;
+    await reload(); render();
+    toast(`${ids.length}명과 친구를 끊었습니다`);
+    openFriends();
+  });
+
   /* 띠를 짚거나 끌면 그 첫소리의 머리글로 뛴다. 누르는 것과 끄는 것을 가르지 않는다 —
      짚은 자리가 곧 가려는 곳이라 손가락이 지나가는 대로 따라가면 된다. */
   const rail = sheet.querySelector("[data-cho-rail]");
@@ -4017,20 +4129,34 @@ async function openFriends() {
     rail.addEventListener("pointerup", off);
     rail.addEventListener("pointercancel", off);
   }
-  const qEl = sheet.querySelector(".arch-q");
-  if (qEl) qEl.addEventListener("input", () => { query = qEl.value; repaint(); });
+  wireBar();
 
-  const only = sheet.querySelector("[data-only-star]");
-  if (only) only.onclick = () => {
-    onlyStar = !onlyStar;
-    only.setAttribute("aria-pressed", onlyStar);
-    only.classList.toggle("on", onlyStar);
-    only.innerHTML = onlyStar ? icon("star", "on") + ` 즐겨찾기 ${starred()}명`
-      : icon("star") + " 즐겨찾기";
-    repaint();
-  };
+  /* 고르는 손짓은 **guard 를 거치지 않는다.**
+
+     guard 는 서버를 기다리는 동안 두 번 눌리지 않게 막는 빗장인데, 여기서 하는 일은
+     Set 에 넣고 빼는 것뿐이라 기다릴 것이 없다. 그런데도 씌워 두었더니 목록을 빠르게
+     톡톡 짚을 때 **두 번째 손짓이 통째로 버려졌다** — 네모칸은 브라우저가 이미 켜 놓아
+     체크는 보이는데 셈에는 안 들어가, 골랐다고 믿은 사람이 안 골린 채로 끊게 된다.
+
+     고르는 중에는 네모칸이든 줄이든 같은 뜻이다 — 그때 열어 볼 일은 없다. */
+  list.addEventListener("click", e => {
+    if (!sel) return;
+    const pick = e.target.closest("[data-fpick]") ?? e.target.closest("[data-friend]");
+    if (!pick) return;
+    const id = pick.dataset.fpick ?? pick.dataset.friend;
+    const on = !sel.has(id);
+    on ? sel.add(id) : sel.delete(id);
+    /* **그 줄의 네모칸만 고쳐 쓴다.** 목록을 통째로 다시 그리면 이백 명이 매번 새로
+       그려지고, 무엇보다 지금 짚고 있는 줄이 그 자리에서 사라졌다 새로 생긴다 —
+       손가락이 목록을 훑으며 톡톡 짚을 때 두 번째부터 헛손질이 된다.
+       바뀌는 것은 네모 하나와 위의 셈뿐이다. */
+    const box = pick.closest(".uf-row")?.querySelector("[data-fpick]");
+    if (box) box.checked = on;
+    repaintBulk();                       // 찾기 칸은 건드리지 않는다
+  });
 
   list.addEventListener("click", guard(async e => {
+    if (sel) return;                     // 고르는 중은 위에서 맡는다
     const st = e.target.closest("[data-star]");
     if (st) {
       const f = friends.find(x => x.id === st.dataset.star);

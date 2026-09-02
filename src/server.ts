@@ -15,7 +15,7 @@ import {
   getFolder, createFolder, canCopy, canMirror, canEdit, seenByMe, markSeen,
   folderInvites, acceptFolder, declineFolder, leaveFolder,
   noticeBreak, folderNotices, readNotices, sweepNotices, inviteToFolder, unlinkFromFolder,
-  cleanName, setDisplayName,
+  cleanName, setDisplayName, starFolder,
   type Work, type User, type ShareMode, type TakeMode,
 } from "./db.ts";
 import {
@@ -828,6 +828,17 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     const id = seg[2];
     // 비추는 폴더는 내가 고칠 것이 없다 — 이름도 아이콘도 주인 것이다
     const mine = getFolder(user.id, id);
+
+    /* 별은 **비추는 폴더에도** 켤 수 있다 — 이름·아이콘과 달리 그건 주인의 값이 아니라
+       내 목록의 차례를 정하는 나만의 표시다. 그래서 아래 미러링 빗장보다 앞에 둔다. */
+    if (seg[3] === "star" && m === "PUT") {
+      const b = await readJson(req);
+      const ok = starFolder(user.id, id, !!b.starred);
+      json(res, ok ? 200 : 404, ok ? { ok: true, starred: !!b.starred }
+        : { ok: false, reason: "없는 폴더입니다." });
+      return true;
+    }
+
     if (mine?.mirror && m === "PATCH") {
       json(res, 403, { ok: false, reason: "비추는 폴더는 고칠 수 없습니다." });
       return true;

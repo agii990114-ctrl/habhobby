@@ -291,6 +291,9 @@ try { db.exec("ALTER TABLE folder ADD COLUMN take_mode TEXT NOT NULL DEFAULT 'co
 /* 남의 폴더를 비추고 있는 폴더. 둘 다 비어 있으면 내 폴더다.
    작품을 베껴 담지 않고 **읽을 때마다 주인 것을 그대로 가져다 보여 준다** —
    그래서 주인이 고치면 나에게도 바뀌고, 나는 고칠 수 없다. */
+/* 자주 여는 폴더에 별을 켠다. 친구의 별과 같은 뜻이다 — 남과 나누는 값이 아니라
+   **내 목록의 차례**를 정하는 나만의 표시라, 비추는 폴더에 켜도 주인은 모른다. */
+try { db.exec("ALTER TABLE folder ADD COLUMN starred INTEGER NOT NULL DEFAULT 0"); } catch { }
 try { db.exec("ALTER TABLE folder ADD COLUMN mirror_owner  TEXT"); } catch { }
 try { db.exec("ALTER TABLE folder ADD COLUMN mirror_folder TEXT"); } catch { }
 /* 함께 고치는 폴더에 이름이 올랐다고 곧바로 참여자가 되지는 않는다 — **수락해야** 한다.
@@ -739,6 +742,8 @@ const mayFile = (userId: string, folderId: string): boolean => {
 
 export type Folder = {
   id: string; name: string; emoji: string; ord: number;
+  /** 자주 여는 폴더 — 내 목록에서 위로 온다. 남에게는 보이지 않는다. */
+  starred: boolean;
   share: { mode: ShareMode; with: string[] };
   take: TakeMode;
   /** 함께 고치는 폴더에 이름이 오른 사람들과 그 상태 (pending · ok) */
@@ -750,7 +755,7 @@ export type Folder = {
 /* 폴더를 읽는 길은 하나다. 목록이든 한 줄이든 조건만 다르다 —
    한 줄 보려고 목록을 통째로 훑고 버리는 일이 없게. */
 function folderRows(where: string, ...args: unknown[]): Folder[] {
-  const rows = db.prepare(`SELECT id, name, emoji, ord, share_mode, take_mode,
+  const rows = db.prepare(`SELECT id, name, emoji, ord, share_mode, take_mode, starred,
       mirror_owner, mirror_folder FROM folder WHERE ${where} ORDER BY ord, rowid`)
     .all(...args) as any[];
   if (!rows.length) return [];
@@ -768,7 +773,7 @@ function folderRows(where: string, ...args: unknown[]): Folder[] {
     /* 함께 고치는 폴더의 참여자와 그 상태. 주인이 「공유자」 창에서 보는 값이다. */
     const people = st.get(r.id) ?? [];
     return {
-      id: r.id, name: r.name, emoji: r.emoji, ord: r.ord,
+      id: r.id, name: r.name, emoji: r.emoji, ord: r.ord, starred: !!r.starred,
       share: { mode: (r.share_mode ?? "none") as ShareMode, with: people.map(p => p.id) },
       take: (r.take_mode ?? "copy") as TakeMode,
       people,
@@ -781,6 +786,11 @@ function folderRows(where: string, ...args: unknown[]): Folder[] {
 export const listFolders = (userId: string): Folder[] => folderRows("user_id = ?", userId);
 export const getFolder = (userId: string, id: string): Folder | null =>
   folderRows("user_id = ? AND id = ?", userId, id)[0] ?? null;
+
+/** 별을 켜고 끈다. 내 폴더에만 켤 수 있다 — 남의 폴더 줄은 애초에 내 표에 없다. */
+export const starFolder = (userId: string, folderId: string, on: boolean): boolean =>
+  !!db.prepare("UPDATE folder SET starred = ? WHERE id = ? AND user_id = ?")
+    .run(on ? 1 : 0, folderId, userId).changes;
 
 /** 폴더 한 줄 만들기 — 새 폴더 · 담아가기 · 미러링이 모두 이 길로 온다 */
 export function createFolder(userId: string, p: {

@@ -389,6 +389,8 @@
     border-radius: 99px; padding: 1px 6px; margin-left: 4px;
   }
   .folder-row { display: flex; align-items: stretch; gap: 6px; }
+  /* 폴더 줄의 별은 친구 목록의 것과 같은 물건이다 — 설정(⋮) 왼쪽에 선다 */
+  .folder-row .star { flex: none; }
   .folder-row .folder { flex: 1; min-width: 0; }
   .folder-more {
     flex: none; width: 38px; border-radius: 12px; cursor: pointer;

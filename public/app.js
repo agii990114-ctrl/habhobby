@@ -616,8 +616,14 @@ function gridHtml(list, emptyMsg) {
 
    `key` 는 지금 어느 목록을 고르고 있는지다. 다른 목록으로 넘어가면 고른 것을 버린다 —
    폴더 A 에서 셋을 골라 둔 채 폴더 B 를 열었는데 그 셋이 따라오면 엉뚱한 것을 옮긴다. */
+/* `key` 가 null 이면 **고를 수 없는 화면**이다(묶음만 늘어놓은 자리). 그때는 고른 것을
+   버리고 줄도 세우지 않는다 — 카드가 여러 묶음에 흩어져 있어 「전체 해제」가 무엇을
+   가리키는지 알 수 없고, 골라 놓고 다른 묶음으로 넘어가면 보이지 않는 것을 옮기게 된다. */
 let workSel = null, workSelKey = null;
-const workPickAt = key => { if (workSelKey !== key) { workSel = null; workSelKey = key; } };
+const workPickAt = key => {
+  if (key === null) { workSel = null; workSelKey = null; return; }
+  if (workSelKey !== key) { workSel = null; workSelKey = key; }
+};
 
 /** 고르는 중인 카드. 켜진 것은 표지를 덮고 체크를 얹는다 — 「작품 넣기」와 같은 모양이다. */
 const workPickCard = w => `<button class="work pick-work${workSel.has(w.id) ? " on" : ""}"
@@ -637,7 +643,7 @@ const workGridHtml = (list, emptyMsg) => workSel
 
 /** 목록 위 줄 — 고르기 전에는 「선택」, 고르는 중에는 셈과 실행 */
 const workBarHtml = any => {
-  if (!any) return "";
+  if (!any || workSelKey === null) return "";
   if (!workSel)
     return `<div class="fr-pick"><button class="mini-btn" data-wsel>선택</button></div>`;
   return `<div class="bulk">
@@ -898,9 +904,13 @@ function openIdle() {
    훑는 자리(가로 슬라이드)와 다루는 자리(격자)의 모양이 앱 전체에서 같아진다. */
 function openSoon() {
   const g = soonSection();
-  openSheet(gridHtml(g.items, "공개 예정인 작품이 없습니다."),
+  workPickAt("soon");
+  openSheet(`<div data-wbar>${workBarHtml(g.items.length)}</div>
+    ${workGridHtml(g.items, "공개 예정인 작품이 없습니다.")}`,
     { full: true, title: "공개 예정", sub: `${g.items.length}편 · 가까운 날부터` });
+  wireWorkPick(sheet.querySelector(".sheet-body"), openSoon);
   sheet.querySelector(".sheet-body").addEventListener("click", e => {
+    if (workSel) return;                       // 고르는 중에는 열어 볼 일이 없다
     const r = e.target.closest("[data-id]");
     if (r) openWork(r.dataset.id, openSoon);   // 목록 위에 겹친다
   });
@@ -948,6 +958,10 @@ function drawIdle() {
     platformOf(w.platformId).name,
   ].filter(Boolean).join(" · "));
 
+  // 세부 목록에서만 고를 수 있다 — 묶음 화면에는 고를 카드가 흩어져 있다.
+  // **몸을 짓기 전에** 정해야 한다: 줄을 그릴 때 이 값을 본다.
+  workPickAt(sec ? "idle:" + sec.key : null);
+
   const head = (title, back) => `<div class="crumb">
       ${back ? `<button data-idle-back aria-label="돌아가기">${icon("left")}</button>` : ""}
       <h3>${title}</h3></div>`;
@@ -965,17 +979,19 @@ function drawIdle() {
   } else {
     body = head(`<i class="idot" style="background:${sec.color}"></i>${esc(sec.label)}`, true)
       + `<p class="sub">${sec.items.length}편</p>`
-      + gridHtml(sec.items, "비어 있습니다.");
+      + `<div data-wbar>${workBarHtml(sec.items.length)}</div>`
+      + workGridHtml(sec.items, "비어 있습니다.");
   }
-
   openSheet(body);
 
   /* 리스너는 openSheet 이 매번 새로 만드는 자식에 붙인다 — sheet 자체에 붙이면
      다시 그릴 때마다 쌓인다. ‹ 는 머리로 옮겨지고 ☰ 와 카드는 본문에 남는다. */
+  wireWorkPick(sheet.querySelector(".sheet-body"), drawIdle);
   const onClick = e => {
     const a = e.target.closest("[data-idle-all]");
     if (a) { idleSec = a.dataset.idleAll; return drawIdle(); }
     if (e.target.closest("[data-idle-back]")) { idleSec = null; return drawIdle(); }
+    if (workSel) return;                       // 고르는 중에는 열어 볼 일이 없다
     const r = e.target.closest("[data-id]");
     // 다른 목록과 똑같이 작품 화면부터 — 보러갈 수도 있어야 한다.
     // 곁창을 닫지 않고 그 위에 겹친다 — 닫으면 보던 자리로 돌아온다.
@@ -1007,13 +1023,17 @@ function drawDayList(t) {
   const g = dayGrp === null ? null : groups.find(x => x.key === dayGrp);
   if (dayGrp !== null && !g) dayGrp = null;      // 다 정리해 그 묶음이 비었다
 
+  // 세부 목록에서만 고를 수 있다 — 몸을 짓기 전에 정해야 줄이 제대로 선다
+  workPickAt(g ? `day:${t}:${g.key}` : null);
+
   const title = `${d.getMonth() + 1}월 ${d.getDate()}일 (${DOW[d.getDay()]})`;
   const body = !total
     ? `<div class="empty">이 날에는 놓인 작품이 없습니다.</div>`
     : g
       ? `<div class="crumb"><button data-day-back aria-label="돌아가기">${icon("left")}</button>
            <h3>${esc(g.label)}</h3><span class="count">${g.items.length}편</span></div>
-         ${gridHtml(g.items, "비어 있습니다.")}`
+         <div data-wbar>${workBarHtml(g.items.length)}</div>
+         ${workGridHtml(g.items, "비어 있습니다.")}`
       : groups.map(x => `<section class="plat">
           <div class="plat-h"><b>${esc(x.label)}</b><span>${x.items.length}편</span>
             <span class="plat-act">
@@ -1029,10 +1049,12 @@ function drawDayList(t) {
     title: g ? `${title} · ${esc(g.label)}` : title,
     sub: `${total}편${same ? " · 오늘" : ""}`,
   });
+  wireWorkPick(sheet.querySelector(".sheet-body"), () => drawDayList(t));
   sheet.querySelector(".sheet-body").addEventListener("click", e => {
     const b = e.target.closest("[data-day-grp]");
     if (b) { dayGrp = b.dataset.dayGrp; return drawDayList(t); }
     if (e.target.closest("[data-day-back]")) { dayGrp = null; return drawDayList(t); }
+    if (workSel) return;                       // 고르는 중에는 열어 볼 일이 없다
     const w = e.target.closest(".work[data-id]");
     if (w) openWork(w.dataset.id, () => drawDayList(t));
   });
@@ -1483,8 +1505,7 @@ const unreadNotices = () => folderNotices.filter(n => !n.read).length;
 function openFolderInvites(back) {
   const draw = () => {
     openSheet(`
-      ${headHtml("폴더 초대", { back: !!back, actions: false,
-        sub: "수락하면 그 폴더가 내 폴더 목록에 함께 섭니다." })}
+      ${headHtml("폴더 초대", { back: !!back, actions: false })}
       ${folderInvites.length ? `<div class="fr-list">${folderInvites.map(v => `
         <div class="inv">
           <span class="ub"><b>${esc(v.emoji)} ${esc(v.name)}</b>
@@ -1520,20 +1541,13 @@ function openFolderInvites(back) {
 /** 끊겼다는 소식. 여는 순간 읽음으로 둔다 — 붉은 숫자는 "봤나" 를 세는 것이다. */
 function openBreakNotices(back) {
   openSheet(`
-    ${headHtml("알림", { back: !!back, actions: false,
-      sub: "폴더 연결이 끊겼을 때 여기에 남습니다." })}
+    ${headHtml("알림", { back: !!back, actions: false })}
     ${folderNotices.length ? `<div class="fr-list">${folderNotices.map(n => `
       <div class="inv${n.read ? "" : " new"}">
         <span class="ub"><b>${esc(n.emoji)} ${esc(n.name)}</b>
           <span>${esc(n.ownerName)}님의 폴더 · ${esc(n.reason)} · ${ago(n.at)}</span></span>
       </div>`).join("")}</div>`
-      : `<div class="empty">새 소식이 없습니다.</div>`}
-    <div class="rest" style="text-align:left;padding:10px 2px 0">
-      끊긴 폴더는 내 폴더 목록에 줄만 남고 안이 빕니다. 필요 없으면 그 줄을 지우세요 —
-      담아 뒀던 작품은 원래 그쪽 것이라 내 목록에는 없었습니다.<br>
-      ${/* 치우는 버튼을 두지 않는다. 소식은 한 번 읽으면 할 일이 끝나는 것이라, 읽고
-           나서 또 "치우기" 를 누르게 하면 같은 일을 두 번 시키는 셈이다. */""}
-      <b>여기까지 본 소식은 다음에 앱을 열 때 사라집니다.</b></div>`);
+      : `<div class="empty">새 소식이 없습니다.</div>`}`);
   if (back) sheet.querySelector("[data-head-back]").onclick = back;
   // 본 것으로 친다. 실패해도 다음에 다시 알린다 — 붉은 숫자가 하루 더 남을 뿐이다.
   if (unreadNotices()) api("POST", "/api/folder-notices").then(reload).then(render).catch(() => {});
@@ -1701,9 +1715,7 @@ function openOthersWork(w, opts) {
          매번 다시 읽어야 한다. 어느 창이든 먼저 하는 일은 「보러 가는 것」이다. */""}
     ${linked ? goHtml(w, plat, true) : ""}
     ${mayTake
-      ? `<button class="btn" style="width:100%;margin-top:9px" data-take>내 목록에 담기</button>
-         <div class="rest" style="text-align:left;padding:7px 2px 0">
-           담아 오면 내 것이 되어 일정도 표지도 내가 고칠 수 있습니다. 그 전에는 볼 수만 있어요.</div>`
+      ? `<button class="btn" style="width:100%;margin-top:9px" data-take>내 목록에 담기</button>`
       : `<div class="rest" style="text-align:left;padding:9px 2px 0">${
           !linked ? "주소 없이 담은 항목입니다. 가져올 것이 제목뿐이라 담아 갈 수 없습니다."
             : `${esc(ownerName)}님이 이 폴더를 가져가는 것은 막아 두었습니다. 보기만 할 수 있어요.`}</div>`}
@@ -1779,10 +1791,7 @@ async function openFolderPeople(f, back) {
         ? `함께 쓰는 사람${wait ? ` · ${wait}명이 아직 대기 중입니다` : ""}`
         : `${esc(f.mirrorOf)}님과 함께 쓰는 폴더` })}
     ${rows()}
-    ${mine ? `<button class="btn" style="width:100%;margin-top:12px" data-more-people>${icon("plus")} 더 부르기</button>
-      <div class="rest" style="text-align:left;padding:10px 2px 0">
-        연결을 해제하면 그 사람은 이 폴더를 더 볼 수 없고, 넣어 둔 작품도 이 폴더에서
-        빠집니다 — 작품 자체는 그 사람 목록에 남습니다. 끊겼다는 것은 그쪽에도 알려집니다.</div>` : ""}`);
+    ${mine ? `<button class="btn" style="width:100%;margin-top:12px" data-more-people>${icon("plus")} 더 부르기</button>` : ""}`);
   sheet.querySelector("[data-head-back]").onclick = back;
 
   /* 명단이 바뀌면 **새로 온 값으로** 다시 그린다 — 손에 든 f 는 이미 옛 값이라,
@@ -1819,15 +1828,11 @@ async function openInviteMore(f, done, back) {
   try { await loadFriends(); } catch (e) { toast(e.message); return; }
   const had = (f.people ?? []).map(x => x.id);
   const out = [];
-  const team = f.take === "edit";
   openSheet(`
     ${headHtml("더 부르기", { back: true, save: "부르기",
       sub: `${f.emoji} ${esc(f.name)}` })}
     ${friends.length
-      ? `<div data-pk></div>
-         <div class="rest" style="text-align:left;padding:12px 2px 0">${team
-           ? "부른 사람에게 초대가 갑니다. 수락하면 이 폴더에 함께 넣고 뺄 수 있습니다."
-           : "부른 사람은 곧바로 이 폴더를 볼 수 있습니다."}</div>`
+      ? `<div data-pk></div>`
       : `<div class="empty">아직 친구가 없습니다.</div>`}`);
   sheet.querySelector("[data-head-back]").onclick = back;
 
@@ -1867,6 +1872,11 @@ function folderRow(fid, emoji, name, f) {
           : f?.take === "edit" ? ` <i class="mtag">공유폴더 · 오너</i>` : ""}</b><span>${
         f?.broken ? esc(f.broken) : `${worksIn(fid).length}개`}</span></span>
       ${real ? "" : `<span class="chev">${icon("right")}</span>`}</button>
+    ${/* 자주 여는 폴더에 별을 켠다 — 켠 것은 목록 맨 위로 온다. 비추는 폴더에도 켤 수
+         있다: 그건 주인의 값이 아니라 **내 목록의 차례**를 정하는 나만의 표시다. */""}
+    ${real && !folderSel ? `<button class="star" data-fstar="${fid}"
+      aria-pressed="${!!f?.starred}" title="즐겨찾기"
+      aria-label="${esc(name)} 즐겨찾기">${icon("star", f?.starred ? "on" : "")}</button>` : ""}
     ${real && !folderSel ? `<button class="folder-more" data-folder-edit="${fid}"
       title="폴더 설정" aria-label="${esc(name)} 설정">${icon("dots")}</button>` : ""}
   </div>`;
@@ -2553,9 +2563,7 @@ function openWorkSettings(id, opts) {
     </div>
     ${w.listUrl ? "" : `<div class="field">
       <label for="w-url">주소 <span style="text-transform:none;letter-spacing:0">— 나중에 페이지가 생기면</span></label>
-      <input id="w-url" placeholder="https://…" spellcheck="false">
-      <div class="rest" style="text-align:left;padding:6px 2px 0">
-        주소를 넣고 저장하면 그 페이지에서 표지와 플랫폼을 받아 옵니다.</div></div>`}
+      <input id="w-url" placeholder="https://…" spellcheck="false"></div>`}
     <div class="field"><label>표지
         <span style="text-transform:none;letter-spacing:0">— 못 받아왔거나 마음에 안 들면</span></label>
       <div class="cover-edit">
@@ -2567,10 +2575,7 @@ function openWorkSettings(id, opts) {
           <input id="w-cover" value="${esc(draft.coverUrl ?? "")}" spellcheck="false"
                  placeholder="또는 https://… 이미지 주소">
         </span>
-      </div>
-      <div class="rest" style="text-align:left;padding:7px 2px 0">
-        포스터를 캡처해 두었다면 <b>사진 고르기</b>로 올리세요. 올린 그림은 화면 크기에 맞게
-        줄여서 담습니다. 비우면 기본 그림으로 돌아갑니다.</div></div>
+      </div></div>
     ${schedHtml(draft.schedule, null, { value: draft.color, fallback: platformOf(w.platformId).color })}
     ${pickerHtml(draft.folders)}
     <div class="field"><label>목록에서 내리기</label>
@@ -2578,8 +2583,6 @@ function openWorkSettings(id, opts) {
         <button class="btn" data-act="watched">${icon("check")} 시리즈 감상 완료</button>
         <button class="btn" data-act="dropped">${icon("trash")} 휴지통</button>
       </div>
-      <div class="rest" style="text-align:left;padding:7px 2px 0">
-        어느 쪽이든 지워지지 않습니다. 왼쪽 메뉴의 보관함으로 옮겨집니다.</div>
     </div>
     <div class="link-row wide-only" style="margin-top:4px">
       <button class="btn" data-cancel>취소</button>
@@ -3107,7 +3110,12 @@ const folderKind = f =>
   f.take === "edit" || f.canEdit ? "team" : f.mirror ? "mirror" : "plain";
 const FOLDER_KINDS = [["all", "전체"], ["plain", "일반"], ["team", "공유"], ["mirror", "미러링"]];
 let fkind = "all";                       // 화면 상태라 시트 밖에 둔다 — 다시 그려도 남는다
-const kindShown = () => folders.filter(f => fkind === "all" || folderKind(f) === fkind);
+/* 별 켠 폴더가 맨 위로 온다. 친구 목록은 첫소리 차례라 그러지 않았는데(ㄱㄴㄷ 띠를
+   짚어 뛰려면 차례가 그 띠와 같아야 한다), 폴더는 짚을 띠가 없어 자주 여는 것을 위로
+   올리는 편이 낫다. 그 안에서는 원래 차례(ord)를 지킨다. */
+const kindShown = () => folders
+  .filter(f => fkind === "all" || folderKind(f) === fkind)
+  .slice().sort((a, b) => (b.starred ? 1 : 0) - (a.starred ? 1 : 0));
 
 /** 갈래 고르개. **두 갈래 넘게 있을 때만** 나온다 — 고를 것이 하나뿐인 고르개는 자리만 먹는다. */
 function kindChips() {
@@ -3221,8 +3229,7 @@ function openFolderForm(existing, after) {
   };
   openSheet(`
     ${headHtml(existing ? "폴더 편집" : "새 폴더", { back: false,
-      save: existing ? "저장" : "만들기",
-      sub: "한 작품은 여러 폴더에 동시에 들어갈 수 있습니다." })}
+      save: existing ? "저장" : "만들기" })}
     <div class="field"><label>아이콘</label>
       <div class="emoji-row" id="emo">${EMOJIS.map(e =>
     `<button data-e="${e}" aria-pressed="${e === emoji}">${e}</button>`).join("")}
@@ -3258,7 +3265,6 @@ function openFolderForm(existing, after) {
       <button class="btn" data-cancel>취소</button>
       <button class="btn primary" data-done>${existing ? "저장" : "만들기"}</button>
     </div>
-    ${existing ? `<div class="note">폴더를 삭제해도 작품은 목록에 남습니다. 묶음만 사라집니다.</div>` : ""}
   `);
   const nameEl = sheet.querySelector("#fname");
   const emoIn = sheet.querySelector("#emo-in");
@@ -3965,9 +3971,7 @@ function openPlatformEdit(platformId) {
         <button class="pick" type="button" data-fg="" aria-pressed="${!draft.fg}">자동</button>
         <button class="pick" type="button" data-fg="#FFFFFF" aria-pressed="${draft.fg === "#FFFFFF"}">흰색</button>
         <button class="pick" type="button" data-fg="#1B1B1B" aria-pressed="${draft.fg === "#1B1B1B"}">검정</button>
-      </div>
-      <div class="rest" style="text-align:left;padding:6px 2px 0">
-        기본은 배경색에 맞춰 저절로 정해집니다.</div></div>
+      </div></div>
     ${p.isDomain ? `<div class="rest" style="text-align:left;padding:0 2px 8px">
       비워 두면 사이트가 밝힌 이름을 씁니다.
       <button class="linky" data-fetch-name>사이트에서 가져오기</button></div>` : ""}
@@ -4075,8 +4079,7 @@ function openInviteAccept(code, from) {
    친구에게 보이는 유일한 신원. 카카오 프로필을 받지 않으므로 여기서 직접 정한다. */
 function openNameForm(after) {
   openSheet(`
-    ${headHtml(me.displayName ? "이름 바꾸기" : "이름 정하기", { back: false,
-      sub: "친구에게 이 이름으로 보입니다. 본명일 필요는 없습니다." })}
+    ${headHtml(me.displayName ? "이름 바꾸기" : "이름 정하기", { back: false })}
     <div class="field"><label for="dname">표시 이름</label>
       <input id="dname" value="${esc(me.displayName ?? "")}" placeholder="예: 영수" maxlength="20"
         autocomplete="off" spellcheck="false"></div>
@@ -4216,7 +4219,7 @@ async function openFriends() {
      이 화면에서 새로 하는 일은 그것 하나뿐이다. */
   openSheet(`
     ${headHtml("친구", { back: false, actions: false,
-      sub: `폴더마다 누구에게 보일지 정할 수 있습니다 · ${friends.length}명` })}
+      sub: `${friends.length}명` })}
     <button class="btn primary" style="width:100%" data-invite>초대 링크 만들기</button>
     <div class="rest" style="text-align:left;padding:7px 2px 12px">
       링크를 받은 사람만 친구가 될 수 있습니다. 아이디로 검색해 아무나 추가하는 방식이 아닙니다.</div>
@@ -4442,9 +4445,7 @@ function openFriendDetail(friendId) {
     ${f.sharedFolders
       ? `<button class="btn primary" style="width:100%" data-see>폴더 보러 가기</button>`
       : ""}
-    <button class="btn" style="width:100%;margin-top:9px" data-unfriend>친구 끊기</button>
-    <div class="rest" style="text-align:left;padding:8px 2px 0">
-      끊으면 서로의 공개 폴더가 보이지 않습니다. 담아 둔 작품은 그대로 남습니다.</div>`);
+    <button class="btn" style="width:100%;margin-top:9px" data-unfriend>친구 끊기</button>`);
 
   sheet.querySelector("[data-head-back]").onclick = openFriends;
   const see = sheet.querySelector("[data-see]");
@@ -4474,12 +4475,8 @@ const OPEN_MODES = [
 
 function openAppSettings() {
   openSheet(`
-    ${headHtml("설정", { back: false, actions: false, sub: "HabHobby 전체에 적용됩니다." })}
+    ${headHtml("설정", { back: false, actions: false })}
     ${colorPickerHtml(settings.themeColor, THEME_DEFAULT, "테마 색", "기본색")}
-    <div class="field" style="margin-top:-10px">
-      <div class="rest" style="text-align:left;padding:0 2px">
-        고른 색에서 글자·바탕 색을 만들어 냅니다. 어떤 색을 골라도 읽히도록 밝기를 맞춥니다.
-      </div></div>
     ${/* 색 → 여는 방식 → 계정 → 안내. 넷이 하는 일이 서로 다르므로 선으로 가른다 —
          한 덩이로 흘려 두면 어디까지가 한 이야기인지 짚어 가며 읽어야 한다. */""}
     <div class="field sep"><label>작품을 여는 방식</label>
@@ -4524,12 +4521,7 @@ function openAppSettings() {
       </div>
       <div class="rest" style="text-align:left;padding:7px 2px 0">
         탈퇴하면 담아둔 작품·폴더·설정이 모두 지워지고 되돌릴 수 없습니다.</div>
-    </div>` : ""}
-    <div class="field sep"><label>연재 일정은 어떻게 정해지나요</label>
-      <div class="rest" style="text-align:left;padding:0 2px">
-        제목과 표지는 페이지가 공개한 정보(Open Graph)에서 가져옵니다. 연재 요일은
-        어느 플랫폼도 공개하지 않기 때문에 <b>직접 골라주셔야</b> 합니다 — 작품당 한 번이면 됩니다.
-      </div></div>`);
+    </div>` : ""}`);
   /* 스펙트럼을 끄는 동안 색이 계속 바뀐다 — 화면은 그때마다 따라가되
      저장은 손이 멎은 뒤 한 번만 한다. 시트는 다시 그리지 않는다 (고르개가 사라진다). */
   const themeDraft = { color: settings.themeColor };
@@ -4610,6 +4602,22 @@ const closeDrawer = () => {
   if (!drawerBack.hidden) lockScroll(false);
   drawerBack.hidden = true;
 };
+
+/* 화면이 넓으면 앱 카드 바깥에 여백이 생긴다. 검은 바탕은 카드 안에만 깔리므로
+   (`.sheet-back` 은 `.app` 안의 absolute 다) 그 여백은 아무 데도 아니었는데, 눈에는
+   검은 바탕과 똑같이 **창 밖**이다. 눌러도 같은 일이 일어나야 한다.
+
+   앱 안쪽은 저마다의 손잡이가 맡으므로 건드리지 않는다. 사이드 메뉴가 시트 위에 있으므로
+   (z-index 6 · 5) 열려 있으면 그쪽을 먼저 닫는다.
+
+   **캡처 단계에서 본다.** 거품 단계까지 기다리면 그 사이에 시트가 다시 그려질 수 있는데,
+   그러면 눌린 마디가 이미 떨어져 나가 `closest(".app")` 이 null 을 준다 — 앱 **안**을
+   눌렀는데 밖을 누른 것으로 읽혀 창이 통째로 닫혔다. 캡처 때는 아직 붙어 있다. */
+document.addEventListener("click", e => {
+  if (e.target.closest(".app")) return;
+  if (!drawerBack.hidden) return closeDrawer();
+  if (!back.hidden) closeSheet();
+}, true);
 document.getElementById("btn-menu").onclick = () => {
   document.getElementById("drawer-stat").textContent =
     `작품 ${activeWorks().length} · 폴더 ${folders.length}`;
@@ -4764,6 +4772,17 @@ screenEl.addEventListener("click", e => {
   /* 갈래 고르개도 .chip 이다 — **매체 거르개보다 먼저** 봐야 한다.
      아래가 먼저 잡으면 dataset.filter 가 없어 filter 가 undefined 가 되고,
      갈래는 갈래대로 안 바뀌면서 목록만 통째로 비어 보인다. */
+  const fs2 = e.target.closest("[data-fstar]");
+  if (fs2) {
+    const f = folders.find(x => x.id === fs2.dataset.fstar);
+    if (!f) return;
+    f.starred = !f.starred;
+    /* 서버를 기다리지 않고 먼저 보여 준다. 실패하면 되돌린다 — 별 하나에 화면이
+       멈춰 있을 이유가 없다. */
+    render();
+    return api("PUT", `/api/folders/${f.id}/star`, { starred: f.starred })
+      .catch(err => { f.starred = !f.starred; render(); toast(err.message); });
+  }
   const k = e.target.closest("[data-fkind]");
   if (k) { fkind = k.dataset.fkind; return render(); }
   const c = e.target.closest("[data-filter]"); if (c) { filter = c.dataset.filter; return render(); }

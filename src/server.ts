@@ -13,7 +13,7 @@ import {
   createPasswordUser, passwordUser, linkGuestPassword, markLogin,
   sharedView, createInvite, inviteOwner, getUser, setFolderShare, setFolderTake,
   getFolder, createFolder, canCopy, canMirror, canEdit, seenByMe, markSeen,
-  folderInvites, acceptFolder, declineFolder,
+  folderInvites, acceptFolder, declineFolder, leaveFolder,
   type Work, type User, type ShareMode, type TakeMode,
 } from "./db.ts";
 import {
@@ -825,12 +825,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       return true;
     }
     if (m === "DELETE") {
-      /* 함께 고치던 폴더를 주인이 지우면 친구들이 걸어 둔 이음줄도 함께 사라진다 —
-         ON DELETE CASCADE 가 work_folder 를 걷어 가므로 남의 작품은 제 주인에게 그대로
-         남고 이 묶음에서만 빠진다. 그게 폴더를 지우는 일의 뜻이다. */
       /* 폴더를 지워도 작품은 남는다 — 묶음만 사라진다.
-         비추던 폴더면 지우는 것이 곧 미러링을 끊는 일이다. 남의 작품은 애초에 내 표에
-         없었으므로 없어질 것도 없다. */
+
+         주인이 함께 고치던 폴더를 지우면 친구들이 걸어 둔 이음줄도 CASCADE 로 함께
+         걷힌다. 남의 작품은 제 주인에게 그대로 남고 이 묶음에서만 빠진다.
+
+         반대로 **함께 쓰기를 그만두는 쪽**은 제 껍데기만 지워서는 모자란다 — 내가 걸어 둔
+         이음줄은 원본 폴더에 붙어 있어 그대로 남고, 주인은 이제 남이 된 사람의 작품을
+         계속 보게 된다. 나가기 전에 내 것을 걷어 간다. */
+      if (mine?.mirror) leaveFolder(user.id, mine.mirror.folder);
       const rf = db.prepare("DELETE FROM folder WHERE id = ? AND user_id = ?").run(id, user.id);
       if (!rf.changes) { json(res, 404, { ok: false, reason: "없는 폴더입니다." }); return true; }
       json(res, 200, { ok: true });

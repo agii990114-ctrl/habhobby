@@ -292,10 +292,14 @@ const guestMode = () => me?.provider === "guest";
    담아가기는 한 벌 떠 가는 것이라 그 뒤로 서로 상관이 없고, 미러링은 비추기만 해서
    내가 고치면 그쪽에도 바뀐다. 어느 쪽을 허락할지는 폴더마다 다를 수 있다 —
    "가져가서 네 맘대로 해" 와 "내가 고르는 걸 계속 봐" 는 다른 뜻이다. */
+/* 공개와 「함께 쓰기」를 한 줄에 둔다. 한때 공개 대상을 고르고 **또** 퍼가기 허용에서
+   함께 고치기를 고르게 했는데, 두 곳을 다 맞춰야 초대가 나가므로 한 곳만 고치고 왜
+   아무 일도 안 일어나는지 몰랐다. 공유 폴더를 만드는 일은 한 가지 결정이다. */
 const SHARE_MODES = [
   ["none", "나만 보기", "아무에게도 보이지 않습니다."],
   ["all", "모든 친구에게", "친구가 늘어나면 그 사람에게도 보입니다."],
-  ["some", "고른 친구에게만", "아래에서 고른 사람만 볼 수 있습니다."],
+  ["some", "고른 친구에게만", "고른 사람이 볼 수 있습니다. 넣고 빼는 것은 나만 합니다."],
+  ["team", "고른 친구와 함께 쓰기", "고른 사람에게 초대를 보냅니다. 수락하면 함께 넣고 뺍니다."],
 ];
 const TAKE_MODES = [
   ["none", "보기만", "가져갈 수 없습니다. 눈으로만 봅니다."],
@@ -2549,6 +2553,10 @@ function openFolderForm(existing, after) {
   /* 보는 것과 가져가는 것은 다른 일이다 — 공개했다고 다 퍼 가도 좋다는 뜻은 아니다.
      기본은 담아가기까지. 미러링은 "내가 고르는 걸 계속 보라" 는 뜻이라 직접 켜야 열린다. */
   let take = existing?.take ?? "copy";
+  /* 화면에서는 "고른 친구와 함께 쓰기" 가 한 항목이지만, 담길 때는 두 값이다 —
+     공개 대상 some + 퍼가기 edit. 화면 값과 담기는 값을 여기서 갈아 끼운다. */
+  let pick = share.mode === "some" && take === "edit" ? "team" : share.mode;
+  const asShare = v => (v === "team" ? "some" : v);
   openSheet(`
     ${headHtml(existing ? "폴더 편집" : "새 폴더", { back: false,
       save: existing ? "저장" : "만들기",
@@ -2569,14 +2577,15 @@ function openFolderForm(existing, after) {
       <div class="rest" style="text-align:left;padding:2px">
         둘러보기로는 폴더를 공개할 수 없습니다. 로그인하면 쓸 수 있어요.</div></div>` : ""}
     ${!guestMode() ? `<div class="field"><label>친구에게 공개</label>
-      ${optsHtml(SHARE_MODES, share.mode, "share")}
-      <div data-share-who${share.mode === "some" ? "" : " hidden"}>
+      ${optsHtml(SHARE_MODES, pick, "share")}
+      <div data-share-who${pick === "some" || pick === "team" ? "" : " hidden"}>
         <div class="rest" style="text-align:left;padding:8px 2px 0">친구를 불러오는 중…</div>
       </div>
     </div>
-    <div class="field" data-take-box${share.mode === "none" ? " hidden" : ""}>
+    ${/* 함께 쓰는 폴더는 퍼가기가 이미 정해져 있다 — 그 칸은 보여 주지 않는다 */""}
+    <div class="field" data-take-box${pick === "none" || pick === "team" ? " hidden" : ""}>
       <label>퍼가기 허용</label>
-      ${optsHtml(TAKE_MODES, take, "take")}
+      ${optsHtml(TAKE_MODES.filter(([v]) => v !== "edit"), take, "take")}
     </div>` : ""}
     ${existing ? `<div class="link-row"><button class="btn" id="fdel">폴더 삭제</button></div>` : ""}
     <div class="link-row wide-only">
@@ -2661,14 +2670,20 @@ function openFolderForm(existing, after) {
       await loadFriends();
       paintWho();
     };
-    if (share.mode === "some") drawWho();
+    if (pick === "some" || pick === "team") drawWho();
 
     wireOpts(sheet, "share", v => {
-      share.mode = v;
-      whoBox.hidden = v !== "some";
-      if (v === "some") drawWho();
-      // 아무에게도 안 보이는 폴더에는 퍼가기라는 말이 성립하지 않는다
-      sheet.querySelector("[data-take-box]").hidden = v === "none";
+      pick = v;
+      share.mode = asShare(v);
+      // 함께 쓰기를 고르면 퍼가기도 그것으로 정해진다. 되돌리면 담아가기로 돌아간다.
+      if (v === "team") take = "edit";
+      else if (take === "edit") take = "copy";
+      const withWho = v === "some" || v === "team";
+      whoBox.hidden = !withWho;
+      if (withWho) drawWho();
+      /* 아무에게도 안 보이는 폴더에는 퍼가기라는 말이 성립하지 않고,
+         함께 쓰는 폴더는 이미 정해져 있다. */
+      sheet.querySelector("[data-take-box]").hidden = v === "none" || v === "team";
     });
     wireOpts(sheet, "take", v => { take = v; });
 

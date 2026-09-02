@@ -657,9 +657,35 @@ export function createFolder(userId: string, p: {
   return getFolder(userId, id)!;
 }
 
+/* 함께 쓰던 사람이 나가면 **그 사람이 걸어 둔 것도 함께 빠진다.**
+
+   작품은 그 사람 목록에 그대로 남는다 — 빠지는 것은 이 묶음과의 이음줄뿐이다.
+   그러지 않으면 주인은 이제 남이 된 사람의 작품을 계속 보게 되고, 나간 사람은 뺄
+   권한이 없어 치우지도 못한다. 둘 다 손댈 수 없는 줄이 남는 셈이다. */
+export function dropContributions(folderId: string, userIds: string[]): number {
+  if (!userIds.length) return 0;
+  const marks = userIds.map(() => "?").join(",");
+  return db.prepare(`DELETE FROM work_folder WHERE folder_id = ? AND work_id IN (
+      SELECT id FROM work WHERE user_id IN (${marks}))`).run(folderId, ...userIds).changes;
+}
+
+/** 그 폴더에 무언가 걸어 둔 사람들 — 주인은 빼고 */
+const contributors = (folderId: string, ownerId: string): string[] =>
+  (db.prepare(`SELECT DISTINCT w.user_id AS id FROM work_folder wf
+    JOIN work w ON w.id = wf.work_id
+    WHERE wf.folder_id = ? AND w.user_id <> ?`).all(folderId, ownerId) as any[]).map(r => r.id);
+
+/** 나 혼자 이 폴더에서 손을 뗀다 — 걸어 둔 것을 걷어 간다 */
+export const leaveFolder = (userId: string, folderId: string): number =>
+  dropContributions(folderId, [userId]);
+
 /** 퍼가기 권한을 정한다 — 비추고 있는 폴더에는 뜻이 없다 (내 것이 아니므로) */
 export const setFolderTake = (folderId: string, take: TakeMode): void => {
+  const was = db.prepare("SELECT user_id, take_mode FROM folder WHERE id = ?").get(folderId) as any;
   db.prepare("UPDATE folder SET take_mode = ? WHERE id = ?").run(take, folderId);
+  /* 함께 고치기를 끄면 더는 함께 쓰는 폴더가 아니다 — 남들이 걸어 둔 것을 걷어 낸다 */
+  if (was && canEdit(was.take_mode as TakeMode) && !canEdit(take))
+    dropContributions(folderId, contributors(folderId, was.user_id));
 };
 
 /** 그 폴더를 누구에게 보여 줄지 정한다. mode 가 "some" 이 아니면 짝은 지운다. */
@@ -670,8 +696,18 @@ export function setFolderShare(folderId: string, mode: ShareMode, viewers: strin
                                needsAccept = false): void {
   const was = new Map((db.prepare("SELECT viewer_id, state FROM folder_share WHERE folder_id = ?")
     .all(folderId) as any[]).map(r => [r.viewer_id, r.state ?? "ok"]));
+  const f = db.prepare("SELECT user_id, take_mode FROM folder WHERE id = ?").get(folderId) as any;
   db.prepare("UPDATE folder SET share_mode = ? WHERE id = ?").run(mode, folderId);
   db.prepare("DELETE FROM folder_share WHERE folder_id = ?").run(folderId);
+
+  /* 명단에서 빠진 사람이 걸어 둔 것도 함께 걷는다 — 모두에게 열어 두는 폴더로 바꾸거나
+     아예 닫는 것도 "이 사람들과 함께 쓰던 것을 그만둔다" 는 뜻이다. */
+  if (f && canEdit(f.take_mode as TakeMode)) {
+    const keep = mode === "some" ? new Set(viewers) : new Set<string>();
+    const gone = contributors(folderId, f.user_id).filter(id => !keep.has(id));
+    dropContributions(folderId, gone);
+  }
+
   if (mode !== "some") return;
   const ins = db.prepare("INSERT OR IGNORE INTO folder_share(folder_id, viewer_id, state) VALUES(?,?,?)");
   for (const v of new Set(viewers)) ins.run(folderId, v, was.get(v) ?? (needsAccept ? "pending" : "ok"));

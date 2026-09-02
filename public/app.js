@@ -1785,15 +1785,25 @@ function render() {
   ib.textContent = idleN > 99 ? "99+" : idleN;
   ib.hidden = !idleN;
 
-  /* 🔔 은 늘 자리에 있다. 여기만 떠 있는 버튼이 아니라 **상단바의 붙박이**라, 없어졌다
-     생겼다 하면 그때마다 탭이 좌우로 밀린다. 대신 붉은 숫자는 있을 때만 붙는다. */
-  const bell = document.getElementById("bell-badge");
+  /* 🔔 은 늘 자리에 있다. 떠 있는 버튼이 아니라 **붙박이**라, 없어졌다 생겼다 하면
+     그때마다 옆의 것들이 밀린다. 대신 붉은 숫자는 있을 때만 붙는다.
+
+     종은 화면 너비에 따라 **상단바에도, 사이드 메뉴에도** 설 수 있다. 어느 쪽이 서는지는
+     CSS가 정하고 여기서는 세 자리에 같은 숫자를 적어 둔다 — 자바스크립트가 너비를 재서
+     가르면 창을 줄였다 늘릴 때마다 어긋난다.
+
+     메뉴 버튼(☰)의 숫자는 좁은 화면 몫이다: 종이 메뉴 안으로 들어가면 열어 보기 전에는
+     소식이 온 줄을 알 수 없다. 넓은 화면에서는 CSS가 그 숫자를 감춘다. */
   const bn = unreadNotices();
-  bell.textContent = bn > 99 ? "99+" : bn;
-  bell.hidden = !bn;
-  /* 게스트는 친구가 없어 끈길 줄도 없다 — 영영 빈 종을 달아 두지 않는다.
-     처음부터 안 보이므로 탭이 밀리는 일도 없다. */
-  document.getElementById("btn-bell").hidden = guestMode();
+  for (const id of ["bell-badge", "menu-bell-badge", "menu-badge"]) {
+    const el = document.getElementById(id);
+    el.textContent = bn > 99 ? "99+" : bn;
+    el.hidden = !bn;
+  }
+  /* 게스트는 친구가 없어 끊길 줄도 없다 — 영영 빈 종을 달아 두지 않는다.
+     처음부터 안 보이므로 옆의 것들이 밀리는 일도 없다. */
+  for (const id of ["btn-bell", "menu-bell"])
+    document.getElementById(id).hidden = guestMode();
 
   /* 폴더 초대는 **폴더 탭에서, 받은 것이 있을 때만** 나온다 — 없는데 자리를 차지하면
      눌러 봐야 빈 창이다. */
@@ -4172,6 +4182,8 @@ drawerBack.addEventListener("click", e => { if (e.target === drawerBack) closeDr
 idleEl.onclick = openIdle;
 fiEl.onclick = () => openFolderInvites();
 document.getElementById("btn-bell").onclick = () => openBreakNotices();
+// 메뉴 안의 종 — 메뉴를 닫고 연다. 창 두 겹이 겹쳐 서면 어느 것을 닫는지 헷갈린다.
+document.getElementById("menu-bell").onclick = () => { closeDrawer(); openBreakNotices(); };
 document.getElementById("menu-close").onclick = closeDrawer;   // 마우스가 있는 기기에만 보인다
 
 /* 사이드 메뉴도 끌어 닫는다. 시트는 아래로, 이쪽은 **왼쪽으로** — 그래서 손잡이도

@@ -3803,16 +3803,54 @@ function openNameForm(after) {
     ${headHtml(me.displayName ? "이름 바꾸기" : "이름 정하기", { back: false,
       sub: "친구에게 이 이름으로 보입니다. 본명일 필요는 없습니다." })}
     <div class="field"><label for="dname">표시 이름</label>
-      <input id="dname" value="${esc(me.displayName ?? "")}" placeholder="예: 영수" maxlength="20"></div>
+      <input id="dname" value="${esc(me.displayName ?? "")}" placeholder="예: 영수" maxlength="20"
+        autocomplete="off" spellcheck="false"></div>
+    ${/* 이름은 겹칠 수 없다. 저장을 눌러야 알 수 있으면 스무 자를 채우고 나서야 다시
+         시작하게 되므로, **치는 동안** 알려 준다. */""}
+    <div class="rest" style="text-align:left;padding:0 2px" data-nfree>
+      친구에게 보이는 유일한 이름이라 다른 사람과 겹칠 수 없습니다.</div>
     <div class="link-row wide-only">
       <button class="btn" data-cancel>취소</button>
       <button class="btn primary" data-done>저장</button></div>`);
   const el = sheet.querySelector("#dname");
+  const note = sheet.querySelector("[data-nfree]");
+
+  /* 칠 때마다 묻지 않는다 — 손이 멈춘 뒤에 한 번만. 늦게 온 대답이 지금 친 글자를
+     덮지 않도록 물어본 값과 견줘 본다. */
+  let timer, asked = "";
+  const check = async () => {
+    const v = el.value.trim();
+    // 빈 칸이 먼저다 — 아직 이름을 안 정한 사람에게는 빈 칸이 "지금 쓰는 이름" 이 아니다
+    if (!v) { note.textContent = "친구에게 보이는 유일한 이름이라 다른 사람과 겹칠 수 없습니다.";
+      note.style.color = ""; return; }
+    if (v === me.displayName) {                   // 원래 내 이름 — 물어볼 것이 없다
+      note.textContent = "지금 쓰는 이름입니다.";
+      note.style.color = "";
+      return;
+    }
+    asked = v;
+    try {
+      const r = await api("GET", `/api/me/name-free?q=${encodeURIComponent(v)}`);
+      if (asked !== el.value.trim()) return;      // 그새 더 쳤다 — 옛 대답은 버린다
+      note.textContent = r.free ? `«${r.name}» 쓸 수 있습니다.` : `«${r.name}» 은 이미 쓰는 사람이 있습니다.`;
+      note.style.color = r.free ? "var(--good)" : "var(--bad-ink)";
+    } catch { /* 못 물어봐도 저장할 때 서버가 다시 본다 */ }
+  };
+  el.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(check, 350); });
+
   wireHead({ save: () => saveName(), cancel: () => closeSheet() });
   const saveName = guard(async () => {
     const v = el.value.trim();
     if (!v) { el.focus(); return; }
-    await api("PUT", "/api/me", { displayName: v });
+    try {
+      await api("PUT", "/api/me", { displayName: v });
+    } catch (e) {
+      // 겹치는 이름은 저장되지 않는다 — 창을 닫지 말고 그 자리에서 고치게 한다
+      note.textContent = e.message;
+      note.style.color = "var(--bad-ink)";
+      el.focus(); el.select();
+      return;
+    }
     await reload(); render();
     after ? after() : closeSheet();
   });

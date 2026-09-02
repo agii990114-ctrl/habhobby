@@ -15,6 +15,7 @@ import {
   getFolder, createFolder, canCopy, canMirror, canEdit, seenByMe, markSeen,
   folderInvites, acceptFolder, declineFolder, leaveFolder,
   noticeBreak, folderNotices, readNotices, dropNotice, inviteToFolder, unlinkFromFolder,
+  cleanName, nameTaken, setDisplayName,
   type Work, type User, type ShareMode, type TakeMode,
 } from "./db.ts";
 import {
@@ -914,10 +915,24 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
   /* ── 표시 이름 — 친구에게 보이는 유일한 신원 ── */
   if (p === "/api/me" && m === "PUT") {
     const b = await readJson(req);
-    const name = String(b.displayName ?? "").trim().slice(0, 20);
-    if (!name) { json(res, 400, { ok: false, reason: "이름을 입력해 주세요." }); return true; }
-    db.prepare("UPDATE user SET display_name = ? WHERE id = ?").run(name, user.id);
-    json(res, 200, { ok: true, displayName: name });
+    const want = cleanName(String(b.displayName ?? ""));
+    if (!want) { json(res, 400, { ok: false, reason: "이름을 입력해 주세요." }); return true; }
+    /* 겹치는 이름은 담지 않는다. 표시 이름이 **친구에게 보이는 유일한 신원**이라,
+       같은 이름이 둘이면 초대 명단에서 어느 쪽인지 가릴 것이 없다. */
+    const saved = setDisplayName(user.id, want);
+    if (!saved) {
+      json(res, 409, { ok: false, reason: `«${want}» 은 이미 쓰는 사람이 있습니다. 다른 이름으로 정해 주세요.` });
+      return true;
+    }
+    json(res, 200, { ok: true, displayName: saved });
+    return true;
+  }
+
+  /* 이름을 치는 동안 물어보는 자리. 저장을 눌러야 알 수 있으면, 스무 자를 채우고
+     나서야 다시 시작하게 된다. */
+  if (p === "/api/me/name-free" && m === "GET") {
+    const want = cleanName(url.searchParams.get("q") ?? "");
+    json(res, 200, { ok: true, name: want, free: !!want && !nameTaken(want, user.id) });
     return true;
   }
 

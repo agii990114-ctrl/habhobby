@@ -392,6 +392,40 @@ once(4, () => {
 /* 도메인 되돌리기도 한 번이면 된다 — 주소를 한 줄씩 뜯어보는 일이라 가장 비쌌다. */
 once(5, restoreHostGrouping);
 
+/* 표시 이름은 **친구에게 보이는 유일한 신원**이다. 아이디도 프로필 사진도 보여 주지
+   않으므로, 같은 이름이 둘이면 초대 명단에서 어느 「김지훈」인지 가릴 방법이 없다.
+   골라 놓고 엉뚱한 사람에게 폴더를 열어 줄 수 있다는 뜻이다 — 겹치지 않게 막는다.
+
+   막는 자리는 둘이다. 하나는 이름을 정하는 길목(setDisplayName), 하나는 여기 색인.
+   길목만 막아도 한 프로세스에서는 새지 않지만, 지키는 규칙은 표 자체가 들고 있어야
+   나중에 다른 길이 생겨도 무너지지 않는다.
+
+   비교는 **접어서** 한다(foldName) — 대소문자와 군더더기 공백만 다른 이름은 사람 눈에
+   같은 이름이고, 눈에 보이지 않는 글자로 다르게 만든 이름은 더 나쁘다. */
+once(6, () => {
+  /* 이미 겹쳐 있는 것부터 푼다. 늦게 만든 계정에 번호를 붙인다 — 먼저 쓰던 사람의
+     이름을 빼앗지 않는다. */
+  const rows = db.prepare(`SELECT id, display_name FROM user
+    WHERE display_name IS NOT NULL AND TRIM(display_name) <> '' ORDER BY rowid`)
+    .all() as { id: string; display_name: string }[];
+  const seen = new Set<string>();
+  const upd = db.prepare("UPDATE user SET display_name = ? WHERE id = ?");
+  let n = 0;
+  for (const r of rows) {
+    const clean = cleanName(r.display_name);
+    let want = clean, k = foldName(clean), i = 1;
+    while (!k || seen.has(k)) { want = `${clean} ${++i}`; k = foldName(want); }
+    seen.add(k);
+    if (want !== r.display_name) { upd.run(want, r.id); n++; }
+  }
+  if (n) console.log(`  겹치던 표시 이름 정리: ${n}명`);
+  /* 이름이 없는 계정은 이 규칙 밖이다 — 아직 정하지 않았을 뿐이라 서로 겹칠 것이 없다.
+     부분 색인이 아니면 NULL 이 아닌 빈 문자열끼리 부딪힌다. */
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_name
+    ON user(LOWER(TRIM(display_name)))
+    WHERE display_name IS NOT NULL AND TRIM(display_name) <> ''`);
+});
+
 /* ── 질의문을 다시 쓴다 ────────────────────────────────────
    db.prepare 는 부를 때마다 SQL 을 새로 컴파일한다 — 한 번에 0.1ms 남짓인데, 우리는 같은
    문장을 요청마다 되풀이해 부르므로 그것만으로 질의 값의 3분의 1을 썼다. 한 번 만든 것을
@@ -532,6 +566,52 @@ export const getUser = (id: string): User | null => {
 export const deleteUser = (id: string): void => {
   db.prepare("DELETE FROM user WHERE id = ?").run(id);   // 나머지는 CASCADE
 };
+
+/* ── 표시 이름 ────────────────────────────────────────────
+   친구에게 보이는 유일한 신원이다. 그래서 **겹치면 안 된다** — 초대 명단에 「김지훈」이
+   둘 있으면 어느 쪽인지 가릴 것이 없고, 골라 놓고 엉뚱한 사람에게 폴더를 열어 준다. */
+
+/** 담기 전에 다듬는다 — 눈에 보이지 않는 글자를 걷고 공백을 한 칸으로 모은다. */
+export function cleanName(s: string): string {
+  return String(s ?? "")
+    /* 폭 없는 글자(zero-width)와 제어 문자를 걷는다. 이것을 두면 「김지훈」과
+       「김<zwsp>지훈」이 화면에서는 똑같은데 표에서는 다른 이름이 되어, 겹치지 말라는
+       규칙을 눈속임으로 넘을 수 있다. */
+    .replace(/[\u0000-\u001f\u007f\u00ad\u200b-\u200f\u2028\u2029\u2060\ufeff]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 20);
+}
+
+/** 견줄 때 쓰는 모양 — 대소문자만 다른 이름은 사람 눈에 같은 이름이다.
+
+    **함수 선언으로 둔다.** 켤 때 도는 이관(once(6))이 이 줄보다 위에서 부르는데,
+    화살표 함수를 담은 const 는 그 자리에서 아직 만들어지지 않아 켜자마자 죽는다. */
+function foldName(s: string): string { return cleanName(s).toLowerCase(); }
+
+/** 그 이름을 이미 쓰는 사람이 있는가. `except` 는 자기 자신(이름을 그대로 두는 경우). */
+export function nameTaken(name: string, except?: string): boolean {
+  const k = foldName(name);
+  if (!k) return false;
+  const r = db.prepare(`SELECT id FROM user
+    WHERE LOWER(TRIM(display_name)) = ? AND id <> ?`).get(k, except ?? "") as any;
+  return !!r;
+}
+
+/** 이름을 정한다. 겹치면 담지 않고 `null` 을 돌려준다 — 부르는 쪽이 사람에게 알린다. */
+export function setDisplayName(userId: string, name: string): string | null {
+  const want = cleanName(name);
+  if (!want) return null;
+  if (nameTaken(want, userId)) return null;
+  try {
+    db.prepare("UPDATE user SET display_name = ? WHERE id = ?").run(want, userId);
+  } catch {
+    /* 위에서 봤는데도 여기서 걸렸다면 색인이 잡은 것이다 — 같은 이름을 동시에 정하려는
+       두 요청이 있었다는 뜻. 사람에게는 "이미 쓰는 이름" 으로 똑같이 보인다. */
+    return null;
+  }
+  return want;
+}
 
 /* ── kv (사용자별 설정·플랫폼 표시) ───────────────────────── */
 export function kvGet<T>(userId: string, key: string, fallback: T): T {

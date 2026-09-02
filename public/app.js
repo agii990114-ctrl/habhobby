@@ -193,12 +193,20 @@ const PROVIDER_LABEL = { kakao: "카카오", naver: "네이버", google: "Google
    그래서 필요한 것만 여기 그려 둔다. 다 합쳐 2KB 남짓이고, currentColor 를 따르므로
    글자 빛깔이 그대로 온다. **사용자가 고르는 폴더 이모지는 그대로 둔다** — 그건 우리
    그림이 아니라 그 사람이 고른 표식이다. */
+/* 그림 조각들.
+
+   **껍데기(index.html)에는 같은 그림이 인라인으로 한 번 더 있다.** 화면 맨 위 줄과
+   서랍은 app.js 가 내려오기 전에 이미 보여야 해서, 그것만은 HTML 에 직접 그려 둔다.
+   그래서 아래 일곱은 두 곳에 같은 모양이 있다 — search · cog · plus · users · x ·
+   check · trash. **한쪽만 고치면 조용히 어긋난다** (톱니로 바꿀 때 실제로 두 곳을
+   고쳤다). 여기 것을 고치거든 index.html 도 함께 보라.
+
+   껍데기에만 있고 여기는 없는 것도 있다(☰ · 종 · 편지 · 게시판) — 여기 두어 봐야
+   부르는 이가 없어 무게만 는다. */
 const ICONS = {
-  menu:    `<path d="M3.5 6.5h17M3.5 12h17M3.5 17.5h17"/>`,
   // 「전체 목록」 — 줄 앞에 점을 찍어 그냥 메뉴와 갈린다
   list:    `<path d="M8.5 6.5h12M8.5 12h12M8.5 17.5h12"/><path d="M4 6.5h.01M4 12h.01M4 17.5h.01"/>`,
   search:  `<circle cx="11" cy="11" r="6.8"/><path d="M20 20l-4.2-4.2"/>`,
-  bell:    `<path d="M18 8.5a6 6 0 1 0-12 0c0 6.5-2.6 8.5-2.6 8.5h17.2S18 15 18 8.5"/><path d="M13.8 20.5a2.2 2.2 0 0 1-3.6 0"/>`,
   /* 설정 — 톱니바퀴. 한때 「톱니는 작게 그리면 뭉개진다」며 손잡이 세 줄을 썼는데,
      그건 그리기 나름이었다. 이빨을 여덟 개만 두고 뿌리(7.0)와 끝(9.4)의 차를 크게
      잡으면 1.25em 에서도 이빨이 하나씩 세어진다. 가운데 구멍은 3.1 — 더 줄이면
@@ -206,9 +214,7 @@ const ICONS = {
   cog:     `<path d="M10.01 5.29L10.21 2.77L13.79 2.77L13.99 5.29A7 7 0 0 1 15.34 5.85L17.26 4.21L19.79 6.74L18.15 8.66A7 7 0 0 1 18.71 10.01L21.23 10.21L21.23 13.79L18.71 13.99A7 7 0 0 1 18.15 15.34L19.79 17.26L17.26 19.79L15.34 18.15A7 7 0 0 1 13.99 18.71L13.79 21.23L10.21 21.23L10.01 18.71A7 7 0 0 1 8.66 18.15L6.74 19.79L4.21 17.26L5.85 15.34A7 7 0 0 1 5.29 13.99L2.77 13.79L2.77 10.21L5.29 10.01A7 7 0 0 1 5.85 8.66L4.21 6.74L6.74 4.21L8.66 5.85A7 7 0 0 1 10.01 5.29Z"/><circle cx="12" cy="12" r="3.1"/>`,
   plus:    `<path d="M12 5.2v13.6M5.2 12h13.6"/>`,
   // 추가 목록 — 집게 달린 판
-  board:   `<path d="M9 4.5H7A2 2 0 0 0 5 6.5v12.6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6.5a2 2 0 0 0-2-2h-2"/><rect x="9" y="2.6" width="6" height="3.8" rx="1.3"/>`,
   // 폴더 초대 — 봉투
-  mail:    `<rect x="3" y="5.2" width="18" height="13.6" rx="2.4"/><path d="M3.6 7.6l7.4 4.9a2 2 0 0 0 2 0l7.4-4.9"/>`,
   users:   `<circle cx="9.2" cy="8" r="3.4"/><path d="M3 20c0-3.4 2.8-5.5 6.2-5.5s6.2 2.1 6.2 5.5"/><path d="M16 5.2a3.4 3.4 0 0 1 0 6.6"/><path d="M17.6 15c2.1.7 3.4 2.4 3.4 5"/>`,
   x:       `<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>`,
   pencil:  `<path d="M4 20h4L18.4 9.6a2.4 2.4 0 0 0-3.4-3.4L4.6 16.6z"/><path d="M14.4 7.4l2.6 2.6"/>`,
@@ -408,6 +414,14 @@ const activeWorks = () => works.filter(w => w.state === "active" && !w.folderOnl
 const filedWorks = () => works.filter(w => w.state === "active");
 const worksInState = s => byRecent(works.filter(w => w.state === s));
 const unfiled = () => byRecent(activeWorks().filter(w => !w.filed && !w.folders.length));
+
+/** 이 작품이 든 폴더 이름들. 지워진 폴더의 자국은 걸러낸다 —
+    작품의 folders 는 폴더가 사라져도 그 id 를 들고 있을 수 있다. */
+const folderNames = w => w.folders
+  .map(id => folders.find(f => f.id === id))
+  .filter(Boolean)
+  .map(f => (f.emoji ? f.emoji + " " : "") + f.name)
+  .join(", ");
 const byRecent = list => [...list].sort((a, b) => b.lastAt - a.lastAt);
 
 /* 캘린더 점 색. 정해 두지 않았으면 플랫폼 색을 쓴다 —
@@ -650,15 +664,21 @@ const workPickAt = key => {
   if (workSelKey !== key) { workSel = null; workSelKey = key; }
 };
 
-/** 고르는 중인 카드. 켜진 것은 표지를 덮고 체크를 얹는다 — 「작품 넣기」와 같은 모양이다. */
-const workPickCard = w => `<button class="work pick-work${workSel.has(w.id) ? " on" : ""}"
-    data-wpick="${esc(w.id)}" aria-pressed="${workSel.has(w.id)}">
+/** 고르는 중인 카드. 켜진 것은 표지를 덮고 체크를 얹는다.
+
+    **고르는 자리는 둘인데 카드는 하나다** — 목록에서 여럿 골라 옮기는 것과 「작품 넣기」.
+    한때 같은 마크업이 두 벌 있었고, 한쪽만 고치면 같은 손짓인데 모양이 달라 보였다.
+    다른 것은 무엇으로 표시하고(attr) 어디에 담아 두느냐(picked)뿐이다. */
+const pickCardHtml = (w, attr, picked) => `<button class="work pick-work${picked.has(w.id) ? " on" : ""}"
+    ${attr}="${esc(w.id)}" aria-pressed="${picked.has(w.id)}">
     <div class="cover" style="${coverStyle(w)}">${coverChar(w)}
       ${w.episode ? `<span class="ep">${esc(w.episode)}</span>` : ""}
       <span class="tick">${icon("check")}</span>
     </div>
     <h4>${esc(w.title)}</h4><time>${ago(w.lastAt)}</time>
   </button>`;
+
+const workPickCard = w => pickCardHtml(w, "data-wpick", workSel);
 
 /** 고르는 중이면 고르는 격자로, 아니면 여느 격자로 */
 const workGridHtml = (list, emptyMsg) => workSel
@@ -979,7 +999,7 @@ function drawIdle() {
   const row = w => rowHtml(w, [
     w.schedule.mode === "dated" && w.schedule.next
       ? `${daysLeft(w.schedule.next)} · ${schedText(w)}` : null,
-    w.folders.map(id => folders.find(f => f.id === id)?.name).filter(Boolean).join(", ") || null,
+    folderNames(w) || null,
     platformOf(w.platformId).name,
   ].filter(Boolean).join(" · "));
 
@@ -1120,14 +1140,7 @@ function openFolderAdd(f, back) {
   /* 고르는 것도 **페이지 탭과 같은 카드**로 한다 — 같은 작품이 화면마다 다른 모양으로
      서면 어느 것이 무엇인지 다시 익혀야 한다. 다른 것은 눌렀을 때 열리는 대신 켜진다는
      것뿐이고, 켜진 것은 표지 위 체크로 말한다. */
-  const card = w => `<button class="work pick-work${picked.has(w.id) ? " on" : ""}"
-    data-add="${esc(w.id)}" aria-pressed="${picked.has(w.id)}">
-    <div class="cover" style="${coverStyle(w)}">${coverChar(w)}
-      ${w.episode ? `<span class="ep">${esc(w.episode)}</span>` : ""}
-      <span class="tick">${icon("check")}</span>
-    </div>
-    <h4>${esc(w.title)}</h4><time>${ago(w.lastAt)}</time>
-  </button>`;
+  const card = w => pickCardHtml(w, "data-add", picked);
 
   const body = () => {
     const gs = groups();
@@ -1516,6 +1529,29 @@ function renderMonth() {
   return html + calTail();
 }
 
+/** 폴더 하나하나에 대고 작품 전체를 훑는 대신, **한 번 훑어 갈라 둔다.**
+
+    폴더 목록은 줄마다 두 가지를 묻는다 — 미리보기에 쓸 넷과 개수. 둘 다 worksIn 을
+    거치면 폴더 F개에 훑기가 2F번이다. 폴더 40개 · 작품 800편에서 1.92ms 였고,
+    갈라 두면 0.13ms 다. 넷만 고르느라 정렬을 손으로 하는 것은 더 보태 주지 않는다
+    (재 보니 같은 0.13ms) — 그래서 안 한다.
+
+    **판마다 새로 만든다.** 들고 있다가 작품이 바뀌면 숫자가 어긋나는데, 작품은 화면
+    곳곳에서 손대므로 언제 낡았는지 지키기 어렵다. 만드는 값(한 번 훑기)이 쓰는 값보다
+    작으니 지키느라 애쓸 일이 아니다. */
+function folderIndex() {
+  const idx = new Map();
+  for (const w of works) {
+    if (w.state !== "active") continue;
+    for (const id of w.folders) {
+      let a = idx.get(id);
+      if (!a) idx.set(id, a = []);
+      a.push(w);
+    }
+  }
+  return idx;
+}
+
 function worksIn(fid) {
   // 전체·미분류는 **내가 보기로 한 것**만 — 남이 넣어 둔 것까지 세면 숫자가 낯설어진다
   if (fid === "_all") return activeWorks();
@@ -1900,8 +1936,14 @@ async function openInviteMore(f, done, back) {
   });
 }
 
-function folderRow(fid, emoji, name, f) {
-  const list = byRecent(worksIn(fid)).slice(0, 4);
+/** 폴더 한 줄. idx 를 주면 그것으로 세고, 안 주면 제가 훑는다 —
+    목록처럼 여러 줄을 한꺼번에 그리는 곳만 색인을 만들어 넘긴다. */
+function folderRow(fid, emoji, name, f, idx) {
+  const all = idx ? (fid === "_all" ? activeWorks()
+    : fid === "_none" ? activeWorks().filter(w => !w.folders.length)
+      : idx.get(fid) ?? [])
+    : worksIn(fid);
+  const list = byRecent(all).slice(0, 4);
   const mini = list.length
     ? `<div class="mini">${list.map(w => `<i style="${coverStyle(w)}"></i>`).join("")}
        ${"<i></i>".repeat(Math.max(0, 4 - list.length))}</div>`
@@ -1920,7 +1962,7 @@ function folderRow(fid, emoji, name, f) {
         f?.mirror
           ? ` <i class="mtag">${f.canEdit ? `공유폴더 · ${esc(f.mirrorOf)}` : `미러링 · ${esc(f.mirrorOf)}`}</i>`
           : f?.take === "edit" ? ` <i class="mtag">공유폴더 · 오너</i>` : ""}</b><span>${
-        f?.broken ? esc(f.broken) : `${worksIn(fid).length}개`}</span></span>
+        f?.broken ? esc(f.broken) : `${all.length}개`}</span></span>
       ${real ? "" : `<span class="chev">${icon("right")}</span>`}</button>
     ${/* 별은 폴더 딱지의 **오른쪽 끝에 이어 붙인다**. 딱지 자체가 button 이라 그 안에
          또 button 을 넣을 수는 없다(문법에도 어긋나고 누를 때 둘이 엉킨다). 형제로 두되
@@ -1974,18 +2016,27 @@ function render() {
     html += railsHtml(byRecent(activeWorks()));
   } else if (viewing) {
     // 친구의 폴더 — 보기만 한다. 고치거나 지우는 것은 주인만 할 수 있다.
-    const inFolder = f => viewing.works.filter(w => w.folders.includes(f.id));
+    /* 친구 폴더도 줄마다 두 번 훑고 있었다(미리보기 · 개수). 한 번 훑어 갈라 둔다 —
+       내 폴더 목록과 같은 이치다. */
+    const frIdx = new Map();
+    for (const w of viewing.works)
+      for (const id of w.folders) {
+        let a = frIdx.get(id);
+        if (!a) frIdx.set(id, a = []);
+        a.push(w);
+      }
     html += whoseBar() + `<div class="folders">`;
     html += viewing.folders.length
       ? viewing.folders.map(f => {
-        const list = inFolder(f).slice(0, 4);
+        const all = frIdx.get(f.id) ?? [];
+        const list = all.slice(0, 4);
         // 내 폴더 줄과 같은 모양 — 표지가 있으면 표지를, 없으면 아이콘 하나를 보여 준다
         const mini = list.length
           ? `<div class="mini">${list.map(w => `<i style="${coverStyle(w)}"></i>`).join("")}
              ${"<i></i>".repeat(Math.max(0, 4 - list.length))}</div>`
           : `<div class="mini solo">${f.emoji}</div>`;
         return `<button class="folder" data-fr-folder="${esc(f.id)}">${mini}
-          <span class="txt"><b>${f.emoji} ${esc(f.name)}</b><span>${inFolder(f).length}개</span></span>
+          <span class="txt"><b>${f.emoji} ${esc(f.name)}</b><span>${all.length}개</span></span>
           <span class="chev">${icon("right")}</span></button>`;
       }).join("")
       : `<div class="empty">${esc(viewing.name)}님이 나에게 공개한 폴더가 없습니다.</div>`;
@@ -1993,15 +2044,17 @@ function render() {
   } else {
     // 고르는 중에는 진짜 폴더만 남긴다 — 전체·미분류·새 폴더는 지울 수 있는 것이 아니다
     html += whoseBar() + kindChips() + folderBar() + `<div class="folders">`;
+    // 이 판에 세울 줄이 모두 함께 쓴다 — 줄마다 작품 전체를 훑지 않게
+    const idx = folderIndex();
     /* 🗂 전체와 🫙 미분류는 폴더가 아니라 **모든 작품을 보는 길**이다. 갈래를 좁힌
        화면에 그것들이 서 있으면 "일반 폴더" 를 골랐는데 전부가 나오는 셈이라 어긋난다. */
     if (!folderSel && fkind === "all") {
-      html += folderRow("_all", icon("grid"), "전체");
+      html += folderRow("_all", icon("grid"), "전체", undefined, idx);
       if (activeWorks().some(w => !w.folders.length))
-        html += folderRow("_none", icon("inbox"), "미분류");
+        html += folderRow("_none", icon("inbox"), "미분류", undefined, idx);
     }
     const list = kindShown();
-    html += list.map(f => folderRow(f.id, f.emoji, f.name, f)).join("");
+    html += list.map(f => folderRow(f.id, f.emoji, f.name, f, idx)).join("");
     if (!list.length) html += `<div class="empty">이 갈래의 폴더가 없습니다.</div>`;
     // 새 폴더는 늘 만들 수 있다 — 갈래는 보는 방식일 뿐이지 만들 수 있는 것을 가르지 않는다
     if (!folderSel) html += `<button class="folder ghost" data-new-folder>${icon("plus")} 새 폴더</button>`;
@@ -2574,6 +2627,10 @@ function openWork(id, over) {
         ${w.episode ? `<dt>회차</dt><dd>${esc(w.episode)}</dd>` : ""}
         ${w.rating ? `<dt>별점</dt><dd><i class="stars-h">${starText(w.rating)}</i></dd>` : ""}
         ${st ? `<dt>상태</dt><dd>${icon(st.icon)} ${esc(st.label)}</dd>` : ""}
+        ${/* 어느 폴더에 넣어 뒀는지. 「이걸 어디에 넣었더라」 를 알아보려고 설정을 열고
+             폴더 고르개를 펼쳐 보는 일이 잦았다 — 읽기만 하면 되는 값이라 여기 적는다.
+             안 넣은 것은 줄 자체를 두지 않는다: 「없음」 은 알려 주는 바가 없다. */""}
+        ${(() => { const n = folderNames(w); return n ? `<dt>폴더</dt><dd>${esc(n)}</dd>` : ""; })()}
         <dt>마지막 실행</dt><dd>${ago(w.lastAt)}</dd>
       </dl>
     </div>
@@ -3243,11 +3300,12 @@ function openFavFolders() {
        하나씩 골라 쌓은 것이라, 쌓은 차례가 곧 내가 기억하는 차례다. */
     const list = folders.filter(f => f.starred)
       .slice().sort((a, b) => (a.starredAt || 0) - (b.starredAt || 0));
+    const favIdx = folderIndex();
     openSheet(`
       ${headHtml("즐겨찾기", { back: false, actions: false, sub: `${list.length}개` })}
       ${list.length
         ? `<div class="folders">${list
-            .map(f => folderRow(f.id, f.emoji, f.name, f)).join("")}</div>`
+            .map(f => folderRow(f.id, f.emoji, f.name, f, favIdx)).join("")}</div>`
         : `<div class="empty">즐겨찾기에 넣은 폴더가 없습니다.<br>폴더 목록에서 별을 눌러 보세요.</div>`}`);
 
     sheet.addEventListener("click", e => {
@@ -4308,12 +4366,16 @@ async function openFriends() {
   const bulkHtml = () => {
     // 고르기 전에는 「선택」 하나만. 왼쪽 끝에 두어 찾기 칸의 왼쪽 모서리와 줄을 맞춘다.
     if (!sel) return `<div class="fr-pick"><button class="mini-btn" data-fsel>선택</button></div>`;
-    /* 「전체 선택」은 두지 않는다 — 친구를 통째로 끊는 일에 한 번 누르면 되는 길을
-       내줄 이유가 없다. 잘못 눌러도 되돌릴 수 없는 쪽으로는 손이 더 가야 맞다.
-       고른 것을 한꺼번에 푸는 쪽은 남긴다: 그건 되돌리는 손짓이다. */
+    /* 「전체 선택」은 **지금 화면에 서 있는 사람만** 집는다 — 찾기나 즐겨찾기로 좁혀
+       놓았으면 그만큼이다. 안 보이는 사람까지 집으면 못 본 채로 끊게 된다.
+       단추 하나가 상황을 따라 이름을 바꾼다(폴더 목록과 같은 규칙) — 다 골라 놓고
+       무르고 싶을 때 누를 것을 따로 찾지 않아도 된다. */
+    const vis = shown();
+    const allPicked = vis.length > 0 && vis.every(f => sel.has(f.id));
     return `<div class="bulk">
       <b>${sel.size}명 선택</b>
-      ${sel.size ? `<button class="mini-btn" data-fsel-all>전체 해제</button>` : ""}
+      ${vis.length ? `<button class="mini-btn" data-fsel-all>${
+        allPicked ? "전체 해제" : "전체 선택"}</button>` : ""}
       <span class="bulk-act">
         <button class="mini-btn danger" data-fsel-del${sel.size ? "" : " disabled"}>친구 끊기</button>
         <button class="mini-btn" data-fsel-off>완료</button>
@@ -4378,7 +4440,13 @@ async function openFriends() {
     const off = bar.querySelector("[data-fsel-off]");
     if (off) off.onclick = () => { sel = null; repaintBar(); repaint(); };
     const all = bar.querySelector("[data-fsel-all]");
-    if (all) all.onclick = () => { sel.clear(); repaintBulk(); repaint(); };
+    if (all) all.onclick = () => {
+      // 보이는 사람만 집고 푼다 — 좁혀 놓은 화면에서 안 보이는 사람이 딸려 오면 안 된다
+      const vis = shown();
+      if (vis.length && vis.every(f => sel.has(f.id))) for (const f of vis) sel.delete(f.id);
+      else for (const f of vis) sel.add(f.id);
+      repaintBulk(); repaint();
+    };
     const del = bar.querySelector("[data-fsel-del]");
     if (del) del.onclick = cutFriends;
     // 「선택」은 이제 아래 줄에 있다 — 갈래가 바뀌므로 칸을 통째로 다시 그린다
@@ -4392,19 +4460,29 @@ async function openFriends() {
     /* 찾기 칸을 치는 동안에는 **줄 위 칸을 다시 그리지 않는다** — 갈아 끼우면 치던 칸이
        사라졌다 새로 생겨서 한글처럼 모아 쓰는 글자가 깨진다. 갈아 끼우는 것은 목록뿐이다. */
     const q2 = bar.querySelector(".arch-q");
-    if (q2) q2.addEventListener("input", () => { query = q2.value; repaint(); });
+    if (q2) q2.addEventListener("input", () => {
+      query = q2.value;
+      repaint();
+      /* 「전체 선택 / 해제」는 **보이는 사람**을 보고 글자를 정한다. 좁히거나 넓히면
+         보이는 사람이 달라지므로 그 글자도 다시 세야 한다 — 안 그러면 일곱 중 넷만
+         골라 놓고 「전체 해제」라 적혀 있다. 갈아 끼우는 것은 아래 셈줄뿐이라
+         치던 칸은 그대로 남는다. */
+      repaintBulk();
+    });
 
     const st = bar.querySelector("[data-only-star]");
     if (st) {
-      const paintStar = () => {
+      /* 이름이 바깥의 paintStar(별 하나를 칠하는 것)와 겹치면 안 된다 — 여기 것은
+         즐겨찾기 **거르개**를 칠한다. 같은 이름이면 읽는 사람이 매번 어느 쪽인지 가려야 한다. */
+      const paintFilter = () => {
         st.classList.toggle("on", onlyStar);
         st.setAttribute("aria-pressed", onlyStar);
         st.innerHTML = onlyStar ? icon("star", "on") + ` 즐겨찾기 ${starred()}명`
           : icon("star") + " 즐겨찾기";
       };
-      paintStar();
+      paintFilter();
       // 제 글자만 고쳐 쓴다 — 옆의 찾기 칸을 함께 갈아 끼울 이유가 없다
-      st.onclick = () => { onlyStar = !onlyStar; paintStar(); repaint(); };
+      st.onclick = () => { onlyStar = !onlyStar; paintFilter(); repaint(); repaintBulk(); };
     }
   }
 

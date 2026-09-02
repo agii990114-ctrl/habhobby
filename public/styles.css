@@ -339,13 +339,13 @@
     /* 스냅은 padding 을 모르고 컨테이너 끝에 카드를 붙인다 — 그러면 첫 카드가
        화면 왼쪽 끝에 딱 붙어 여백이 사라진다. 스냅에도 같은 여백을 알려 준다. */
     scroll-padding-left: 16px;
+    scrollbar-width: thin; scrollbar-color: var(--line-2) transparent;   /* 파이어폭스 */
   }
   .rail .work { flex: none; width: 106px; scroll-snap-align: start; }
   .rail::-webkit-scrollbar { height: 6px; }
   .rail::-webkit-scrollbar-track { background: transparent; }
   .rail::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 99px; }
   .rail::-webkit-scrollbar-thumb:hover { background: var(--ink-3); }
-  .rail { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
 
   /* ── Folders ───────────────────────── */
   .folders { display: flex; flex-direction: column; gap: 7px; }
@@ -684,13 +684,16 @@
     color: var(--accent-ink); text-decoration: underline; text-underline-offset: 2px;
   }
   /* 같은 이름을 쓰는 구간이 있을 때 뜨는 제안 */
+  /* 한 블록으로 둔다 — 아래에 같은 이름을 또 적어 flex-direction 과 align-items 를
+     덮어쓰고 있었다. 위에 적힌 align-items: center 는 죽은 글자였고, 읽는 사람은
+     두 곳을 겹쳐 봐야 실제 모양을 알 수 있었다. */
   .twin {
-    display: flex; align-items: center; flex-wrap: wrap; gap: 6px 9px;
+    display: flex; flex-direction: column; align-items: stretch;
+    flex-wrap: wrap; gap: 6px 9px;
     margin-bottom: 12px; padding: 10px 12px; font-size: 12.5px;
     background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
     border-radius: 10px;
   }
-  .twin { flex-direction: column; align-items: stretch; }
   .twin b { color: var(--accent-ink); }
   .twin-top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; }
   .twin-top span { color: var(--ink-3); font-size: 11.5px; margin-left: auto; }

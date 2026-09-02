@@ -1730,13 +1730,16 @@ function openOthersWork(w, opts) {
   if (take) take.onclick = guard(async () => {
     const r = await api("POST", `/api/friends/${ownerId}/take`, { work: w.id });
     await reload(); render();
-    /* 돌아갈 곳을 **지금 잡아 둔다.** 작품 설정은 제 시트를 새로 열면서 쌓아 둔 되돌림
-       더미를 비우므로(openSheet), 그 뒤에 closeSheet 를 불러 봐야 창만 닫힌다.
-       `over` 는 이 창이 덮고 있던 자리를 다시 여는 손잡이다 — 그것을 그대로 넘긴다. */
-    const back = opts.over ?? (() => hideSheet());
     toast(r.already ? `«${r.title}» 은(는) 이미 담겨 있습니다` : `«${r.title}» 담았습니다`);
-    if (r.id && works.some(x => x.id === r.id)) openWorkSettings(r.id, { back });
-    else back();
+    /* **담긴 뒤의 모습을 보여 준다.** 이미 저장이 끝난 뒤라 곧바로 고치는 창을 여는 것은
+       한 걸음 앞서간다 — 무엇이 담겼는지 먼저 보고, 고칠 것이 있으면 거기서 「설정」으로
+       들어가면 된다. 남의 작품 창과 같은 모양이라 눈이 옮겨 갈 자리도 그대로다.
+
+       `over` 는 이 창이 덮고 있던 자리(친구 폴더)를 다시 여는 손잡이다. 그대로 넘기면
+       닫았을 때 보던 자리로 돌아온다. */
+    if (r.id && works.some(x => x.id === r.id)) openWork(r.id, opts.over);
+    else if (opts.over) opts.over();
+    else hideSheet();
   });
 }
 
@@ -2068,6 +2071,10 @@ function hideSheet() {
   back.hidden = true;
   // 폴더 팝업은 주소에도 남아 있다 — 닫으면 같이 비운다
   if (openFolderId !== null) { openFolderId = null; writeHash(); }
+  /* 골라 둔 작품도 여기서 버린다. 창을 닫는 것은 **하던 일을 그만두는 것**이라,
+     같은 폴더를 다시 열었을 때 지난번에 고른 것이 그대로 켜져 있으면 안 된다 —
+     골라 둔 줄 모르고 「휴지통」을 누르게 된다. */
+  workSel = null; workSelKey = null;
   sheet.className = "sheet";
   sheet.style.transform = ""; sheet.style.transition = "";
   sheet.innerHTML = "";
@@ -3246,7 +3253,7 @@ function openFolderForm(existing, after) {
            안 고른 갈래의 설명은 지금 읽을 이야기가 아니다. */""}
       <div data-take-box${share.mode === "none" ? " hidden" : ""}>${takeHtml()}</div>
     </div>` : ""}
-    ${existing ? `<div class="link-row"><button class="btn" id="fdel">폴더 삭제</button></div>` : ""}
+    ${existing ? `<div class="link-row"><button class="btn bad" id="fdel">폴더 삭제</button></div>` : ""}
     <div class="link-row wide-only">
       <button class="btn" data-cancel>취소</button>
       <button class="btn primary" data-done>${existing ? "저장" : "만들기"}</button>
@@ -4133,8 +4140,8 @@ async function openFriends() {
     <button class="uf-item" data-friend="${esc(f.id)}">
       <span class="ub"><b>${esc(f.displayName)}</b>
         <span>${f.sharedFolders ? `나에게 공개한 폴더 ${f.sharedFolders}개` : "나에게 공개한 폴더 없음"}</span></span>
-      ${/* 고르는 중에는 화살표도 별도 치운다 — 지금 할 수 있는 일은 고르는 것뿐이다 */""}
-      ${sel ? "" : `<span class="chev">${icon("right")}</span>`}</button>
+      ${/* 화살표는 두지 않는다 — 이 목록의 줄은 전부 눌리는 것이라 하나하나에 "눌러도
+           된다" 를 붙일 이유가 없고, 그만큼 이름 쓸 자리가 좁아진다. */""}</button>
     ${sel ? "" : starHtml(f)}</div>`;
 
   /* 목록은 **첫소리 차례**다. 오른쪽 ㄱㄴㄷ 띠를 짚어 뛰려면 차례가 그 띠와 같아야 한다 —
@@ -4709,9 +4716,12 @@ document.addEventListener("keydown", e => {
 
 document.getElementById("btn-search").onclick = openFind;
 document.getElementById("menu-search").onclick = () => { closeDrawer(); openFind(); };
-document.getElementById("tab-cal").onclick = () => { tab = "cal"; render(); };
-document.getElementById("tab-home").onclick = () => { tab = "home"; render(); };
-document.getElementById("tab-lib").onclick = () => { tab = "lib"; closeSheet(); render(); };
+/* 탭을 옮기는 것도 **하던 일을 그만두는 것**이다 — 폴더를 골라 둔 채 캘린더에 다녀오면,
+   돌아왔을 때 무엇을 왜 골랐는지 기억나지 않는다. */
+const goTab = t => { tab = t; folderSel = null; render(); };
+document.getElementById("tab-cal").onclick = () => goTab("cal");
+document.getElementById("tab-home").onclick = () => goTab("home");
+document.getElementById("tab-lib").onclick = () => { closeSheet(); goTab("lib"); };
 
 /* 폴더 줄도 꾹 누르면 고르기로 들어간다 — 친구 목록과 같은 손짓이다.
    🗂 전체와 🫙 미분류는 진짜 폴더가 아니라 고를 것이 없다. */

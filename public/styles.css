@@ -141,11 +141,24 @@
     #menu-bell { display: flex; }
     #menu-badge:not([hidden]) { display: block; }
   }
+  /* ── 붙박이 아이콘 ──
+     이모지 대신 직접 그린 조각들(app.js 의 ICONS). 선으로만 그리고 빛깔은 글자를 따른다 —
+     버튼 안에서든 글줄 안에서든 그 자리 색이 그대로 오도록. 크기는 글자 크기에 매어
+     두어, 큰 버튼에 놓으면 알아서 커진다. */
+  .ic {
+    width: 1.25em; height: 1.25em; flex: none; display: inline-block; vertical-align: -.26em;
+    fill: none; stroke: currentColor; stroke-width: 1.7;
+    stroke-linecap: round; stroke-linejoin: round;
+  }
+  /* 별은 켜면 안이 찬다 — 테두리만으로는 켜졌는지 멀리서 안 보인다 */
+  .ic.on { fill: currentColor; }
   .icon-btn {
     width: 30px; height: 30px; flex: none; border-radius: 9px; cursor: pointer;
     border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-3);
     font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center;
   }
+  /* 버튼 한가운데 홀로 서는 아이콘은 글줄 기준선을 따를 이유가 없다 */
+  .icon-btn .ic, .fab .ic, .mini-btn .ic { vertical-align: 0; }
   .icon-btn:hover { border-color: var(--ink-3); color: var(--ink); }
   /* 제목 글줄 **안에** 서는 버튼(폴더 제목 옆의 공유자). 제목에 딸린 것이므로 글자와 함께
      흘러야 한다 — 오른쪽 버튼 무리에 두면 「이 폴더에 무엇을 할까」 사이에 「누가 있나」가

@@ -114,7 +114,7 @@ function byInitial(list) {
 /** 별 하나 — 켜고 끄는 것은 친구 목록에서만 한다 (README 「즐겨찾기」) */
 const starHtml = f => `<button class="star" data-star="${esc(f.id)}"
   aria-pressed="${!!f.starred}" title="즐겨찾기"
-  aria-label="${esc(f.displayName)} 즐겨찾기">★</button>`;
+  aria-label="${esc(f.displayName)} 즐겨찾기">${icon("star", f.starred ? "on" : "")}</button>`;
 
 /* 도메인 구간의 이름을 사이트가 밝힌 og:site_name 으로 채운다.
    한 사이트당 한 번이면 되고, 못 얻으면 주소 그대로 둔다 — 있으면 좋은 것이지 없다고 못 쓸 것은 아니다. */
@@ -159,13 +159,62 @@ const SCHED_HINT = {
 };
 const PROVIDER_LABEL = { kakao: "카카오", naver: "네이버", google: "Google",
   local: "이 기기", guest: "둘러보기", password: "아이디 로그인" };
+/* ── 붙박이 아이콘 ────────────────────────────────────────
+   한때 이 자리들이 전부 이모지였다. 그런데 이모지는 **기기가 그린다** — 윈도우의 🔔과
+   아이폰의 🔔이 서로 다른 그림이고, 크기도 굵기도 글줄 위 높이도 제각각이라 버튼마다
+   따로 맞춰야 했다.
+
+   그렇다고 아이콘 글꼴(폰트어썸 같은)을 부르지는 않는다. 쓰는 것은 열몇 개인데 세트
+   하나가 수천 개분 글리프를 싣고 오고, 무엇보다 **바깥으로 요청이 하나 는다** — 이 앱은
+   의존성이 없고 화면 파일을 한 번에 내보내는 것이 값의 대부분이다.
+
+   그래서 필요한 것만 여기 그려 둔다. 다 합쳐 2KB 남짓이고, currentColor 를 따르므로
+   글자 빛깔이 그대로 온다. **사용자가 고르는 폴더 이모지는 그대로 둔다** — 그건 우리
+   그림이 아니라 그 사람이 고른 표식이다. */
+const ICONS = {
+  menu:    `<path d="M3.5 6.5h17M3.5 12h17M3.5 17.5h17"/>`,
+  // 「전체 목록」 — 줄 앞에 점을 찍어 그냥 메뉴와 갈린다
+  list:    `<path d="M8.5 6.5h12M8.5 12h12M8.5 17.5h12"/><path d="M4 6.5h.01M4 12h.01M4 17.5h.01"/>`,
+  search:  `<circle cx="11" cy="11" r="6.8"/><path d="M20 20l-4.2-4.2"/>`,
+  bell:    `<path d="M18 8.5a6 6 0 1 0-12 0c0 6.5-2.6 8.5-2.6 8.5h17.2S18 15 18 8.5"/><path d="M13.8 20.5a2.2 2.2 0 0 1-3.6 0"/>`,
+  // 설정 — 톱니는 작게 그리면 뭉개진다. 손잡이 세 줄이 더 또렷하다.
+  sliders: `<path d="M3.5 7h4M11 7h9.5M3.5 12h9.5M17 12h3.5M3.5 17h5.5M13 17h7.5"/><circle cx="9.2" cy="7" r="2.1"/><circle cx="15" cy="12" r="2.1"/><circle cx="11.2" cy="17" r="2.1"/>`,
+  plus:    `<path d="M12 5.2v13.6M5.2 12h13.6"/>`,
+  // 추가 목록 — 집게 달린 판
+  board:   `<path d="M9 4.5H7A2 2 0 0 0 5 6.5v12.6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6.5a2 2 0 0 0-2-2h-2"/><rect x="9" y="2.6" width="6" height="3.8" rx="1.3"/>`,
+  // 폴더 초대 — 봉투
+  mail:    `<rect x="3" y="5.2" width="18" height="13.6" rx="2.4"/><path d="M3.6 7.6l7.4 4.9a2 2 0 0 0 2 0l7.4-4.9"/>`,
+  users:   `<circle cx="9.2" cy="8" r="3.4"/><path d="M3 20c0-3.4 2.8-5.5 6.2-5.5s6.2 2.1 6.2 5.5"/><path d="M16 5.2a3.4 3.4 0 0 1 0 6.6"/><path d="M17.6 15c2.1.7 3.4 2.4 3.4 5"/>`,
+  x:       `<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>`,
+  pencil:  `<path d="M4 20h4L18.4 9.6a2.4 2.4 0 0 0-3.4-3.4L4.6 16.6z"/><path d="M14.4 7.4l2.6 2.6"/>`,
+  star:    `<path d="M12 3.6l2.7 5.5 6 .9-4.35 4.2 1.03 6-5.38-2.83L6.62 20.2l1.03-6L3.3 10l6-.9z"/>`,
+  check:   `<path d="M4.8 12.6l4.8 4.8L19.2 6.9"/>`,
+  trash:   `<path d="M3.8 6.8h16.4"/><path d="M9.4 6.8V5A1.4 1.4 0 0 1 10.8 3.6h2.4A1.4 1.4 0 0 1 14.6 5v1.8"/><path d="M6.4 6.8l.95 12.3a2 2 0 0 0 2 1.85h5.3a2 2 0 0 0 2-1.85l.95-12.3"/><path d="M10.3 10.6v6.6M13.7 10.6v6.6"/>`,
+  left:    `<path d="M14.8 5.2L8 12l6.8 6.8"/>`,
+  right:   `<path d="M9.2 5.2L16 12l-6.8 6.8"/>`,
+  // 「전체」 — 네 칸으로 나눈 판. 폴더가 아니라 **모두를 보는 길**이라 폴더처럼 안 그린다.
+  grid:    `<rect x="3.4" y="3.4" width="7.4" height="7.4" rx="1.6"/><rect x="13.2" y="3.4" width="7.4" height="7.4" rx="1.6"/><rect x="3.4" y="13.2" width="7.4" height="7.4" rx="1.6"/><rect x="13.2" y="13.2" width="7.4" height="7.4" rx="1.6"/>`,
+  // 폴더 줄 오른쪽의 ⋮ — 그 줄에 딸린 것을 더 여는 자리
+  dots:    `<circle cx="12" cy="5.2" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18.8" r="1.5"/>`,
+  // 「미분류」 — 아직 안 갈라 놓은 것이 담기는 함
+  inbox:   `<path d="M3 12.5h4.6l1.5 3h5.8l1.5-3H21"/><path d="M5 5.6L3 12.5v5.1a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5.1l-2-6.9a2 2 0 0 0-1.9-1.4H6.9A2 2 0 0 0 5 5.6z"/>`,
+};
+
+/** 아이콘 한 조각. 크기와 빛깔은 자리마다 CSS가 정한다. */
+const icon = (name, cls = "") => ICONS[name]
+  ? `<svg class="ic${cls ? " " + cls : ""}" viewBox="0 0 24 24" aria-hidden="true"
+      focusable="false">${ICONS[name]}</svg>`
+  : "";
+
 const STATES = {
-  watched: { label: "감상 완료", icon: "✓", desc: "끝까지 본 시리즈" },
-  dropped: { label: "휴지통", icon: "🗑", desc: "더 보지 않는 시리즈" },
+  watched: { label: "감상 완료", icon: "check", desc: "끝까지 본 시리즈" },
+  dropped: { label: "휴지통", icon: "trash", desc: "더 보지 않는 시리즈" },
 };
 
 const MAX_STAR = 5;
-const starText = n => "★".repeat(n) + "☆".repeat(MAX_STAR - n);
+/* 별점은 **그린 별**로 적는다. ★☆ 는 글꼴이 그리는 것이라 기기마다 굵기가 달랐고,
+   켠 것과 안 켠 것의 대비도 글꼴에 맡겨야 했다. 여기서는 안을 채우고 비우는 차이다. */
+const starText = n => icon("star", "on").repeat(n) + icon("star").repeat(MAX_STAR - n);
 
 /** 받침에 따라 "으로 / 로"를 고른다 — "휴지통으로", "감상 완료로" */
 function ro(word) {
@@ -575,10 +624,10 @@ function railsHtml(list) {
       <div class="plat-h">
         <span class="pmark" style="background:${p.color};color:${p.fg}">${esc(p.initial)}</span>
         <b${p.isDomain && !p.overridden ? ' class="dom"' : ""}>${esc(p.name)}</b>
-        <button class="edit-dom" data-plat="${esc(pid)}" title="이름·색·마크 바꾸기">✏️</button>
+        <button class="edit-dom" data-plat="${esc(pid)}" title="이름·색·마크 바꾸기">${icon("pencil")}</button>
         <span>${items.length}편</span>
         <span class="plat-act">
-          <button class="edit-dom" data-plat-all="${esc(pid)}" title="전체 목록" aria-label="전체 목록">☰</button>
+          <button class="edit-dom" data-plat-all="${esc(pid)}" title="전체 목록" aria-label="전체 목록">${icon("list")}</button>
         </span>
       </div>
       <div class="rail">${items.map(w => workCard(w)).join("")}</div>
@@ -592,7 +641,7 @@ function rowHtml(w, sub, mini) {
   return `<button class="row${mini ? " mini" : ""}${st ? " done" : ""}" data-id="${w.id}"
     ${st ? `title="${esc(st.label)}"` : ""}>
     <span class="thumb" style="${coverStyle(w)}">${coverChar(w)}</span>
-    <span class="rt"><b>${st ? `<i class="st">${st.icon}</i> ` : ""}${esc(w.title)}</b>
+    <span class="rt"><b>${st ? `<i class="st">${icon(st.icon)}</i> ` : ""}${esc(w.title)}</b>
       <span>${esc(sub ?? p.name)}</span></span>
     <span class="pdot" style="background:${workColor(w)}"></span>
   </button>`;
@@ -716,7 +765,7 @@ const secHtml = (g, allAttr) => `<section class="plat">
       <b>${esc(g.label)}</b><span>${g.items.length}편</span>
       <span class="plat-act">
         <button class="edit-dom" ${allAttr}
-          title="전체 목록" aria-label="${esc(g.label)} 전체 목록">☰</button>
+          title="전체 목록" aria-label="${esc(g.label)} 전체 목록">${icon("list")}</button>
       </span>
     </div>
     <div class="rail">${g.items.map(w => workCard(w,
@@ -795,7 +844,7 @@ function drawIdle() {
   ].filter(Boolean).join(" · "));
 
   const head = (title, back) => `<div class="crumb">
-      ${back ? `<button data-idle-back aria-label="돌아가기">‹</button>` : ""}
+      ${back ? `<button data-idle-back aria-label="돌아가기">${icon("left")}</button>` : ""}
       <h3>${title}</h3></div>`;
 
   let body;
@@ -857,14 +906,14 @@ function drawDayList(t) {
   const body = !total
     ? `<div class="empty">이 날에는 놓인 작품이 없습니다.</div>`
     : g
-      ? `<div class="crumb"><button data-day-back aria-label="돌아가기">‹</button>
+      ? `<div class="crumb"><button data-day-back aria-label="돌아가기">${icon("left")}</button>
            <h3>${esc(g.label)}</h3><span class="count">${g.items.length}편</span></div>
          ${gridHtml(g.items, "비어 있습니다.")}`
       : groups.map(x => `<section class="plat">
           <div class="plat-h"><b>${esc(x.label)}</b><span>${x.items.length}편</span>
             <span class="plat-act">
               <button class="edit-dom" data-day-grp="${esc(x.key)}"
-                title="전체 목록" aria-label="${esc(x.label)} 전체 목록">☰</button>
+                title="전체 목록" aria-label="${esc(x.label)} 전체 목록">${icon("list")}</button>
             </span>
           </div>
           <div class="rail">${x.items.map(w => workCard(w)).join("")}</div>
@@ -923,7 +972,7 @@ function openFolderAdd(f, back) {
     data-add="${esc(w.id)}" aria-pressed="${picked.has(w.id)}">
     <div class="cover" style="${coverStyle(w)}">${coverChar(w)}
       ${w.episode ? `<span class="ep">${esc(w.episode)}</span>` : ""}
-      <span class="tick">✓</span>
+      <span class="tick">${icon("check")}</span>
     </div>
     <h4>${esc(w.title)}</h4><time>${ago(w.lastAt)}</time>
   </button>`;
@@ -940,7 +989,7 @@ function openFolderAdd(f, back) {
       const p = platformOf(detail);
       const all = items.length && items.every(w => picked.has(w.id));
       return `<div class="plat-h" style="margin-bottom:12px">
-          <button class="icon-btn" data-back-rails aria-label="구간 목록으로">‹</button>
+          <button class="icon-btn" data-back-rails aria-label="구간 목록으로">${icon("left")}</button>
           <span class="pmark" style="background:${p.color};color:${p.fg}">${esc(p.initial)}</span>
           <b>${esc(p.name)}</b><span>${items.length}편</span>
           ${items.length ? `<button class="mini-btn" data-gall="${esc(detail)}">${
@@ -961,7 +1010,7 @@ function openFolderAdd(f, back) {
           <span class="plat-act">
             <button class="mini-btn" data-gall="${esc(pid)}">${all ? "구간 해제" : "구간 선택"}</button>
             ${/* 페이지 탭과 같은 자리, 같은 아이콘 — 레일에 다 안 들어가면 여기서 펼친다 */""}
-            <button class="edit-dom" data-more="${esc(pid)}" title="전체 목록" aria-label="전체 목록">☰</button>
+            <button class="edit-dom" data-more="${esc(pid)}" title="전체 목록" aria-label="전체 목록">${icon("list")}</button>
           </span>
         </div>
         <div class="rail">${items.map(card).join("")}</div>
@@ -1060,7 +1109,10 @@ function openFolderSheet(id) {
   openFolderId = id;
   writeHash();
 
-  const name = id === "_all" ? "🗂 전체" : id === "_none" ? "🫙 미분류" : `${f.emoji} ${f.name}`;
+  /* 🗂 · 🫙 는 우리가 고른 표식이라 그린 아이콘으로, 폴더 이모지는 그 사람이 고른 것이라
+     그대로 둔다. */
+  const name = id === "_all" ? icon("grid") + " 전체"
+    : id === "_none" ? icon("inbox") + " 미분류" : `${f.emoji} ${f.name}`;
   const inFolder = byRecent(worksIn(id));
   const shown = inFolder.filter(w => filter === "all" || w.mediaType === filter);
   const types = ["all", ...Object.keys(MEDIA).filter(t => inFolder.some(w => w.mediaType === t))];
@@ -1082,10 +1134,10 @@ function openFolderSheet(id) {
   if (f) {
     // 전체·미분류는 진짜 폴더가 아니라 고칠 것이 없다
     const head = sheet.querySelector(".sheet-head");
-    const mk = (glyph, label, cls, onclick) => {
+    const mk = (name, label, cls, onclick) => {
       const b = document.createElement("button");
       b.className = "icon-btn" + (cls ? " " + cls : "");
-      b.textContent = glyph;
+      b.innerHTML = icon(name);
       b.title = label;
       b.setAttribute("aria-label", label);
       b.onclick = onclick;
@@ -1097,7 +1149,7 @@ function openFolderSheet(id) {
        섞어 두었을 때는 「이 폴더를 어떻게 할까」 버튼들 사이에 「누가 있나」 가 끼어
        무엇을 하는 자리인지 흐렸다. 제목에 딸린 것은 제목 옆에 둔다. */
     if (f.take === "edit" || f.canEdit) {
-      const who = mk("👥", "공유자", "in-title", guard(async () => {
+      const who = mk("users", "공유자", "in-title", guard(async () => {
         // 이름을 보여 주려면 친구 목록이 있어야 한다 (「친구가 많아지면」)
         try { await loadFriends(); } catch { /* 못 불러와도 상태는 보여 준다 */ }
         openFolderPeople(f, () => openFolderSheet(id));
@@ -1111,8 +1163,8 @@ function openFolderSheet(id) {
        함께 쓰는 폴더만 예외다(canEdit): 그때는 원본 폴더에 걸린다.
        누를 수 있는데 아무 일도 안 일어나는 버튼은 두지 않는다. */
     if (!f.mirror || f.canEdit)
-      head.append(mk("＋", "작품 넣기", "", () => openFolderAdd(f, () => openFolderSheet(id))));
-    head.append(mk("⚙", "폴더 설정", "", () => openFolderForm(f, f2 => {
+      head.append(mk("plus", "작품 넣기", "", () => openFolderAdd(f, () => openFolderSheet(id))));
+    head.append(mk("sliders", "폴더 설정", "", () => openFolderForm(f, f2 => {
       closeSheet();
       render();
       if (f2) openFolderSheet(f2.id);        // 고치고 나면 보던 폴더로 돌아온다
@@ -1155,7 +1207,7 @@ function renderWeek() {
       <div class="colb">${list.length
         ? shown.slice(0, WEEK_MAX).map(w => rowHtml(w, null, true)).join("")
           + (list.length > WEEK_MAX
-            ? `<button class="more" data-day-all="${d.getTime()}">＋${
+            ? `<button class="more" data-day-all="${d.getTime()}">${icon("plus")}${
                 list.length - WEEK_MAX}편 더보기</button>`
             : "")
         : `<div class="rest">—</div>`}</div>
@@ -1229,9 +1281,9 @@ function renderMonth() {
   const sel = calDay && inMonth(calDay) ? new Date(calDay) : null;
 
   let html = `<div class="cal-nav">
-    <button data-cal-move="-1" aria-label="이전 달">‹</button>
+    <button data-cal-move="-1" aria-label="이전 달">${icon("left")}</button>
     <b>${y}년 ${m + 1}월</b>
-    <button data-cal-move="1" aria-label="다음 달">›</button>
+    <button data-cal-move="1" aria-label="다음 달">${icon("right")}</button>
     ${thisMonth ? "" : `<button class="today-btn" data-cal-today>오늘로</button>`}
   </div><div class="mon-grid">`;
 
@@ -1263,12 +1315,12 @@ function renderMonth() {
       <div class="day-h">
         <h4>${m + 1}월 ${sel.getDate()}일 ${DOW[sel.getDay()]}요일${sameDay(sel, t0) ? " · 오늘" : ""}</h4>
         <span>${list.length ? `${list.length}편` : ""}</span>
-        <button data-cal-close aria-label="목록 닫기">✕</button>
+        <button data-cal-close aria-label="목록 닫기">${icon("x")}</button>
       </div>
       ${list.length
         ? shown.slice(0, WEEK_MAX).map(w => rowHtml(w, schedText(w))).join("")
           + (list.length > WEEK_MAX
-            ? `<button class="more" data-day-all="${sel.getTime()}">＋${
+            ? `<button class="more" data-day-all="${sel.getTime()}">${icon("plus")}${
                 list.length - WEEK_MAX}편 더보기</button>`
             : "")
         : `<div class="rest">이 날은 예정된 업데이트가 없습니다.</div>`}</div>`;
@@ -1394,9 +1446,9 @@ async function openWhose() {
        어디서 켠 것인지 헷갈린다. 순서는 서버가 이미 별 켠 사람을 위로 올려 준다. */
     return list.map(f => `<button class="uf-item" data-go-friend="${esc(f.id)}">
       <span class="thumb ph">${esc(f.displayName.slice(0, 1))}</span>
-      <span class="ub"><b>${f.starred ? `<i class="star-on">★</i> ` : ""}${esc(f.displayName)}</b>
+      <span class="ub"><b>${f.starred ? `<i class="star-on">${icon("star", "on")}</i> ` : ""}${esc(f.displayName)}</b>
         <span>나에게 공개한 폴더 ${f.sharedFolders}개</span></span>
-      ${viewing?.id === f.id ? `<span class="wnow">보는 중</span>` : `<span class="chev">›</span>`}</button>`).join("");
+      ${viewing?.id === f.id ? `<span class="wnow">보는 중</span>` : `<span class="chev">${icon("right")}</span>`}</button>`).join("");
   };
 
   openSheet(`
@@ -1597,7 +1649,7 @@ async function openFolderPeople(f, back) {
         ? `함께 쓰는 사람${wait ? ` · ${wait}명이 아직 대기 중입니다` : ""}`
         : `${esc(f.mirrorOf)}님과 함께 쓰는 폴더` })}
     ${rows()}
-    ${mine ? `<button class="btn" style="width:100%;margin-top:12px" data-more-people>＋ 더 부르기</button>
+    ${mine ? `<button class="btn" style="width:100%;margin-top:12px" data-more-people>${icon("plus")} 더 부르기</button>
       <div class="rest" style="text-align:left;padding:10px 2px 0">
         연결을 해제하면 그 사람은 이 폴더를 더 볼 수 없고, 넣어 둔 작품도 이 폴더에서
         빠집니다 — 작품 자체는 그 사람 목록에 남습니다. 끊겼다는 것은 그쪽에도 알려집니다.</div>` : ""}`);
@@ -1684,9 +1736,9 @@ function folderRow(fid, emoji, name, f) {
           ? ` <i class="mtag">${f.canEdit ? `공유폴더 · ${esc(f.mirrorOf)}` : `미러링 · ${esc(f.mirrorOf)}`}</i>`
           : f?.take === "edit" ? ` <i class="mtag">공유폴더 · 오너</i>` : ""}</b><span>${
         f?.broken ? esc(f.broken) : `${worksIn(fid).length}개`}</span></span>
-      ${real ? "" : `<span class="chev">›</span>`}</button>
+      ${real ? "" : `<span class="chev">${icon("right")}</span>`}</button>
     ${real && !folderSel ? `<button class="folder-more" data-folder-edit="${fid}"
-      title="폴더 설정" aria-label="${esc(name)} 설정">⋮</button>` : ""}
+      title="폴더 설정" aria-label="${esc(name)} 설정">${icon("dots")}</button>` : ""}
   </div>`;
 }
 
@@ -1743,7 +1795,7 @@ function render() {
           : `<div class="mini solo">${f.emoji}</div>`;
         return `<button class="folder" data-fr-folder="${esc(f.id)}">${mini}
           <span class="txt"><b>${f.emoji} ${esc(f.name)}</b><span>${inFolder(f).length}개</span></span>
-          <span class="chev">›</span></button>`;
+          <span class="chev">${icon("right")}</span></button>`;
       }).join("")
       : `<div class="empty">${esc(viewing.name)}님이 나에게 공개한 폴더가 없습니다.</div>`;
     html += `</div>`;
@@ -1753,14 +1805,15 @@ function render() {
     /* 🗂 전체와 🫙 미분류는 폴더가 아니라 **모든 작품을 보는 길**이다. 갈래를 좁힌
        화면에 그것들이 서 있으면 "일반 폴더" 를 골랐는데 전부가 나오는 셈이라 어긋난다. */
     if (!folderSel && fkind === "all") {
-      html += folderRow("_all", "🗂", "전체");
-      if (activeWorks().some(w => !w.folders.length)) html += folderRow("_none", "🫙", "미분류");
+      html += folderRow("_all", icon("grid"), "전체");
+      if (activeWorks().some(w => !w.folders.length))
+        html += folderRow("_none", icon("inbox"), "미분류");
     }
     const list = kindShown();
     html += list.map(f => folderRow(f.id, f.emoji, f.name, f)).join("");
     if (!list.length) html += `<div class="empty">이 갈래의 폴더가 없습니다.</div>`;
     // 새 폴더는 늘 만들 수 있다 — 갈래는 보는 방식일 뿐이지 만들 수 있는 것을 가르지 않는다
-    if (!folderSel) html += `<button class="folder ghost" data-new-folder>＋ 새 폴더</button>`;
+    if (!folderSel) html += `<button class="folder ghost" data-new-folder>${icon("plus")} 새 폴더</button>`;
     html += `</div>`;
   }
 
@@ -1915,7 +1968,7 @@ sheet.addEventListener("click", e => { if (e.target.closest("[data-close]")) clo
 function headHtml(title, opts = {}) {
   const { back = true, save = "저장", cancel = "취소", sub = "", actions = true } = opts;
   return `<div class="crumb">
-      ${back ? `<button data-head-back aria-label="돌아가기">‹</button>` : ""}
+      ${back ? `<button data-head-back aria-label="돌아가기">${icon("left")}</button>` : ""}
       <h3>${title}</h3>
       ${actions ? `<span class="crumb-act">
         <button class="mini-btn" data-cancel>${cancel}</button>
@@ -1963,7 +2016,7 @@ function openSheet(html, opts = {}) {
      닫기 버튼은 마우스가 있는 기기에서만 보인다 (styles.css). */
   const top = inner => `<div class="sheet-top">
       <div class="handle-zone"><div class="handle"></div></div>
-      <button class="sheet-x" data-close type="button" aria-label="닫기" title="닫기">✕</button>
+      <button class="sheet-x" data-close type="button" aria-label="닫기" title="닫기">${icon("x")}</button>
       ${inner}
     </div>`;
 
@@ -2336,7 +2389,7 @@ function openWorkSettings(id, opts) {
   const again = () => openWorkSettings(id, { ...o, mode, back: o.back, snap, draft });
 
   openSheet(`
-    <div class="crumb"><button data-back-work aria-label="돌아가기">‹</button><h3>작품 설정</h3>
+    <div class="crumb"><button data-back-work aria-label="돌아가기">${icon("left")}</button><h3>작품 설정</h3>
       <span class="crumb-act">
         <button class="mini-btn" data-cancel>취소</button>
         <button class="mini-btn on" data-done>저장</button>
@@ -2372,8 +2425,8 @@ function openWorkSettings(id, opts) {
     ${pickerHtml(draft.folders)}
     <div class="field"><label>목록에서 내리기</label>
       <div class="link-row">
-        <button class="btn" data-act="watched">✓ 시리즈 감상 완료</button>
-        <button class="btn" data-act="dropped">🗑 휴지통</button>
+        <button class="btn" data-act="watched">${icon("check")} 시리즈 감상 완료</button>
+        <button class="btn" data-act="dropped">${icon("trash")} 휴지통</button>
       </div>
       <div class="rest" style="text-align:left;padding:7px 2px 0">
         어느 쪽이든 지워지지 않습니다. 왼쪽 메뉴의 보관함으로 옮겨집니다.</div>
@@ -2458,7 +2511,7 @@ function openWorkSettings(id, opts) {
      것인지는 묻는다. 이미 매긴 점수는 지우지 않으므로 되돌리면 그대로 살아난다. */
   sheet.querySelector('[data-act="dropped"]').onclick = guard(async () => {
     const yes = await askSure({
-      title: "휴지통으로 옮길까요?", ok: "🗑 휴지통", back: again,
+      title: "휴지통으로 옮길까요?", ok: "휴지통", back: again,
       body: `${esc(w.title)} 을(를) 목록에서 내립니다. 지워지지 않고 왼쪽 메뉴의 휴지통에 남습니다.`,
     });
     if (!yes) return;
@@ -2475,11 +2528,11 @@ function openRating(w, state) {
   let picked = w.rating ?? 0;
 
   openSheet(`
-    ${headHtml(`${meta.icon} ${meta.label}`,
+    ${headHtml(`${icon(meta.icon)} ${meta.label}`,
       { back: false, save: `${esc(meta.label)}${ro(meta.label)} 옮기기`, sub: esc(w.title) })}
     <div class="field"><label>별점</label>
       <div class="stars">${Array.from({ length: MAX_STAR }, (_, i) =>
-        `<button data-star="${i + 1}" aria-label="${i + 1}점">★</button>`).join("")}</div>
+        `<button data-star="${i + 1}" aria-label="${i + 1}점">${icon("star")}</button>`).join("")}</div>
       <div class="rest" data-star-sum style="padding:4px 2px 0"></div>
     </div>
     <div class="link-row wide-only">
@@ -2491,7 +2544,7 @@ function openRating(w, state) {
   const paint = n => box.querySelectorAll("[data-star]")
     .forEach(b => b.classList.toggle("on", +b.dataset.star <= n));
   const sum = () => {
-    sheet.querySelector("[data-star-sum]").textContent =
+    sheet.querySelector("[data-star-sum]").innerHTML =
       picked ? `${starText(picked)} ${picked}점` : "안 매겨도 됩니다.";
   };
   paint(picked); sum();
@@ -2551,11 +2604,11 @@ function friendPicker(box, { all, already = [], out, onChange }) {
       <select data-pk-add aria-label="친구 고르기">
         <option value="">${esc(none)}</option>
         ${left.map(f => `<option value="${esc(f.id)}"${done.has(f.id) ? " disabled" : ""}>${
-          f.starred ? "★ " : ""}${esc(f.displayName)}${done.has(f.id) ? " — 이미 초대됨" : ""}</option>`).join("")}
+          f.starred ? icon("star", "on") + " " : ""}${esc(f.displayName)}${done.has(f.id) ? " — 이미 초대됨" : ""}</option>`).join("")}
       </select>
       ${got.length ? `<div class="pickers" style="margin-top:10px">${got.map(f =>
           `<button class="pick on" data-pk-off="${esc(f.id)}" title="빼기"
-            >${esc(f.displayName)} <i>✕</i></button>`).join("")}</div>` : ""}`;
+            >${esc(f.displayName)} <i>${icon("x")}</i></button>`).join("")}</div>` : ""}`;
     onChange?.();
   };
 
@@ -2800,7 +2853,7 @@ function pickerHtml(selected) {
         `<button class="pick" data-fid="${f.mirror ? f.mirror.folder : f.id}"
           aria-pressed="${selected.includes(f.mirror ? f.mirror.folder : f.id)}"
           >${f.emoji} ${esc(f.name)}${f.mirror ? " (함께)" : ""}</button>`).join("")}
-      <button class="pick add" data-picker-new>＋ 새 폴더</button>
+      <button class="pick add" data-picker-new>${icon("plus")} 새 폴더</button>
     </div></div>`;
 }
 
@@ -2961,7 +3014,7 @@ function openFolderForm(existing, after) {
       <div class="emoji-row" id="emo">${EMOJIS.map(e =>
     `<button data-e="${e}" aria-pressed="${e === emoji}">${e}</button>`).join("")}
         <button class="emo-more" data-emo-more aria-pressed="${own}"
-          title="직접 넣기" aria-label="아이콘 직접 넣기">＋</button>
+          title="직접 넣기" aria-label="아이콘 직접 넣기">${icon("plus")}</button>
       </div>
       <div class="emoji-own"${own ? "" : " hidden"}>
         <input id="emo-in" value="${own ? esc(emoji) : ""}" maxlength="8" spellcheck="false"
@@ -3165,7 +3218,7 @@ function openFind() {
     const rank = w => (w.state === "active" ? 0 : 1);
     return byRecent(hit).sort((a, b) => rank(a) - rank(b))
       .map(w => rowHtml(w, `${platformOf(w.platformId).name}`
-        + (w.state === "active" ? "" : ` · ${STATES[w.state].icon} ${STATES[w.state].label}`)
+        + (w.state === "active" ? "" : ` · ${icon(STATES[w.state].icon)} ${STATES[w.state].label}`)
         + ` · ${ago(w.lastAt)}`)).join("");
   };
 
@@ -3268,7 +3321,7 @@ function archRow(w) {
     } · ${ago(w.lastAt)}</span></span>
     <span class="arch-act">
       <button class="mini-btn" data-restore="${w.id}">되돌리기</button>
-      ${trash ? `<button class="mini-btn" data-trash="${w.id}">🗑 휴지통</button>`
+      ${trash ? `<button class="mini-btn" data-trash="${w.id}">${icon("trash")} 휴지통</button>`
               : `<button class="mini-btn danger" data-del="${w.id}">삭제</button>`}</span>
   </div>`;
 }
@@ -3295,7 +3348,7 @@ function archBulk() {
     ${vis.length ? `<button class="mini-btn" data-pick-all>${allPicked ? "전체 해제" : "전체 선택"}</button>` : ""}
     <span class="bulk-act">
       <button class="mini-btn" data-bulk="restore">되돌리기</button>
-      ${trash ? `<button class="mini-btn" data-bulk="trash">🗑 휴지통</button>`
+      ${trash ? `<button class="mini-btn" data-bulk="trash">${icon("trash")} 휴지통</button>`
               : `<button class="mini-btn danger" data-bulk="delete">삭제</button>`}
     </span>
   </div>`;
@@ -3328,14 +3381,14 @@ function archBody() {
             .map(w => `<i style="${coverStyle(w)}"></i>`).join("")}</div>
           <span class="txt"><b${g.stars ? ' class="stars-h"' : ""}>${g.label}</b>
             <span>${g.items.length}편</span></span>
-          <span class="chev">›</span></button>`).join("")}</div>`
+          <span class="chev">${icon("right")}</span></button>`).join("")}</div>`
       : `<div class="empty">비어 있습니다.</div>`;
 
   const g = groups.find(x => x.key === arch.group);
   // 마지막 항목을 지우면 그 묶음 자체가 없어진다 — 빈 화면에 붙들려 있지 말고 목록으로
   if (!g) { arch.group = null; return archBody(); }
 
-  return `<div class="crumb"><button data-arch-back aria-label="묶음 목록으로">‹</button>
+  return `<div class="crumb"><button data-arch-back aria-label="묶음 목록으로">${icon("left")}</button>
       <h3${g.stars ? ' class="stars-h"' : ""}>${g.label}</h3>
       <span class="count">${g.items.length}편</span></div>
     ${g.items.map(archRow).join("")}`;
@@ -3352,7 +3405,7 @@ function drawArchive() {
     ${searchHtml("작품명으로 검색", arch.q)}
     <div data-arch-bulk>${archBulk()}</div>
     <div data-arch-body>${archBody()}</div>`,
-    { full: true, title: `${meta.icon} ${meta.label}`, sub: `${meta.desc} · ${total}편` });
+    { full: true, title: `${icon(meta.icon)} ${meta.label}`, sub: `${meta.desc} · ${total}편` });
 
   // 글자마다 시트를 통째로 다시 그리면 입력 칸이 포커스를 잃는다 — 결과만 갈아 끼운다
   const repaint = () => {
@@ -3375,7 +3428,7 @@ function drawArchive() {
 
   /* 버리기·지우기는 한 건이든 여럿이든 같은 말로 묻는다. 닫으면 보던 자리로 되돌린다. */
   const sureAbout = (what, n, title) => askSure(what === "trash"
-    ? { title: "휴지통으로 옮길까요?", ok: "🗑 휴지통", back: drawArchive,
+    ? { title: "휴지통으로 옮길까요?", ok: "휴지통", back: drawArchive,
         body: n === 1 ? `${esc(title ?? "")} 을(를) 휴지통으로 옮깁니다. 거기서 되돌릴 수 있습니다.`
                       : `${n}편을 휴지통으로 옮깁니다. 거기서 되돌릴 수 있습니다.` }
     : { title: "영구 삭제할까요?", ok: "삭제", back: drawArchive,
@@ -3430,7 +3483,7 @@ function openInbox() {
       <button class="menu-item" data-go="url" style="border:1px solid var(--line-2);border-radius:11px">
         <span class="mi">🔗</span><span class="mt">URL 추가<small>주소를 붙여넣어 목록에 담기</small></span></button>
       <button class="menu-item" data-go="manual" style="border:1px solid var(--line-2);border-radius:11px">
-        <span class="mi">✎</span><span class="mt">직접 입력<small>주소 없이 제목과 일정만으로</small></span></button>
+        <span class="mi">${icon("pencil")}</span><span class="mt">직접 입력<small>주소 없이 제목과 일정만으로</small></span></button>
     </div>`);
   sheet.querySelector('[data-go="unfiled"]').onclick = openUnfiled;
   sheet.querySelector('[data-go="url"]').onclick = () => openAdd();
@@ -3447,7 +3500,7 @@ function openUnfiled() {
       return `<button class="uf-item" data-uf="${w.id}">
         <span class="thumb" style="${coverStyle(w)}">${coverChar(w)}</span>
         <span class="ub"><b>${esc(w.title)}</b><span>${esc(p.name)} · ${esc(schedText(w))}</span></span>
-        <span class="chev">›</span></button>`;
+        <span class="chev">${icon("right")}</span></button>`;
     }).join("") : `<div class="empty">모두 정리했습니다.<br>다른 앱에서 공유하면 여기에 쌓입니다.</div>`}</div>`);
   sheet.querySelector("[data-head-back]").onclick = openInbox;
   sheet.querySelector(".uf-list").addEventListener("click", e => {
@@ -3829,6 +3882,7 @@ function openNameForm(after) {
       el.focus(); el.select();
       return;
     }
+    toast("저장되었습니다");
     await reload(); render();
     after ? after() : closeSheet();
   });
@@ -3852,7 +3906,7 @@ async function openFriends() {
       <span class="thumb ph">${esc(f.displayName.slice(0, 1))}</span>
       <span class="ub"><b>${esc(f.displayName)}</b>
         <span>${f.sharedFolders ? `나에게 공개한 폴더 ${f.sharedFolders}개` : "나에게 공개한 폴더 없음"}</span></span>
-      <span class="chev">›</span></button>
+      <span class="chev">${icon("right")}</span></button>
     ${starHtml(f)}</div>`;
 
   /* 목록은 **첫소리 차례**다. 오른쪽 ㄱㄴㄷ 띠를 짚어 뛰려면 차례가 그 띠와 같아야 한다 —
@@ -3893,7 +3947,7 @@ async function openFriends() {
       링크를 받은 사람만 친구가 될 수 있습니다. 아이디로 검색해 아무나 추가하는 방식이 아닙니다.</div>
     ${friends.length ? `<div class="fr-bar">
       ${friends.length > 6 ? searchHtml("이름으로 찾기") : ""}
-      <button class="mini-btn" data-only-star aria-pressed="false">★ 즐겨찾기</button>
+      <button class="mini-btn" data-only-star aria-pressed="false">${icon("star")} 즐겨찾기</button>
     </div>` : ""}
     <div class="fr-wrap">
       <div class="fr-list" data-fr-list>${rows()}</div>
@@ -3967,7 +4021,8 @@ async function openFriends() {
     onlyStar = !onlyStar;
     only.setAttribute("aria-pressed", onlyStar);
     only.classList.toggle("on", onlyStar);
-    only.textContent = onlyStar ? `★ 즐겨찾기 ${starred()}명` : "★ 즐겨찾기";
+    only.innerHTML = onlyStar ? icon("star", "on") + ` 즐겨찾기 ${starred()}명`
+      : icon("star") + " 즐겨찾기";
     repaint();
   };
 
@@ -4165,7 +4220,7 @@ function openAppSettings() {
       }
       await reload(); render();
       openAppSettings();                       // 안내 문구까지 새로 그린다
-      toast("표시 이름을 바꿨습니다");
+      toast("저장되었습니다");
     });
   }
 

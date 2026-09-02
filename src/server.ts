@@ -929,7 +929,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
        같은 이름이 둘이면 초대 명단에서 어느 쪽인지 가릴 것이 없다. */
     const saved = setDisplayName(user.id, want);
     if (!saved) {
-      json(res, 409, { ok: false, reason: `«${want}» 은 이미 쓰는 사람이 있습니다. 다른 이름으로 정해 주세요.` });
+      json(res, 409, { ok: false, reason: "중복된 닉네임입니다." });
       return true;
     }
     json(res, 200, { ok: true, displayName: saved });

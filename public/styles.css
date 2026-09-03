@@ -683,6 +683,11 @@
   .stars-h { color: var(--star); letter-spacing: .06em; font-style: normal; }
 
   /* 보관함 검색 */
+  /* 머리줄의 돋보기 옆에 서는 찾기 칸 — 한 줄에 맞게 낮고 좁다. 좁은 화면에서는 제목을
+     밀지 않을 만큼만 차지한다. */
+  .arch-q.head-q {
+    width: min(160px, 40vw); margin-bottom: 0; padding: 6px 10px; font-size: 13px;
+  }
   .arch-q {
     width: 100%; margin-bottom: 12px; padding: 9px 12px; font-size: 13.5px;
     background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 9px;

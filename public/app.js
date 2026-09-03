@@ -5047,10 +5047,8 @@ async function openFriends() {
      친구가 적으면 접을 것도 없다 — 훑어서 찾는 편이 빠르다. */
   const barHtml = () => {
     if (!friends.length) return "";
-    const top = finding
-      ? `<div class="fr-bar">${searchHtml("이름으로 찾기", query)}</div>`
-      : "";
-    return top + `<div data-fr-bulk>${bulkHtml()}</div>`;
+    // 찾기 칸은 머리줄의 돋보기 옆에 선다(아래) — 여기는 고르기 줄뿐이다
+    return `<div data-fr-bulk>${bulkHtml()}</div>`;
   };
 
   /* 셈이 바뀔 때 갈아 끼우는 것은 **이 조각뿐**이다 — 위의 찾기 칸까지 함께 다시 그리면
@@ -5118,13 +5116,48 @@ async function openFriends() {
     find.setAttribute("aria-label", "이름으로 찾기");
     find.innerHTML = icon("search");
     find.setAttribute("aria-pressed", String(finding));
-    find.onclick = () => {
-      finding = !finding;
-      if (!finding) query = "";        // 접으면 좁힌 것도 푼다 — 안 보이는 조건이 남지 않게
-      find.setAttribute("aria-pressed", String(finding));
-      repaintBar(); repaint();
-      if (finding) sheet.querySelector(".arch-q")?.focus();
+
+    /* **칸은 돋보기 바로 옆에 선다** — 누른 자리에서 열려야 눈이 따라간다. 본문 위에
+       세웠을 때는 머리줄을 눌렀는데 초대 링크 아래에서 칸이 나타나, 어디가 열렸는지
+       한 번 찾아야 했다.
+
+       **딴 데를 누르면 접힌다.** 찾기는 잠깐 쓰는 칸이라 열어 둔 채 목록을 다루기 시작하면
+       거기 있는 줄도 모르게 좁힌 채로 보게 된다. 접을 때 좁힌 것도 함께 푼다. */
+    let qEl = null;
+    const away = e => {
+      if (!sheet.contains(find)) { document.removeEventListener("pointerdown", away); return; }
+      if (e.target.closest(".sheet-act")) return;      // 칸이나 돋보기 자체는 그대로
+      closeFind();
     };
+    const openFind = () => {
+      finding = true;
+      find.setAttribute("aria-pressed", "true");
+      qEl = document.createElement("input");
+      qEl.className = "arch-q head-q";
+      qEl.type = "search";
+      qEl.placeholder = "이름으로 찾기";
+      qEl.autocomplete = "off";
+      qEl.spellcheck = false;
+      qEl.setAttribute("aria-label", "이름으로 찾기");
+      qEl.addEventListener("input", () => {
+        query = qEl.value;
+        repaint();
+        /* 「전체 선택 / 해제」는 **보이는 사람**을 보고 글자를 정한다 — 좁히거나 넓히면
+           그 글자도 다시 세야 한다. 갈아 끼우는 것은 아래 셈줄뿐이라 치던 칸은 그대로다. */
+        repaintBulk();
+      });
+      find.before(qEl);
+      qEl.focus();
+      document.addEventListener("pointerdown", away);
+    };
+    const closeFind = () => {
+      finding = false;
+      find.setAttribute("aria-pressed", "false");
+      qEl?.remove(); qEl = null;
+      document.removeEventListener("pointerdown", away);
+      if (query) { query = ""; repaint(); repaintBulk(); }
+    };
+    find.onclick = () => (finding ? closeFind() : openFind());
     sheetAct(find);
   }
 

@@ -884,6 +884,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     }
   }
 
+  /** 보낸 값이면 다듬어 돌려주고, 아예 안 보냈으면 옛 값을 그대로 둔다.
+      빈 글자를 **지우라는 뜻**으로 살려 두는 것이 요점이다. */
+  const field = (b: any, key: string, was: string) =>
+    typeof b[key] === "string" ? b[key].trim() : was;
+
   /* 공개 대상과 퍼가기 권한을 받아 담는다. 만들 때와 고칠 때가 같은 값을 받으므로
      받아들이는 잣대도 한 곳에 둔다.
 
@@ -982,9 +987,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
         json(res, 403, { ok: false, reason: "공개 설정은 폴더 주인만 정할 수 있습니다." });
         return true;
       }
-      db.prepare("UPDATE folder SET name = COALESCE(?, name), emoji = COALESCE(?, emoji) WHERE id = ?")
-        .run(typeof b.name === "string" ? b.name.trim() : null,
-          typeof b.emoji === "string" ? b.emoji.trim() : null, id);
+      const next = field(b, "name", mine.name);
+      const nextEmoji = field(b, "emoji", mine.emoji);
+      if (!next && !nextEmoji) {
+        json(res, 400, { ok: false, reason: "이름이나 아이콘 중 하나는 정해 주세요." });
+        return true;
+      }
+      db.prepare("UPDATE folder SET name = ?, emoji = ? WHERE id = ?").run(next, nextEmoji, id);
       json(res, 200, { ok: true, folder: getFolder(user.id, id) });
       return true;
     }
@@ -992,8 +1001,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       if (!mine) { json(res, 404, { ok: false, reason: "없는 폴더입니다." }); return true; }
       const b = await readJson(req);
 
-      db.prepare("UPDATE folder SET name = COALESCE(?, name), emoji = COALESCE(?, emoji) WHERE id = ?")
-        .run(b.name?.trim() || null, b.emoji || null, id);
+      /* **빈 값과 안 보낸 값은 다르다.**
+
+         한때 `b.name?.trim() || null` 로 받았는데, 빈 글자는 거짓이라 그대로 null 이 되고
+         COALESCE 가 옛 이름을 도로 집었다 — 이름을 지우고 저장해도 이름이 그대로 남았다.
+         "고치지 마" 와 "비워 줘" 를 가르는 것은 값의 참거짓이 아니라 **왔는지 안 왔는지**다. */
+      const next = field(b, "name", mine.name);
+      const nextEmoji = field(b, "emoji", mine.emoji);
+      if (!next && !nextEmoji) {
+        json(res, 400, { ok: false, reason: "이름이나 아이콘 중 하나는 정해 주세요." });
+        return true;
+      }
+      db.prepare("UPDATE folder SET name = ?, emoji = ? WHERE id = ?").run(next, nextEmoji, id);
 
       applyShare(id, b);
       json(res, 200, { ok: true, folders: listFolders(user.id) });

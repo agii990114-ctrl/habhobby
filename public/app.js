@@ -676,7 +676,11 @@ function gridHtml(list, emptyMsg) {
    버리고 줄도 세우지 않는다 — 카드가 여러 묶음에 흩어져 있어 「전체 해제」가 무엇을
    가리키는지 알 수 없고, 골라 놓고 다른 묶음으로 넘어가면 보이지 않는 것을 옮기게 된다. */
 let workSel = null, workSelKey = null;
-const workPickAt = key => {
+/* **지금 화면에 서 있는 작품들.** 「전체 선택」은 이것만 집는다 — 좁혀 놓은 화면에서
+   안 보이는 것까지 집으면 못 본 채로 옮기게 된다(친구 목록과 같은 규칙). */
+let workShown = [];
+const workPickAt = (key, shown = []) => {
+  workShown = shown;
   if (key === null) { workSel = null; workSelKey = null; return; }
   if (workSelKey !== key) { workSel = null; workSelKey = key; }
 };
@@ -723,13 +727,19 @@ const workBarHtml = any => {
   const picked = [...workSel].map(id => works.find(w => w.id === id)).filter(Boolean);
   const canTake = picked.filter(mayTakeWork);
   const mine = picked.filter(w => !w.mirror);
+  /* 단추 하나가 상황을 따라 이름을 바꾼다 — 다 골라 놓고 무르고 싶을 때 누를 것을
+     따로 찾지 않아도 된다(친구 목록·폴더 목록과 같은 규칙). */
+  const allPicked = workShown.length > 0 && workShown.every(w => workSel.has(w.id));
   return `<div class="bulk">
     <b>${workSel.size}개 선택</b>
-    ${workSel.size ? `<button class="mini-btn" data-wsel-all>전체 해제</button>` : ""}
+    ${workShown.length ? `<button class="mini-btn" data-wsel-all>${
+      allPicked ? "전체 해제" : "전체 선택"}</button>` : ""}
     <span class="bulk-act">
       ${canTake.length ? `<button class="mini-btn on" data-wtake
         >${icon("plus")} 담아가기</button>` : ""}
-      ${mine.length ? `<button class="mini-btn" data-wbulk="watched"
+      ${mine.length ? `<button class="mini-btn" data-wfolder
+        >${icon("inbox")} 폴더에 추가</button>
+      <button class="mini-btn" data-wbulk="watched"
         >${icon("check")} 감상 완료</button>
       <button class="mini-btn danger" data-wbulk="dropped"
         >${icon("trash")} 휴지통</button>` : ""}
@@ -749,7 +759,12 @@ function wireWorkPick(box, redraw) {
   box.addEventListener("click", e => {
     if (e.target.closest("[data-wsel]")) { workSel = new Set(); return redraw(); }
     if (e.target.closest("[data-wsel-off]")) { workSel = null; return redraw(); }
-    if (e.target.closest("[data-wsel-all]")) { workSel.clear(); return redraw(); }
+    if (e.target.closest("[data-wsel-all]")) {
+      // 보이는 것만 집고 푼다 — 좁혀 놓은 화면에서 안 보이는 것이 딸려 오면 안 된다
+      if (workShown.length && workShown.every(w => workSel.has(w.id))) workSel.clear();
+      else for (const w of workShown) workSel.add(w.id);
+      return redraw();
+    }
     const c = e.target.closest("[data-wpick]");
     if (c) {
       const id = c.dataset.wpick;
@@ -790,6 +805,64 @@ function wireWorkPick(box, redraw) {
       ? `${added}편 담았습니다${already ? ` · ${already}편은 이미 있었습니다` : ""}`
       : already ? `${already}편 모두 이미 담겨 있습니다`
         : "담아갈 수 있는 작품이 없습니다");
+  }));
+
+  /* 골라 둔 작품을 한꺼번에 한 폴더에 넣는다.
+
+     **내 것만 집는다.** 비쳐 온 작품은 내 목록에 없어 내 폴더에 걸 수가 없다 — 먼저
+     담아 와야 하고, 그 일은 바로 옆 「담아가기」가 한다. 서버도 같은 잣대로 거른다.
+
+     넣을 곳으로는 **내가 실제로 넣을 수 있는 폴더만** 세운다. 비쳐 온 폴더 중에서는
+     함께 고치는 것(쉐어링)만이다 — 미러링만 걸린 폴더를 늘어놓으면 눌러 놓고
+     "0편 들어갔습니다" 를 보게 된다.
+
+     폴더를 새로 만드는 길도 이 안에 둔다. 고르고 나서야 「이건 따로 묶고 싶다」는 생각이
+     드는 일이 잦은데, 그때 창을 닫고 폴더부터 만들러 가면 골라 둔 것이 흩어진다. */
+  box.addEventListener("click", guard(async e => {
+    if (!e.target.closest("[data-wfolder]")) return;
+    const list = [...workSel].map(id => works.find(w => w.id === id)).filter(w => w && !w.mirror);
+    if (!list.length) return;
+
+    const put = guard(async (fid, fname) => {
+      const { added } = await api("POST", `/api/folders/${fid}/works`, { works: list.map(w => w.id) });
+      workSel = null;
+      await reload(); render(); redraw();
+      /* 몇 편이 들었는지 그대로 말한다 — 이미 들어 있던 것이 섞여 있으면 고른 수와
+         들어간 수가 다르다. "넣었습니다" 만 말하면 없는 편을 찾아 헤매게 된다. */
+      toast(added === list.length ? `${added}편을 «${fname}» 에 넣었습니다`
+        : added ? `${list.length}편 중 ${added}편만 들어갔습니다 — 나머지는 이미 있었습니다`
+        : `이미 «${fname}» 에 다 들어 있습니다`);
+    });
+
+    const draw = () => {
+      const able = folders.filter(f => !f.mirror || f.canEdit);
+      openSheet(`
+        ${headHtml(`${list.length}편을 폴더에`, { back: true, actions: false,
+          sub: "넣을 폴더를 고르세요" })}
+        <div class="folders">
+          ${able.map(f => `<button class="folder" data-put="${esc(f.id)}">
+            <div class="mini solo">${f.emoji || icon("inbox")}</div>
+            <span class="txt"><b>${esc(f.name)}${f.mirror
+              ? ` <i class="mtag">공유폴더 · ${esc(f.mirrorOf)}</i>` : ""}</b><span>${
+              worksIn(f.id).length}개</span></span></button>`).join("")}
+          <button class="folder" data-put-new>
+            <div class="mini solo">${icon("plus")}</div>
+            <span class="txt"><b>새 폴더에 넣기</b><span>만들면서 바로 넣습니다</span></span></button>
+        </div>`, { over: redraw });
+
+      wireHead({ save: () => {}, cancel: redraw });
+      sheet.querySelector(".sheet-body").addEventListener("click", ev => {
+        const b = ev.target.closest("[data-put]");
+        if (b) {
+          const f = folders.find(x => x.id === b.dataset.put);
+          if (f) return put(f.id, f.name);
+        }
+        // 새로 만들면 그 폴더에 바로 넣는다. 물러났으면 고르던 자리로 돌아온다.
+        if (ev.target.closest("[data-put-new]"))
+          openFolderForm(null, f => f ? put(f.id, f.name) : draw());
+      });
+    };
+    draw();
   }));
 
   box.addEventListener("click", guard(async e => {
@@ -1014,7 +1087,7 @@ function openIdle() {
    훑는 자리(가로 슬라이드)와 다루는 자리(격자)의 모양이 앱 전체에서 같아진다. */
 function openSoon() {
   const g = soonSection();
-  workPickAt("soon");
+  workPickAt("soon", g.items);
   openSheet(`<div data-wbar>${workBarHtml(g.items.length)}</div>
     ${workGridHtml(g.items, "공개 예정인 작품이 없습니다.")}`,
     { full: true, title: "공개 예정", sub: `${g.items.length}편 · 가까운 날부터` });
@@ -1070,7 +1143,7 @@ function drawIdle() {
 
   // 세부 목록에서만 고를 수 있다 — 묶음 화면에는 고를 카드가 흩어져 있다.
   // **몸을 짓기 전에** 정해야 한다: 줄을 그릴 때 이 값을 본다.
-  workPickAt(sec ? "idle:" + sec.key : null);
+  workPickAt(sec ? "idle:" + sec.key : null, sec?.items ?? []);
 
   const head = (title, back) => `<div class="crumb">
       ${back ? `<button data-idle-back aria-label="돌아가기">${icon("left")}</button>` : ""}
@@ -1084,7 +1157,7 @@ function drawIdle() {
     /* 페이지 탭과 같은 모양 — 단락마다 가로로 밀어 보고, ☰ 로 그 단락 전부를 편다.
        훑는 것과 다루는 것은 다른 일이라 화면을 나눈다. */
     body = head("추가 목록", false)
-      + `<p class="sub">${total}편 · 달력에 놓일 근거가 아직 없는 것들입니다.</p>`
+      + `<p class="sub">전체 ${total}편 · 달력에 놓일 근거가 아직 없는 것들입니다.</p>`
       + secs.map(g => secHtml(g, `data-idle-all="${esc(g.key)}"`)).join("");
   } else {
     body = head(`<i class="idot" style="background:${sec.color}"></i>${esc(sec.label)}`, true)
@@ -1134,15 +1207,13 @@ function drawDayList(t) {
   if (dayGrp !== null && !g) dayGrp = null;      // 다 정리해 그 묶음이 비었다
 
   // 세부 목록에서만 고를 수 있다 — 몸을 짓기 전에 정해야 줄이 제대로 선다
-  workPickAt(g ? `day:${t}:${g.key}` : null);
+  workPickAt(g ? `day:${t}:${g.key}` : null, g?.items ?? []);
 
   const title = `${d.getMonth() + 1}월 ${d.getDate()}일 (${DOW[d.getDay()]})`;
   const body = !total
     ? `<div class="empty">이 날에는 놓인 작품이 없습니다.</div>`
     : g
-      ? `<div class="crumb"><button data-day-back aria-label="돌아가기">${icon("left")}</button>
-           <h3>${esc(g.label)}</h3><span class="count">${g.items.length}편</span></div>
-         <div data-wbar>${workBarHtml(g.items.length)}</div>
+      ? `<div data-wbar>${workBarHtml(g.items.length)}</div>
          ${workGridHtml(g.items, "비어 있습니다.")}`
       : groups.map(x => `<section class="plat">
           <div class="plat-h"><b>${esc(x.label)}</b><span>${x.items.length}편</span>
@@ -1154,16 +1225,19 @@ function drawDayList(t) {
           <div class="rail">${x.items.map(w => workCard(w)).join("")}</div>
         </section>`).join("");
 
+  /* **셈은 지금 보는 목록의 것이다.** 첫 화면에서는 「전체 7편」, 「매주」로 들어가면
+     「5편」— 들어가서도 전체 수가 그대로 서 있으면, 눈앞의 다섯을 세어 보고서야
+     그 숫자가 무엇의 수인지 알게 된다. */
   openSheet(body, {
     full: true,
     title: g ? `${title} · ${esc(g.label)}` : title,
-    sub: `${total}편${same ? " · 오늘" : ""}`,
+    sub: g ? `${g.items.length}편` : `전체 ${total}편${same ? " · 오늘" : ""}`,
+    back: g ? () => { dayGrp = null; drawDayList(t); } : null,
   });
   wireWorkPick(sheet.querySelector(".sheet-body"), () => drawDayList(t));
   sheet.querySelector(".sheet-body").addEventListener("click", e => {
     const b = e.target.closest("[data-day-grp]");
     if (b) { dayGrp = b.dataset.dayGrp; return drawDayList(t); }
-    if (e.target.closest("[data-day-back]")) { dayGrp = null; return drawDayList(t); }
     if (workSel) return;                       // 고르는 중에는 열어 볼 일이 없다
     const w = e.target.closest(".work[data-id]");
     if (w) openWork(w.dataset.id, () => drawDayList(t));
@@ -1248,13 +1322,29 @@ function openFolderAdd(f, back) {
     }).join("");
   };
 
+  /* 고르기 줄. **아무것도 안 골랐을 때도 선다** — 「전체 선택」은 첫 손짓이라
+     그때 보이지 않으면 하나하나 눌러 놓고서야 만나게 된다.
+
+     집는 것은 **지금 화면에 서 있는 것**(shown())뿐이다. 찾기로 좁혀 놓았는데 안 보이는
+     것까지 딸려 들어가면, 넣은 줄 모르는 작품이 폴더에 앉는다. 구간별 「구간 선택」과
+     같은 규칙이고, 여기는 그 위의 한 단계다. */
   const paintBulk = () => {
     const bar = sheet.querySelector("[data-add-bulk]");
     if (!bar) return;
-    bar.innerHTML = picked.size
+    const vis = shown();
+    const all = vis.length > 0 && vis.every(w => picked.has(w.id));
+    bar.innerHTML = vis.length || picked.size
       ? `<div class="bulk"><b>${picked.size}개 선택</b>
-          <span class="bulk-act"><button class="mini-btn" data-none>모두 해제</button></span></div>`
+          ${vis.length ? `<button class="mini-btn" data-all>${all ? "전체 해제" : "전체 선택"}</button>` : ""}
+          ${picked.size ? `<span class="bulk-act"><button class="mini-btn" data-none>모두 해제</button></span>` : ""}
+        </div>`
       : "";
+    const every = bar.querySelector("[data-all]");
+    if (every) every.onclick = () => {
+      if (all) for (const w of vis) picked.delete(w.id);
+      else for (const w of vis) picked.add(w.id);
+      paint();
+    };
     const off = bar.querySelector("[data-none]");
     if (off) off.onclick = () => { picked = new Set(); paint(); };
   };
@@ -1352,7 +1442,7 @@ function openFolderSheet(id) {
   const shown = inFolder.filter(w => filter === "all" || w.mediaType === filter);
   const types = ["all", ...Object.keys(MEDIA).filter(t => inFolder.some(w => w.mediaType === t))];
 
-  workPickAt("folder:" + id);          // 다른 폴더로 넘어가면 고른 것은 버린다
+  workPickAt("folder:" + id, shown);          // 다른 폴더로 넘어가면 고른 것은 버린다
   openSheet(`${types.length > 2
       ? `<div class="chips">${types.map(t =>
           `<button class="chip" data-filter="${t}" aria-pressed="${filter === t}">${
@@ -2273,7 +2363,20 @@ const closeSheet = () => {
    한때 이 자리에 touchstart · touchend · pointerdown/up 을 손으로 엮어 두었다.
    아이폰에서 배경 톡이 한 번에 안 먹는다고 짐작해 덧붙인 것인데, 손짓 사이에 상태가
    남아 **시트 안 버튼이 안 눌리는** 더 큰 탈을 냈다. 전부 걷어내고 click 하나로 돌아왔다. */
-back.addEventListener("click", e => { if (e.target === back) closeSheet(); });
+/* **누르기 시작한 자리도 배경이어야 닫는다.**
+
+   폴더 이름을 지우려고 입력 칸 안에서 글자를 끌다가 배경 위에서 손을 떼면, 브라우저는
+   둘의 공통 조상을 target 으로 click 을 올린다 — 그것이 배경이라 창이 닫혔다. 이름을
+   고르던 손짓이 창을 닫는 손짓이 되어 버린 것이다.
+
+   누른 자리를 기억해 두었다가 뗀 자리와 같을 때만 닫는다. 배경을 톡 누르는 진짜 손짓은
+   그대로 먹히고, 안에서 시작한 끌기는 어디서 놓든 창을 건드리지 않는다. */
+let downOnBack = false;
+back.addEventListener("pointerdown", e => { downOnBack = e.target === back; });
+back.addEventListener("click", e => {
+  if (e.target === back && downOnBack) closeSheet();
+  downOnBack = false;
+});
 // 시트 안쪽은 매번 새로 그려지므로 닫기는 시트 자체에 한 번만 위임해 둔다
 sheet.addEventListener("click", e => { if (e.target.closest("[data-close]")) closeSheet(); });
 
@@ -2345,13 +2448,21 @@ function openSheet(html, opts = {}) {
      구조가 있으니 한쪽에서만 어긋나는 일이 이어졌다 (머리 위 8px 틈으로 내용이 비치고,
      닫기 버튼이 스크롤과 함께 사라지고, 머리줄 top 을 손잡이 높이만큼 손으로 맞추고…).
      하나로 합치면 그 자리가 통째로 없어진다. */
+  /* **돌아가기는 머리줄 왼쪽에 선다.** 한때 세부 화면이 제 본문 첫머리에 제목줄을 하나 더
+     세우고 그 안에 ‹ 를 두었는데, 머리줄이 이미 「9월 3일 (수) · 매주」를 말하고 있어
+     같은 이야기가 두 줄을 차지했다. 화면 위쪽을 그만큼 잡아먹으면서. */
   sheet.innerHTML = top(opts.full
       ? `<div class="sheet-head">
+           ${opts.back ? `<button class="head-back" data-sheet-back type="button"
+             aria-label="돌아가기">${icon("left")}</button>` : ""}
            <div class="sh-t"><h3>${opts.title ?? ""}</h3>
              ${opts.sub ? `<p class="sub">${opts.sub}</p>` : ""}</div>
          </div>`
       : "")
     + `<div class="sheet-body">${html}</div>`;
+
+  const bk = sheet.querySelector("[data-sheet-back]");
+  if (bk) bk.onclick = opts.back;
 
   /* 낮은 시트의 제목줄은 각 화면이 제 본문 첫머리에 그린다 — 부르는 쪽 모양을 바꾸지 않고
      그린 뒤에 머리 영역으로 옮긴다. 본문 안쪽에 따로 있는 제목줄(날짜 미지정의 묶음 제목
@@ -3804,9 +3915,16 @@ function drawPlatformList(pid) {
   const p = platformOf(pid);
   const all = byRecent(activeWorks().filter(w => w.platformId === pid));
 
+  /* 찾기로 좁힌 뒤의 목록. 몸을 짓는 함수 안에만 두면 「전체 선택」이 그것을 못 본다 —
+     밖으로 빼서 workPickAt 에도 같은 것을 넘긴다. */
+  const shownNow = () => {
+    const q = platQuery.trim().toLowerCase();
+    return q ? all.filter(w => w.title.toLowerCase().includes(q)) : all;
+  };
+
   const body = () => {
     const q = platQuery.trim().toLowerCase();
-    const hits = q ? all.filter(w => w.title.toLowerCase().includes(q)) : all;
+    const hits = shownNow();
     if (!hits.length)
       return `<div class="empty">${q ? "찾는 작품이 없습니다." : "비어 있습니다."}</div>`;
     return (q ? `<div class="rest" style="text-align:left;padding:0 2px 8px">
@@ -3815,7 +3933,7 @@ function drawPlatformList(pid) {
       + workGridHtml(hits, "");
   };
 
-  workPickAt("plat:" + pid);           // 다른 구간으로 넘어가면 고른 것은 버린다
+  workPickAt("plat:" + pid, shownNow());           // 다른 구간으로 넘어가면 고른 것은 버린다
   openSheet(`
     ${all.length > 7 ? searchHtml("작품명으로 검색", platQuery) : ""}
     <div data-plat-body>${body()}</div>`,
@@ -3884,21 +4002,25 @@ function archVisible() {
   return archGroups(list).find(g => g.key === arch.group)?.items ?? [];
 }
 
-/** 여러 개를 한 번에 처리하는 줄. 고른 게 없으면 나타나지 않는다. */
+/** 여러 개를 한 번에 처리하는 줄.
+
+    **고른 게 없어도 선다** — 「전체 선택」은 첫 손짓이라, 하나를 골라야 나타나면
+    그때는 이미 하나하나 누르기 시작한 뒤다. 대신 실제로 무엇을 하는 단추(되돌리기·삭제)는
+    고른 것이 있을 때만 붙인다. 줄에 늘 서 있는 것은 셈과 「전체 선택」뿐이다. */
 function archBulk() {
   const n = arch.picked.size;
-  if (!n) return "";
-  const trash = arch.state === "watched";
   const vis = archVisible();
-  const allPicked = vis.length && vis.every(w => arch.picked.has(w.id));
+  if (!n && !vis.length) return "";
+  const trash = arch.state === "watched";
+  const allPicked = vis.length > 0 && vis.every(w => arch.picked.has(w.id));
   return `<div class="bulk">
     <b>${n}개 선택</b>
     ${vis.length ? `<button class="mini-btn" data-pick-all>${allPicked ? "전체 해제" : "전체 선택"}</button>` : ""}
-    <span class="bulk-act">
+    ${n ? `<span class="bulk-act">
       <button class="mini-btn" data-bulk="restore">되돌리기</button>
       ${trash ? `<button class="mini-btn" data-bulk="trash">${icon("trash")} 휴지통</button>`
               : `<button class="mini-btn danger" data-bulk="delete">삭제</button>`}
-    </span>
+    </span>` : ""}
   </div>`;
 }
 
@@ -3936,10 +4058,7 @@ function archBody() {
   // 마지막 항목을 지우면 그 묶음 자체가 없어진다 — 빈 화면에 붙들려 있지 말고 목록으로
   if (!g) { arch.group = null; return archBody(); }
 
-  return `<div class="crumb"><button data-arch-back aria-label="묶음 목록으로">${icon("left")}</button>
-      <h3${g.stars ? ' class="stars-h"' : ""}>${g.label}</h3>
-      <span class="count">${g.items.length}편</span></div>
-    ${g.items.map(archRow).join("")}`;
+  return g.items.map(archRow).join("");
 }
 
 function openArchive(state) {
@@ -3949,16 +4068,37 @@ function openArchive(state) {
 
 function drawArchive() {
   const meta = STATES[arch.state], total = worksInState(arch.state).length;
+  /* 묶음 하나를 펼쳤으면 **머리줄이 그 묶음을 말한다** — 이름도 편수도. 한때 세부 화면이
+     본문 첫머리에 제목줄을 하나 더 세웠는데, 머리줄이 이미 자리를 차지하고 있어
+     같은 이야기가 두 줄이 되었다. 돌아가기도 머리줄 왼쪽으로 옮겼다. */
+  /* 찾는 중에는 묶음을 무시한다(archBody 와 같은 잣대) — 그때는 머리줄도 묶음을
+     말하면 안 된다. 몸과 머리가 같은 하나를 보고 정해지도록 한 자리에서 잰다. */
+  const openGroup = () => archGrouped() && arch.group !== null && !arch.q.trim()
+    ? archGroups(worksInState(arch.state)).find(x => x.key === arch.group) : null;
+  const g = openGroup();
   openSheet(`
     ${searchHtml("작품명으로 검색", arch.q)}
     <div data-arch-bulk>${archBulk()}</div>
     <div data-arch-body>${archBody()}</div>`,
-    { full: true, title: `${icon(meta.icon)} ${meta.label}`, sub: `${meta.desc} · ${total}편` });
+    { full: true,
+      title: g ? `${icon(meta.icon)} ${g.label}` : `${icon(meta.icon)} ${meta.label}`,
+      sub: g ? `${g.items.length}편` : `${meta.desc} · 전체 ${total}편`,
+      back: g ? () => { arch.group = null; drawArchive(); } : null });
 
-  // 글자마다 시트를 통째로 다시 그리면 입력 칸이 포커스를 잃는다 — 결과만 갈아 끼운다
+  /* 글자마다 시트를 통째로 다시 그리면 입력 칸이 포커스를 잃는다 — 결과만 갈아 끼운다.
+     **머리줄도 함께 갈아 끼운다**: 묶음 안에서 찾기 시작하면 몸은 묶음을 벗어나는데
+     머리줄만 묶음 이름을 붙들고 있으면, 화면이 서로 다른 말을 한다. */
   const repaint = () => {
     sheet.querySelector("[data-arch-bulk]").innerHTML = archBulk();
     sheet.querySelector("[data-arch-body]").innerHTML = archBody();
+    const now = openGroup();
+    sheet.querySelector(".sh-t h3").innerHTML =
+      `${icon(meta.icon)} ${now ? now.label : meta.label}`;
+    sheet.querySelector(".sh-t .sub").textContent =
+      now ? `${now.items.length}편` : `${meta.desc} · 전체 ${total}편`;
+    // 묶음 없이 연 화면에는 애초에 버튼이 없다 — 찾기로 묶음이 생기지도 않는다
+    const bk = sheet.querySelector("[data-sheet-back]");
+    if (bk) bk.hidden = !now;
   };
   const qEl = sheet.querySelector(".arch-q");
   qEl.addEventListener("input", () => { arch.q = qEl.value; repaint(); });
@@ -3992,8 +4132,8 @@ function drawArchive() {
 
   sheet.querySelector(".sheet-body").addEventListener("click", guard(async e => {
     const g = e.target.closest("[data-grp]");
-    if (g) { arch.group = +g.dataset.grp; return repaint(); }
-    if (e.target.closest("[data-arch-back]")) { arch.group = null; return repaint(); }
+    // 머리줄이 묶음 이름을 말하므로 몸만 갈아 끼워서는 안 된다 — 통째로 다시 그린다
+    if (g) { arch.group = +g.dataset.grp; return drawArchive(); }
 
     if (e.target.closest("[data-pick-all]")) {
       const vis = archVisible();

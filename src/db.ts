@@ -1025,7 +1025,10 @@ export function createFolder(userId: string, p: {
     .get(userId) as { n: number }).n;
   db.prepare(`INSERT INTO folder(id, user_id, name, emoji, ord, take_mode,
       mirror_owner, mirror_folder) VALUES(?,?,?,?,?,?,?,?)`)
-    .run(id, userId, p.name, p.emoji || "📁", ord,
+    /* 빈 아이콘을 몰래 📁 로 바꾸지 않는다 — 이름만으로 세운 폴더는 아이콘이 없는 것이
+       맞고, 그때 목록의 얼굴 자리에는 표지 넷이 선다. 몰래 채워 넣으면 만들 때와 고칠 때의
+       잣대가 달라진다(고치는 쪽은 빈 값을 그대로 담는다). 둘 다 비는 일은 API 가 막는다. */
+    .run(id, userId, p.name, p.emoji, ord,
       // 비추는 폴더는 내 것이 아니라 남에게 넘길 수 없다 (sharedView 도 걸러 낸다)
       p.mirror ? "none" : "copy",
       p.mirror?.owner ?? null, p.mirror?.folder ?? null);

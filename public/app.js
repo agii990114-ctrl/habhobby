@@ -5080,11 +5080,9 @@ async function openFriends() {
       ${vis.length ? `<button class="mini-btn" data-fsel-all>${
         allPicked ? "전체 해제" : "전체 선택"}</button>` : ""}
       <span class="bulk-act">
-        ${/* **여럿을 한꺼번에 즐겨찾기로.** 한 명씩 별을 누르는 것은 목록을 훑다 눈에 띈
-             사람에게 하는 일이고, 스물다섯 명 중 다섯을 추리는 일은 골라서 한 번에 하는
-             것이 맞다. 끊기 옆에 두되 빨강은 그쪽에만 — 되돌릴 수 있는 일과 없는 일이다. */""}
-        <button class="mini-btn" data-fsel-star${sel.size ? "" : " disabled"}
-          >${icon("star")} 즐겨찾기로</button>
+        ${/* 고르기로 하는 일은 **삭제 하나**다. 즐겨찾기는 목록을 훑다 눈에 띈 사람에게
+             하는 일이라 줄의 별로 한 명씩 켠다 — 여기에 두었더니 「고르기」가 서로 다른
+             갈래의 일을 담는 통이 되어, 무엇을 하려고 골랐는지가 흐려졌다. */""}
         <button class="mini-btn danger" data-fsel-del${sel.size ? "" : " disabled"}>삭제</button>
         <button class="mini-btn" data-fsel-off>완료</button>
       </span></div>`;
@@ -5185,8 +5183,6 @@ async function openFriends() {
       else for (const f of vis) sel.add(f.id);
       repaintBulk(); repaint();
     };
-    const st2 = bar.querySelector("[data-fsel-star]");
-    if (st2) st2.onclick = starFriends;
     const del = bar.querySelector("[data-fsel-del]");
     if (del) del.onclick = cutFriends;
     // 「선택」은 이제 아래 줄에 있다 — 갈래가 바뀌므로 칸을 통째로 다시 그린다
@@ -5211,25 +5207,6 @@ async function openFriends() {
     });
 
   }
-
-  /** 고른 사람들을 한꺼번에 즐겨찾기로 켠다.
-
-      **끄지는 않는다** — 켠 사람과 안 켠 사람을 함께 골랐을 때 「뒤집기」로 하면 무엇이
-      켜지고 무엇이 꺼질지 고른 사람이 미리 알 수 없다. 「켠다」 하나로 두면 결과가 하나다.
-      끄는 것은 줄의 별을 눌러 한 명씩 한다. */
-  const starFriends = guard(async () => {
-    const ids = [...sel].filter(id => !friends.find(f => f.id === id)?.starred);
-    if (!ids.length) { toast("고른 사람은 이미 즐겨찾기입니다"); return; }
-    for (const id of ids) {
-      const f = friends.find(x => x.id === id);
-      f.starred = true;
-      await api("PATCH", `/api/friends/${id}`, { starred: true });
-    }
-    sortFriends();
-    sel = null;
-    repaintBar(); repaint();
-    toast(`${ids.length}명을 즐겨찾기에 넣었습니다`);
-  });
 
   /** 고른 사람들을 한꺼번에 끊는다 */
   const cutFriends = guard(async () => {

@@ -481,6 +481,16 @@ async function takeWork(userId: string, src: Work, folderIds: string[]):
   return { already: false, id };
 }
 
+/* 퍼가기 값은 쉼표로 이은 집합이다("copy,mirror"). 빈 글자는 비공개.
+   모르는 낱말이 섞여 있으면 통째로 물린다 — 반만 받아들이면 고른 것과 저장된 것이 달라진다. */
+const TAKE_WORDS = ["copy", "mirror", "edit"];
+const validTake = (v: unknown): boolean =>
+  typeof v === "string" &&
+  (v === "" || v.split(",").every(w => TAKE_WORDS.includes(w)));
+/** 차례를 고정한다 — 같은 조합이 늘 같은 글자가 되어야 견주기 쉽다 */
+const normTake = (v: string): string =>
+  TAKE_WORDS.filter(w => v.split(",").includes(w)).join(",");
+
 /* ── 라우팅 ───────────────────────────────────────────────── */
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -885,14 +895,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
         ? b.share.with.filter((x: any) => typeof x === "string") : [];
       /* 함께 고치는 폴더는 **부른다고 곧바로 참여자가 되지 않는다** — 수락을 받는다.
          퍼가기 값이 이번에 함께 왔으면 그것을, 아니면 지금 폴더에 적힌 것을 본다. */
-      const take = ["none", "copy", "mirror", "both", "edit"].includes(b.take)
+      const take = validTake(b.take)
         ? b.take : getFolder(user.id, id)?.take;
       setFolderShare(id, b.share.mode as ShareMode, want.filter(v => areFriends(user.id, v)),
-        take === "edit");
+        canEdit(take as TakeMode));
     }
     /* 퍼가기 권한 — 공개하지 않은 폴더에는 뜻이 없지만, 껐다 켰다 할 때마다 값이
        날아가면 다시 정해야 하므로 공개 여부와 상관없이 그대로 담아 둔다. */
-    if (["none", "copy", "mirror", "both", "edit"].includes(b.take)) setFolderTake(id, b.take as TakeMode);
+    if (validTake(b.take)) setFolderTake(id, normTake(b.take) as TakeMode);
   };
 
   if (p === "/api/folders" && m === "POST") {

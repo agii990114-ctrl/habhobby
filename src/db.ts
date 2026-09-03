@@ -485,6 +485,31 @@ once(6, () => {
     WHERE display_name IS NOT NULL AND TRIM(display_name) <> ''`);
 });
 
+/* 퍼가기 갈래를 「하나 고르기」에서 「셋을 켜고 끄기」로 옮긴다.
+
+   옛 값은 다섯이었고 새 값은 쉼표로 이은 집합이다. 「둘 다」는 둘을 켜면 되고,
+   「보기만」은 셋이 다 꺼진 것과 같아 비공개가 된다 — 보이기만 하고 아무것도 못 하는
+   자리는 없앤다(고르는 사람에게 그 차이가 뚜렷하지 않았다).
+
+   「폴더 공유」는 예전에 담아가기·미러링을 저절로 포함했지만 이제는 독립이다.
+   함께 쓰는 사람이 담아가기까지 하려면 클로닝을 함께 켜면 된다. */
+once(8, () => {
+  const map: Record<string, string> = {
+    none: "", copy: "copy", mirror: "mirror", both: "copy,mirror", edit: "edit",
+  };
+  const rows = db.prepare("SELECT id, take_mode FROM folder").all() as
+    { id: string; take_mode: string }[];
+  const upd = db.prepare("UPDATE folder SET take_mode = ? WHERE id = ?");
+  let n = 0;
+  for (const r of rows) {
+    const want = map[r.take_mode];
+    if (want === undefined || want === r.take_mode) continue;
+    upd.run(want, r.id);
+    n++;
+  }
+  if (n) console.log(`  퍼가기 갈래를 켜고 끄는 방식으로 옮김: ${n}개`);
+});
+
 /* 작품 하나를 url(공용)과 work(내 것)로 가른다.
 
    **옛 줄은 옮기지 않는다.** 이 이관을 하기 전에 계정을 전부 비웠고(가입 0명), 옮길
@@ -878,14 +903,21 @@ export type ShareMode = "none" | "all" | "some";
 export type TakeMode = "none" | "copy" | "mirror" | "both" | "edit";
 /* 함께 고치는 사이라면 담아가는 것도 된다 — 가장 너그러운 갈래다.
    같이 꾸린 폴더에서 마음에 드는 것을 내 것으로 만드는 일은 그 폴더의 쓰임 그대로다. */
-export const canCopy = (t: TakeMode): boolean =>
-  t === "copy" || t === "both" || t === "edit";
+/* **셋은 서로 독립이다.** 예전에는 하나만 고를 수 있어서 「둘 다」라는 갈래를 따로 두었고,
+   「폴더 공유」는 담아가기·미러링을 저절로 포함했다. 이제는 켜고 끄는 셋이라 그럴 필요가 없다 —
+   담아가기만, 미러링만, 셋 다, 무엇이든 된다. 셋이 다 꺼져 있으면 비공개다.
+
+   값은 쉼표로 이은 글자다("copy,mirror"). 칸을 셋으로 늘리지 않은 까닭은 이 값을 읽는
+   자리가 마흔 곳이 넘는데, 그 전부가 아래 세 함수를 지나기 때문이다 — 여기만 바꾸면 된다. */
+export const hasTake = (t: TakeMode, flag: string): boolean =>
+  String(t ?? "").split(",").includes(flag);
+
+export const canCopy = (t: TakeMode): boolean => hasTake(t, "copy");
 /* 함께 고치는 폴더도 상대 쪽에서는 **비추는 폴더**로 선다 — 내 목록에 들어오는 길이
    하나뿐이어야 하고, 그 길은 이미 미러링이 내고 있다. 다른 것은 고칠 수 있느냐뿐이다. */
-export const canMirror = (t: TakeMode): boolean =>
-  t === "mirror" || t === "both" || t === "edit";
+export const canMirror = (t: TakeMode): boolean => hasTake(t, "mirror");
 /** 이 폴더를 볼 수 있는 사람은 **넣고 뺄 수도** 있다 */
-export const canEdit = (t: TakeMode): boolean => t === "edit";
+export const canEdit = (t: TakeMode): boolean => hasTake(t, "edit");
 
 /** 그 폴더를 함께 쓰는 사람들 — 주인과, 주인이 보여 주기로 한 친구들.
 

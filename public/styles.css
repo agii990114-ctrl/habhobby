@@ -1269,6 +1269,28 @@
     border: 2px solid var(--line-2); background: var(--surface);
   }
   .opt[aria-pressed="true"] .mark { border-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 3px var(--surface); }
+  /* **여럿을 켤 수 있는 자리**의 표시. 동그라미는 「셋 중 하나」로 읽히므로 네모에 체크를
+     넣는다 — 켜고 끄는 것임을 모양이 먼저 말한다. */
+  .mark.tick { border-radius: 6px; position: relative; }
+  .opt[aria-pressed="true"] .mark.tick {
+    box-shadow: none;
+    background: var(--accent); border-color: var(--accent);
+  }
+  .opt[aria-pressed="true"] .mark.tick::after {
+    content: ""; position: absolute; left: 4px; top: 1px;
+    width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0;
+    transform: rotate(42deg);
+  }
+  /* 공개 설정은 넷이라 한 칸이 좁다 — 글자를 조금 줄이고 표시를 위에 놓는다 */
+  .take-flags .opt { padding: 11px 6px; gap: 6px; }
+  .take-flags .opt .ot b { font-size: 12.5px; }
+
+  /* 딸려 붙는 태그 고르개 — 위에서 정한 것에 대한 「누구에게」다 */
+  .tag-opts { margin-top: 2px; }
+  .scope-lab {
+    margin-top: 14px; margin-bottom: 7px;
+    font-size: 11.5px; font-weight: 600; letter-spacing: .04em; color: var(--ink-3);
+  }
   .opt .ot { min-width: 0; }
   .opt .ot b { display: block; font-size: 13.5px; font-weight: 600; margin-bottom: 2px; }
   .opt[aria-pressed="true"] .ot b { color: var(--accent-ink); }

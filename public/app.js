@@ -3029,6 +3029,16 @@ const optsHtml = (list, current, key, cols = 0) => {
     : "");
 };
 
+/** 태그 한 줄로 고르는 목록 — 딸려 붙는 자리에 쓴다(공개 범위처럼).
+    고른 것의 설명만 아래에 작게 적는 것은 위(optsHtml)와 같다. */
+const tagOptsHtml = (list, current, key) => {
+  const now = list.find(([v]) => v === current);
+  return `<div class="pickers tag-opts" data-opts="${key}">${list.map(([v, t]) =>
+    `<button type="button" class="pick" data-o="${v}" aria-pressed="${current === v}"
+      >${t}</button>`).join("")}</div>
+    <div class="opt-why" data-opt-why="${key}">${esc(now?.[2] ?? "")}</div>`;
+};
+
 /** 고른 것을 눈에 보이게 하고 값을 넘겨준다 */
 function wireOpts(root, key, onPick, list) {
   const box = root.querySelector(`[data-opts="${key}"]`); if (!box) return;
@@ -3451,17 +3461,25 @@ function openFolderForm(existing, after) {
      기본은 클로닝 하나. 미러링은 "내가 고르는 걸 계속 보라" 는 뜻이라 직접 켜야 열린다. */
   const flags = new Set(String(existing?.take ?? "copy").split(",").filter(Boolean));
 
-  /** 켜고 끄는 단추 넷 — 비공개는 고르는 것이 아니라 **셋이 다 꺼진 결과**다. */
+  /** 켜고 끄는 단추 넷 — 비공개는 고르는 것이 아니라 **셋이 다 꺼진 결과**다.
+
+      이 창에서 **먼저 정하는 것**이라 큰 칸으로 세운다. 범위(누구에게)는 그다음이라
+      작은 태그로 딸려 붙는다 — 앞선 물음이 눈에 먼저 들어와야 차례가 읽힌다.
+
+      켜고 끄는 것이라 표시가 동그라미가 아니라 **체크**다. 동그라미는 「셋 중 하나」로
+      읽히는데 여기서는 여럿을 켤 수 있다. */
   const takeHtml = () => {
     const off = flags.size === 0;
-    return `<div class="pickers take-tags">
-      <button type="button" class="pick${off ? " on" : ""}" data-take-off>비공개</button>
-      ${TAKE_FLAGS.map(([v, t]) =>
-      `<button type="button" class="pick${flags.has(v) ? " on" : ""}" data-take="${v}"
-        aria-pressed="${flags.has(v)}">${t}</button>`).join("")}</div>
-      <div class="rest take-note">${off
-        ? "아무에게도 보이지 않습니다."
-        : TAKE_FLAGS.filter(([v]) => flags.has(v)).map(([, , d]) => d).join(" ")}</div>`;
+    const card = (v, t, on) => `<button type="button" class="opt${on ? " on" : ""}"
+      ${v ? `data-take="${v}"` : "data-take-off"} aria-pressed="${on}">
+      <span class="mark tick"></span><span class="ot"><b>${t}</b></span></button>`;
+    return `<div class="opts row take-flags" style="--opt-cols:4">
+      ${card("", "비공개", off)}
+      ${TAKE_FLAGS.map(([v, t]) => card(v, t, flags.has(v))).join("")}
+    </div>
+    <div class="opt-why">${off
+      ? "아무에게도 보이지 않습니다."
+      : TAKE_FLAGS.filter(([v]) => flags.has(v)).map(([, , d]) => d).join(" ")}</div>`;
   };
   openSheet(`
     ${headHtml(existing ? "폴더 편집" : "새 폴더", { back: false,
@@ -3488,7 +3506,10 @@ function openFolderForm(existing, after) {
            안 열어 두었으면 물을 것도 없다. 그래서 셋이 다 꺼져 있으면 범위 칸이 사라진다. */""}
       <div data-take-box>${takeHtml()}</div>
       <div data-scope${flags.size ? "" : " hidden"}>
-      ${optsHtml(SHARE_MODES, share.mode, "share", 3)}
+      ${/* 범위는 **그다음 물음**이라 작은 태그로 딸려 붙는다. 위에서 무엇을 열지
+           정하고 나면, 여기서는 그 대상을 좁히기만 하면 된다. */""}
+      <div class="scope-lab">공개 범위</div>
+      ${tagOptsHtml(SHARE_MODES, share.mode, "share")}
       <div data-share-who${share.mode === "some" ? "" : " hidden"}>
         <div class="rest" style="text-align:left;padding:8px 2px 0">친구를 불러오는 중…</div>
       </div>
@@ -4791,7 +4812,11 @@ function openAppSettings() {
              글자마다 서버를 두드리게 되고, 안내 한 줄에 그만한 값을 치를 이유가 없다. */""}
         다른 사람과 겹칠 수 없습니다.
       </div>`}
-      <div class="link-row" style="margin-top:12px">
+</div>` : ""}
+    <div class="field sep"><label>작품을 여는 방식</label>
+      ${optsHtml(OPEN_MODES, settings.openMode, "openmode", 2)}</div>
+    ${me ? `<div class="field sep sep-end">
+      <div class="link-row">
         ${me.provider === "local" || guestMode()
           ? `<button class="btn" disabled title="${guestMode()
               ? "둘러보기는 로그아웃하면 담아둔 것에 다시 닿을 수 없습니다"
@@ -4801,9 +4826,7 @@ function openAppSettings() {
       </div>
       <div class="rest" style="text-align:left;padding:7px 2px 0">
         탈퇴하면 담아둔 작품·폴더·설정이 모두 지워지고 되돌릴 수 없습니다.</div>
-</div>` : ""}
-    <div class="field sep sep-end"><label>작품을 여는 방식</label>
-      ${optsHtml(OPEN_MODES, settings.openMode, "openmode", 2)}</div>`);
+    </div>` : ""}`);
   /* 스펙트럼을 끄는 동안 색이 계속 바뀐다 — 화면은 그때마다 따라가되
      저장은 손이 멎은 뒤 한 번만 한다. 시트는 다시 그리지 않는다 (고르개가 사라진다). */
   const themeDraft = { color: settings.themeColor };

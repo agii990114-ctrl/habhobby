@@ -3838,14 +3838,15 @@ function openFolderForm(existing, after, kind) {
   const team = sort === "share";
   /* 켜고 끄는 것은 **일반 폴더에서만** 있는 일이다. 공유 폴더의 값은 늘 edit 하나 —
      고를 것이 없으므로 칸도 세우지 않는다.
-     일반 폴더의 기본은 클로닝 하나. 미러링은 "내가 고르는 걸 계속 보라" 는 뜻이라 직접 켠다. */
+     **새 일반 폴더는 아무것도 안 켠 채로 선다 — 비공개다.** 한때 클로닝을 켜 둔 채 띄웠는데,
+     폴더는 우선 내 것이고 여는 것은 그다음의 결정이다. 처음부터 켜져 있으면 「열지 않을
+     것인가」를 매번 되묻게 되고, 무심코 만든 폴더가 친구에게 열린다. */
   const flags = team ? new Set(["edit"])
-    : new Set(String(existing?.take ?? "copy").split(",").filter(v => v && v !== "edit"));
-  /* 공유 폴더는 **명단이 곧 폴더**라 범위가 늘 「친구 선택」이다. 새로 만드는 일반 폴더는
-     클로닝이 켜진 채로 시작하므로 범위도 함께 채워 둔다 — 켜 보이는데 실은 아무에게도
-     안 보이는 상태로 저장되면, 화면이 한 말과 저장된 것이 달라진다. */
+    : new Set(String(existing?.take ?? "").split(",").filter(v => v && v !== "edit"));
+  /* 공유 폴더는 **명단이 곧 폴더**라 범위가 늘 「친구 선택」이다. 일반 폴더의 범위는
+     켜는 순간에 채워진다(아래 takeBox 손짓) — 새 폴더는 아무것도 안 켠 채라 여기서
+     채울 것이 없다. */
   if (team) share.mode = "some";
-  else if (!existing && flags.size && share.mode === "none") share.mode = "all";
 
   /** 켜고 끄는 단추 둘 — 클로닝과 미러링.
 

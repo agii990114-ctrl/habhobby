@@ -1106,7 +1106,9 @@ export function createFolder(userId: string, p: {
          **빈 글자다.** 한때 "none" 이라 적었는데 그건 갈래가 다섯이던 때의 낱말이고,
          지금 값은 쉼표로 이은 집합이라 「아무것도 안 켬」은 빈 글자다. canCopy 들이
          모두 거짓을 내주어 눈에 띄지 않았을 뿐, 규칙 밖의 값이 표에 앉아 있었다. */
-      p.mirror ? "" : "copy",
+      /* 새 폴더는 비공개로 선다 — 화면과 같은 기본값이다. take 를 안 보낸 요청도
+         열리지 않은 폴더가 되어야 한다(열리는 것은 늘 명시적인 선택). */
+      "",
       p.mirror?.owner ?? null, p.mirror?.folder ?? null);
   return getFolder(userId, id)!;
 }

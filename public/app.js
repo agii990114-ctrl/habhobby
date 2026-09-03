@@ -2890,6 +2890,11 @@ function wireGo(w) {
       window.addEventListener("pagehide", cancel, { once: true });
       window.addEventListener("blur", cancel, { once: true });
     }
+    /* **보러 간 때를 화면에서 먼저 적는다.** closeSheet 는 되돌아갈 창(폴더)을 그 자리에서
+       다시 그리는데, 서버가 lastAt 을 올려 주는 것은 그 뒤다 — 그래서 폴더 창이 옛 차례로
+       그려진 채 남아, 나갔다 들어와야 방금 본 것이 앞에 섰다. 서버가 적을 값은 어차피
+       「지금」이라 미리 적어도 어긋나지 않고, reload 가 곧 같은 값으로 덮는다. */
+    w.lastAt = Date.now();
     closeSheet();
     await api("POST", `/api/works/${w.id}/open`);
     await reload(); render();

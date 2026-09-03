@@ -385,10 +385,12 @@ const guestMode = () => me?.provider === "guest";
    한때 「고른 친구와 함께 쓰기」를 공개 갈래에 끼워 두었는데, 그건 공개 대상과 퍼가기를
    한 항목에 뭉쳐 놓은 것이라 갈래가 셋인지 넷인지도 헷갈렸다. 함께 쓰기는 **퍼가기 쪽**
    이야기다 — 「폴더 공유」로 그리로 옮겼다. */
+/* **「나만 보기」는 범위에 두지 않는다.** 공개 설정의 「비공개」가 이미 그 자리다 —
+   같은 뜻이 두 곳에 있으면 어느 쪽을 눌러야 하는지 알 수 없고, 애초에 셋이 다 꺼져
+   있으면 범위 칸이 뜨지도 않는다. 값 자체(none)는 남는다 — 저장될 때 그 모양이 필요하다. */
 const SHARE_MODES = [
-  ["none", "나만 보기", "아무에게도 보이지 않습니다."],
-  ["all", "모든 친구에게", "친구가 늘어나면 그 사람에게도 보입니다."],
-  ["some", "고른 친구에게만", "고른 사람이 볼 수 있습니다."],
+  ["all", "전체 공개", "친구가 늘어나면 그 사람에게도 보입니다."],
+  ["some", "친구 선택", "고른 사람이 볼 수 있습니다."],
 ];
 /* **켜고 끄는 셋.** 하나만 고르는 것이 아니라 원하는 만큼 켠다 — 클로닝과 미러링을
    함께 열어 두면 친구가 둘 중에 고른다. 셋을 다 끄면 비공개다. */
@@ -3597,12 +3599,23 @@ function openFolderForm(existing, after) {
 
     takeBox.addEventListener("click", e => {
       if (e.target.closest("[data-take-off]")) {      // 비공개 — 셋을 한꺼번에 끈다
-        flags.clear(); paintTake(); return;
+        flags.clear(); share.mode = "none"; paintTake(); return;
       }
       const b = e.target.closest("[data-take]"); if (!b) return;
       const v = b.dataset.take;
       if (flags.has(v)) flags.delete(v);
       else {
+        /* 비공개에서 처음 켜는 참이면 범위가 「none」이라 아무것도 골라져 있지 않다.
+           고르라고 빈 채로 두면 안 고르고 저장하기 쉬우므로 **전체 공개**로 시작한다 —
+           좁히는 것은 한 번 더 누르면 되고, 친구에게만 보이는 것이라 위험이 크지 않다. */
+        if (share.mode === "none") {
+          share.mode = "all";
+          const opts = sheet.querySelector('[data-opts="share"]');
+          opts?.querySelectorAll("[data-o]").forEach(x =>
+            x.setAttribute("aria-pressed", String(x.dataset.o === "all")));
+          const why = sheet.querySelector('[data-opt-why="share"]');
+          if (why) why.textContent = SHARE_MODES.find(([m]) => m === "all")?.[2] ?? "";
+        }
         /* 쉐어링을 켜면 범위가 「고른 친구에게만」이어야 한다 — 초대할 명단이 필요하다.
            나만 보기였다면 그리로 옮겨 주고, 고르개도 함께 켠다. */
         if (v === "edit" && share.mode !== "some") {
@@ -3616,6 +3629,7 @@ function openFolderForm(existing, after) {
         }
         flags.add(v);
       }
+      if (flags.size === 0) share.mode = "none";     // 손으로 마지막 하나를 꺼도 같다
       paintTake();
     });
   }

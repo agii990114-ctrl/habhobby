@@ -1281,6 +1281,11 @@
     width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0;
     transform: rotate(42deg);
   }
+  /* **손을 올려도 테두리를 굵게 두르지 않는다.** 카드가 크다 보니 테두리가 진해지면
+     칸 전체가 눌린 것처럼 보여, 켜진 것과 그냥 지나가는 것이 헷갈린다. */
+  .take-flags .opt:hover { border-color: var(--line-2); }
+  .take-flags .opt[aria-pressed="true"]:hover { border-color: var(--accent); }
+
   /* 공개 설정은 넷이라 한 칸이 좁다 — 글자를 조금 줄이고 표시를 위에 놓는다 */
   .take-flags .opt { padding: 11px 6px; gap: 6px; }
   .take-flags .opt .ot b { font-size: 12.5px; }

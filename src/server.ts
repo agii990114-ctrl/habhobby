@@ -15,7 +15,7 @@ import {
   getFolder, createFolder, canCopy, canMirror, canEdit, seenByMe, markSeen,
   folderInvites, acceptFolder, declineFolder, leaveFolder,
   noticeBreak, folderNotices, readNotices, sweepNotices, inviteToFolder, unlinkFromFolder,
-  cleanName, setDisplayName, starFolder, findOrMakeUrl,
+  cleanName, setDisplayName, starFolder, findOrMakeUrl, knownUrl,
   type Work, type User, type ShareMode, type TakeMode,
 } from "./db.ts";
 import {
@@ -591,7 +591,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
 
   if (p === "/api/resolve" && m === "POST") {
     const { url: target } = await readJson(req);
-    const r = await resolveUrl(String(target ?? ""));
+    const r = await resolveUrl(String(target ?? ""), knownUrl);
     json(res, r.ok ? 200 : 400, r.ok ? { ...r, originLabel: originLabel(r) } : r);
     return true;
   }
@@ -617,7 +617,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       return true;
     }
 
-    const r = await resolveUrl(String(b.url ?? ""));
+    const r = await resolveUrl(String(b.url ?? ""), knownUrl);
 
     /* **없는 페이지는 담지 않는다.** 여기서 막는 것은 「없다고 확신할 수 있는 것」뿐이다 —
        그쪽이 404 라 했거나, 깊은 주소를 물었는데 대문으로 튕겼거나(없는 작품 번호),

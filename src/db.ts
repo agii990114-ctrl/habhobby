@@ -790,6 +790,22 @@ export function getWork(userId: string, id: string): Work | null {
   return toWork(r, fs.map(f => f.folder_id));
 }
 
+/** 이미 담아 둔 작품인가 — **긁기 전에** 물어본다.
+
+    주소에서 「어느 사이트의 몇 번 작품인가」를 뽑는 데는 네트워크가 들지 않으므로,
+    그것만으로 여기를 찾아볼 수 있다. 있으면 남의 페이지를 다시 읽을 이유가 없다. */
+export function knownUrl(platformId: string, seriesId: string) {
+  const r = db.prepare(`SELECT list_url, app_url, media_type, title, cover_url, cover_aspect, episode
+    FROM url WHERE platform_id = ? AND series_id = ?`).get(platformId, seriesId) as any;
+  if (!r) return null;
+  return {
+    listUrl: r.list_url as string, appUrl: r.app_url as string | null,
+    mediaType: r.media_type as string, title: r.title as string,
+    coverUrl: r.cover_url as string | null, coverAspect: r.cover_aspect as number | null,
+    episode: r.episode as string | null,
+  };
+}
+
 /** 주소로 공용 줄을 찾거나 새로 만든다. **여기가 url 에 쓰는 유일한 길이다.**
 
     이미 있으면 그대로 쓴다 — 남이 담아 둔 줄을 내가 담는다고 고쳐 쓰면, 그 사람 화면의

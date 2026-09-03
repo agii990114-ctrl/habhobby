@@ -237,12 +237,20 @@ function pageIsGeneric(og: Og, askedUrl: string, plat: Platform, title: string):
 const MEMO_MS = 10 * 60 * 1000;
 const memo = new Map<string, { at: number; got: Resolved }>();
 
-export async function resolveUrl(raw: string): Promise<Resolved> {
+/** 이미 담아 둔 작품의 값 — 부르는 쪽(db)이 아는 것을 넘겨준다.
+    resolve 는 db 를 모르므로 함수로 받는다. */
+export type Known = {
+  listUrl: string; appUrl: string | null; mediaType: string;
+  title: string; coverUrl: string | null; coverAspect: number | null; episode: string | null;
+};
+export type KnownLookup = (platformId: string, seriesId: string) => Known | null;
+
+export async function resolveUrl(raw: string, known?: KnownLookup): Promise<Resolved> {
   const key = raw.trim();
   const seen = memo.get(key);
   if (seen && Date.now() - seen.at < MEMO_MS) return seen.got;
 
-  const got = await resolveOnce(raw);
+  const got = await resolveOnce(raw, known);
   /* 못 읽은 것(blocked)은 기억하지 않는다 — 잠깐 죽었거나 느렸을 뿐일 수 있고,
      그걸 10분 붙들면 다시 넣어 보는 사람에게 같은 실패만 되돌려 준다. */
   if (got.ok && got.origin !== "blocked") {
@@ -252,13 +260,48 @@ export async function resolveUrl(raw: string): Promise<Resolved> {
   return got;
 }
 
-async function resolveOnce(raw: string): Promise<Resolved> {
+async function resolveOnce(raw: string, known?: KnownLookup): Promise<Resolved> {
   // 주소를 먼저 골라낸다. 공유받은 문자열은 제목이 붙어 있어서, 그대로는
   // 단축 주소인지조차 알아볼 수 없다 — 그러면 리다이렉트를 못 따라간다.
   const p = parseShared(await unshorten(extractUrl(raw)));
   if (!p.ok) return { ok: false, reason: p.reason };
 
   const plat: Platform = p.platform;
+
+  /* **이미 아는 작품이면 남의 페이지를 긁지 않는다.**
+
+     주소에서 「어느 사이트의 몇 번 작품인가」를 뽑는 일(parseShared)에는 네트워크가
+     들지 않는다. 그것만으로 공용 표를 찾아볼 수 있으니, 누군가 이미 담아 둔 작품이면
+     그 줄을 그대로 쓰면 된다.
+
+     한 작품을 백 명이 담으면 예전에는 그 사이트를 백 번 두드렸다. 이제 첫 사람만
+     두드린다 — 남의 서버에 폐를 덜 끼치고, 그만큼 차단당할 일도 준다.
+
+     살았는지(dead) 는 묻지 않는다. 그 줄이 있다는 것은 누군가 담았을 때 살아 있었다는
+     뜻이고, 그걸 확인하자고 페이지를 긁으면 안 긁으려던 뜻이 사라진다. */
+  const had = known?.(plat.id, p.seriesId ?? "");
+  if (had) {
+    return {
+      ok: true,
+      dead: null,
+      status: 0,
+      platform: { id: plat.id, name: plat.name, color: plat.color, fg: plat.fg, initial: plat.initial },
+      seriesId: p.seriesId,
+      title: had.title,
+      coverUrl: had.coverUrl,
+      coverAspect: had.coverAspect,
+      listUrl: p.listUrl,
+      appUrl: p.appUrl,
+      /* 회차는 **주소에서 뽑은 것**을 쓴다. 같은 작품이라도 사람마다 다른 화를
+         가리키는 주소를 넣기 때문이다 — 공용 줄의 것을 쓰면 남의 진도가 붙는다. */
+      episode: plat.mediaType === "text" ? null : (p.episode ?? had.episode ?? null),
+      mediaType: plat.mediaType,
+      schedule: { mode: "unknown", days: [], next: null, source: "auto" },
+      origin: "og",
+      note: p.note,
+    };
+  }
+
   const og = await fetchOg(p.listUrl);
   // 플랫폼이 더 나은 표지를 알고 있으면 그것으로 바꾼다 (예: 레진 wide → tall)
   const cover = og.image && plat.cover ? plat.cover(og.image) : og.image;

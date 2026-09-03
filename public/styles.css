@@ -378,8 +378,16 @@
     display: flex; align-items: center; justify-content: center;
     font-size: 19px; background: var(--surface); border: 1px solid var(--line);
   }
-  .folder .txt { min-width: 0; flex: 1; }
-  .folder .txt b { display: block; font-size: 13.5px; font-weight: 600; line-height: 1.35;
+  .folder .txt { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+  /* 한 줄. 왼쪽은 늘어나고(이름·갯수), 딱지는 오른쪽 끝에 붙는다.
+     `.folder .txt span` 이 작은 회색 글씨를 주므로 그것부터 물린다 — 이 통은
+     껍데기일 뿐이고, 글씨 모양은 안에 든 b 와 span 이 저마다 정한다. */
+  .folder .txt .tline {
+    display: flex; align-items: center; gap: 6px; min-width: 0;
+    font-size: inherit; color: inherit;
+  }
+  .folder .txt .tline .mtag { margin-left: auto; flex: none; }
+  .folder .txt b { display: block; flex: 1; font-size: 13.5px; font-weight: 600; line-height: 1.35;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .folder .txt span { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
   .folder .chev { color: var(--ink-3); font-size: 15px; flex: none; }
@@ -831,13 +839,19 @@
   .sheet.full { position: relative; }
   .fab.in-sheet { z-index: 6; }
 
-  /* 폴더의 즐겨찾기 — 닫기 버튼과 같은 줄, 그 왼쪽. 닫기가 없는 기기(손가락)에서는
-     그 자리를 그대로 물려받는다. */
-  .sheet-fav {
+  /* 머리줄 오른쪽에 딸려 붙는 단추 — 폴더의 즐겨찾기(★)와 작품의 설정(⚙).
+     닫기 버튼과 같은 줄, 그 왼쪽. 닫기가 없는 기기(손가락)에서는 그 자리를
+     그대로 물려받는다. 한 창에 둘이 같이 서는 일은 없다. */
+  .sheet-fav, .sheet-cog {
     position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
     z-index: 3; width: 30px; height: 30px; font-size: 15px;
     display: flex; align-items: center; justify-content: center;
   }
+  .sheet-cog {
+    border: 1px solid var(--line-2); border-radius: 8px; cursor: pointer;
+    background: var(--surface); color: var(--ink-3); line-height: 1;
+  }
+  .sheet-cog:hover { border-color: var(--ink-3); color: var(--ink); }
   .fab:active { transform: none; }
   /* 좁은 화면은 앱이 화면 전체를 써서 버튼이 맨 끝에 붙는다 — 조금 더 올린다.
      같은 특이성이라 .fab 정의보다 뒤에 있어야 이긴다. */
@@ -1020,6 +1034,8 @@
   .btn:hover { border-color: var(--ink-3); }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .btn.primary:hover { background: var(--accent-ink); border-color: var(--accent-ink); }
+  /* 위험한 일은 빨강. **.btn 은 bad, .mini-btn 은 danger** 로 이름이 갈라져 있다 —
+     한쪽 이름을 다른 쪽에 붙이면 아무 일도 안 일어나고, CSS 는 그것을 알려 주지 않는다. */
   .btn.bad { background: var(--bad); border-color: var(--bad); color: #fff; }
   .btn.bad:hover { background: var(--bad-ink); border-color: var(--bad-ink); }
 
@@ -1122,7 +1138,7 @@
        닫기는 자리를 차지하지 않는 absolute 라, 비켜 주지 않으면 그 밑에 깔린다. */
     .sheet.full .sheet-head .icon-btn { margin-right: 34px; }
     .sheet.full .sheet-head .head-act { margin-right: 34px; }
-    .sheet-fav { right: 46px; }
+    .sheet-fav, .sheet-cog { right: 46px; }
     /* 사이드 메뉴는 머리 영역이 따로 없다 — 오른쪽 가장자리의 손잡이만큼 안쪽에 둔다 */
     .drawer-x { right: 26px; top: 10px; }
   }

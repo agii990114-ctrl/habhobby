@@ -116,7 +116,7 @@ function byInitial(list) {
     **두 가지를 함께 바꿔야 한다** — 눌린 표시(aria-pressed)는 색을 금색으로 바꾸고,
     아이콘의 on 은 속을 채운다. 색만 바꾸면 금색 빈 별이라는 어중간한 것이 남아, 다시
     그리기 전까지 켠 것인지 아닌지 알 수 없다. 실제로 친구 목록에서 그 탈이 났다.
-    칠하는 자리가 셋(친구 줄·폴더 줄·폴더 창)이라 한 곳으로 모은다. */
+    칠하는 자리가 넷(친구 줄·폴더 줄·폴더 창·별점 매기기)이라 한 곳으로 모은다. */
 const paintStar = (btn, on) => {
   btn.setAttribute("aria-pressed", !!on);
   btn.innerHTML = icon("star", on ? "on" : "");
@@ -880,7 +880,8 @@ function wireWorkPick(box, redraw) {
     /* **감상 완료는 별점을 묻는다** — 한 편을 옮길 때와 같다. 나중에 별점별로 모아 보는
        것이 그 값의 쓰임이라, 여럿을 한꺼번에 끝낼 때야말로 매겨 둘 만하다. */
     if (to === "watched") {
-      return openRating(picked, to, { after: () => {
+      // 취소는 보던 목록으로 — 고른 것도 그대로 남는다 (askSure 의 back 과 같은 규칙)
+      return openRating(picked, to, { back: redraw, after: () => {
         workSel = null;
         toast(`${picked.length}편을 ${label}${ro(label)} 옮겼습니다`);
         redraw();
@@ -2110,20 +2111,31 @@ function folderRow(fid, emoji, name, f, idx) {
       : `<div class="mini solo empty"></div>`;
   // 전체·미분류는 진짜 폴더가 아니라 설정할 것이 없다 — 그때만 화살표를 둔다
   const real = fid !== "_all" && fid !== "_none";
+  /* 딱지에 **누구를** 미러링하는지까지 적는다. 아래 작은 글씨를 읽지 않고 목록을
+     훑는 것만으로 남의 폴더임을 알아야 한다 — 내 폴더와 한 줄로 섞여 있기 때문이다.
+     함께 고치는 폴더는 **내가 연 것인지 불려 간 것인지**가 먼저 보여야 한다 —
+     목록에서 둘이 나란히 서기 때문이다.
+
+     자리는 **줄의 오른쪽 끝**이다. 한때 이름 바로 뒤, 그것도 같은 `<b>` 안에 두었는데
+     그 `<b>` 가 말줄임을 하는 통이라 **이름이 길면 딱지까지 잘려 나갔다.** 줄마다 딱지가
+     시작되는 자리도 달라서, 목록을 훑으며 남의 폴더를 골라내기가 어려웠다. */
+  const tag = f?.mirror
+    ? `<i class="mtag">${f.canEdit ? `공유폴더 · ${esc(f.mirrorOf)}` : `미러링 · ${esc(f.mirrorOf)}`}</i>`
+    : canEdit(f?.take) ? `<i class="mtag">공유폴더 · 오너</i>` : "";
+  const cnt = `<span>${f?.broken ? esc(f.broken) : `${all.length}개`}</span>`;
+  /* 아이콘만으로 세운 폴더는 **윗줄 자체가 없다** — 그때는 딱지를 갯수와 한 줄에 세운다.
+     빈 이름 줄을 남겨 두면 그 폴더만 저 혼자 키가 크고, 딱지는 아무것도 없는 줄의
+     오른쪽 끝에 떠 있게 된다. */
+  const txt = name
+    ? `<span class="tline"><b>${esc(name)}</b>${tag}</span><span class="tline">${cnt}</span>`
+    : `<span class="tline">${cnt}${tag}</span>`;
+
   return `<div class="folder-row">
     ${folderSel && real ? `<label class="arch-pick"><input type="checkbox" data-fpick="${fid}"
       ${folderSel.has(fid) ? "checked" : ""} aria-label="${esc(name)} 선택"></label>` : ""}
     <button class="folder${real && !folderSel ? " joined" : ""}" data-folder="${fid}">${mini}
-      ${/* 딱지에 **누구를** 미러링하는지까지 적는다. 아래 작은 글씨를 읽지 않고 목록을
-            훑는 것만으로 남의 폴더임을 알아야 한다 — 내 폴더와 한 줄로 섞여 있기 때문이다. */""}
-      ${/* 함께 고치는 폴더는 **내가 연 것인지 불려 간 것인지**가 먼저 보여야 한다 —
-           목록에서 둘이 나란히 서기 때문이다. */""}
       ${/* 아이콘은 왼쪽 미리보기 자리에 이미 서 있다 — 제목 옆에 또 붙이지 않는다 */""}
-      <span class="txt"><b>${esc(name)}${
-        f?.mirror
-          ? ` <i class="mtag">${f.canEdit ? `공유폴더 · ${esc(f.mirrorOf)}` : `미러링 · ${esc(f.mirrorOf)}`}</i>`
-          : canEdit(f?.take) ? ` <i class="mtag">공유폴더 · 오너</i>` : ""}</b><span>${
-        f?.broken ? esc(f.broken) : `${all.length}개`}</span></span>
+      <span class="txt">${txt}</span>
       ${real ? "" : `<span class="chev">${icon("right")}</span>`}</button>
     ${/* 별은 폴더 딱지의 **오른쪽 끝에 이어 붙인다**. 딱지 자체가 button 이라 그 안에
          또 button 을 넣을 수는 없다(문법에도 어긋나고 누를 때 둘이 엉킨다). 형제로 두되
@@ -2817,11 +2829,51 @@ function openWork(id, over) {
     ${linked ? goHtml(w, p, true)
       : `<div class="rest" style="text-align:left;padding:2px 2px 8px">
            주소 없이 담은 항목입니다. 나중에 페이지가 생기면 설정에서 주소를 붙일 수 있습니다.</div>`}
-    <button class="btn" data-act="settings" style="width:100%;margin-top:9px">설정</button>
+    ${/* **설정은 톱니로 머리줄에 올렸다.** 여기 있던 가로 가득한 「설정」 단추는 창에서
+         가장 큰 자리를 차지하면서, 정작 이 창에 와서 가장 자주 하는 일이 아니었다.
+         자주 하는 일은 「다 봤다」와 「치운다」다 — 그 둘을 이 자리에 세운다.
+
+         이미 내려 둔 작품이면 되돌리는 길만 둔다. 감상 완료를 다시 누를 일도,
+         휴지통에 있는 것을 또 버릴 일도 없다. */""}
+    ${st
+      ? `<div class="link-row" style="margin-top:9px">
+           <button class="btn" data-act="active">${icon("left")} 목록으로 되돌리기</button></div>`
+      : `<div class="link-row" style="margin-top:9px">
+           <button class="btn" data-act="watched">${icon("check")} 감상 완료</button>
+           <button class="btn bad" data-act="dropped">${icon("trash")} 휴지통</button></div>`}
   `, { over });
   wireGo(w);
-  sheet.querySelector('[data-act="settings"]').onclick = () =>
-    openWorkSettings(id, { back: () => openWork(id, over) });
+
+  /* 톱니는 닫기 버튼 옆 — 폴더 창의 즐겨찾기(.sheet-fav)와 같은 자리다.
+     닫기가 없는 기기(손가락)에서는 그 자리를 그대로 물려받는다. */
+  const cog = document.createElement("button");
+  cog.className = "sheet-cog";
+  cog.type = "button";
+  cog.title = "작품 설정";
+  cog.setAttribute("aria-label", "작품 설정");
+  cog.innerHTML = icon("cog");
+  cog.onclick = () => openWorkSettings(id, { back: () => openWork(id, over) });
+  sheet.querySelector(".sheet-top").append(cog);
+
+  const again = () => openWork(id, over);
+  const move = guard(async to => {
+    await api("PATCH", `/api/works/${id}`, { state: to });
+    await reload(); render(); closeSheet();
+    toast(to === "active" ? "목록으로 되돌렸습니다" : `${STATES[to].label}${ro(STATES[to].label)} 옮겼습니다`);
+  });
+  const act = sel => sheet.querySelector(`[data-act="${sel}"]`);
+  // 감상 완료는 별점을 물어본다 — 나중에 별점별로 모아 보기 위한 것이다
+  if (act("watched")) act("watched").onclick = () => openRating(w, "watched", { back: again });
+  /* 휴지통은 별점을 묻지 않는다 — 버리는 것에 점수를 매길 일은 없다. 대신 정말 내릴
+     것인지는 묻는다. 이미 매긴 점수는 지우지 않으므로 되돌리면 그대로 살아난다. */
+  if (act("dropped")) act("dropped").onclick = guard(async () => {
+    const yes = await askSure({
+      title: "휴지통으로 옮길까요?", ok: "휴지통", back: again,
+      body: `${esc(w.title)} 을(를) 목록에서 내립니다. 지워지지 않고 왼쪽 메뉴의 휴지통에 남습니다.`,
+    });
+    if (yes) await move("dropped");
+  });
+  if (act("active")) act("active").onclick = () => move("active");
 }
 
 function openWorkSettings(id, opts) {
@@ -2990,8 +3042,21 @@ function openRating(target, state, opts = {}) {
     </div>`);
 
   const box = sheet.querySelector(".stars");
-  const paint = n => box.querySelectorAll("[data-star]")
-    .forEach(b => b.classList.toggle("on", +b.dataset.star <= n));
+  /* **속을 채워야 켠 별이다.** 한때 단추에 on 만 붙여 금색으로만 물들였는데, 아이콘은
+     테두리만 그린 별이라 「금색 빈 별」이라는 어중간한 것이 남았다. 아래 요약글은
+     꽉 찬 별로 적히고 있어서 같은 화면에서 두 가지 별이 서로 다른 말을 했다.
+
+     빛깔은 단추의 on 이(.stars button.on), 속은 아이콘의 on 이(.ic.on) 채운다 —
+     둘 다 있어야 한 벌이다. 이 짝은 paintStar 가 아는 것이므로 그것을 부른다. */
+  const paint = n => box.querySelectorAll("[data-star]").forEach(b => {
+    const on = +b.dataset.star <= n;
+    /* **안 바뀌면 손대지 않는다.** paintStar 는 innerHTML 을 갈아 끼우는데, 이 함수는
+       마우스가 별 위를 지날 때마다 불린다 — 그대로 두면 손을 올려놓은 것만으로 별 다섯의
+       속을 매번 새로 짓고, 누르는 도중에 갈리면 눌린 요소가 사라져 클릭이 샌다. */
+    if (b.classList.contains("on") === on) return;
+    b.classList.toggle("on", on);
+    paintStar(b, on);
+  });
   const sum = () => {
     sheet.querySelector("[data-star-sum]").innerHTML =
       picked ? `${starText(picked)} ${picked}점${one ? "" : " · 고른 전부에 같은 점수"}`
@@ -3020,8 +3085,13 @@ function openRating(target, state, opts = {}) {
       await reload(); render();
       if (opts.after) opts.after(); else closeSheet();
     }),
-    // 취소는 아무것도 바꾸지 않고 한 걸음 뒤로 — 잘못 눌렀을 때 빠져나갈 길
-    cancel: () => openWorkSettings(w.id),
+    /* 취소는 아무것도 바꾸지 않고 **왔던 자리로** 한 걸음 뒤로 — 잘못 눌렀을 때 빠져나갈 길.
+
+       한때 여기가 `openWorkSettings(w.id)` 였는데, 이 함수에는 `w` 가 없다(list · one 뿐).
+       작품 설정에서만 별점을 물었을 때 베껴 온 이름이 그대로 남은 것이라, 취소를 누르면
+       ReferenceError 로 조용히 멈췄다. 부르는 쪽이 돌아갈 자리를 일러 주게 한다. */
+    cancel: () => opts.back ? opts.back()
+      : one ? openWorkSettings(one.id) : closeSheet(),
   });
 }
 
@@ -3957,7 +4027,10 @@ function drawPlatformList(pid) {
 /* ── 보관함 ──────────────────────────────────────────────── */
 /* 별점 묶음을 폴더처럼 여닫고, 작품명으로 찾는다.
    화면 상태라 시트 밖에 둔다 — 되돌리기·삭제 뒤 다시 그려도 보던 자리가 유지된다. */
-let arch = { state: "watched", group: null, q: "", picked: new Set() };
+/* picked 가 **null 이면 아직 고르는 중이 아니다.** 빈 Set 과 가르는 것이 요점이다 —
+   빈 Set 은 「고르는 중인데 아직 하나도 안 골랐다」라서 체크칸과 고르기 줄이 서야 하고,
+   null 은 그냥 목록이라 아무것도 서지 않는다. 작품 격자(workSel)와 같은 규칙이다. */
+let arch = { state: "watched", group: null, q: "", picked: null };
 
 /** 별점 높은 것부터. 안 매긴 것은 섞이지 않게 맨 뒤로 따로 모은다. */
 function archGroups(list) {
@@ -3979,15 +4052,18 @@ function archRow(w) {
      같은 자리를 두 번 누르는 손짓이라 잘못 누른 사람은 두 번 다 잘못 눌렀다. */
   const trash = arch.state === "watched";
   return `<div class="arch">
-    <label class="arch-pick"><input type="checkbox" data-pick="${w.id}"
-      ${arch.picked.has(w.id) ? "checked" : ""} aria-label="${esc(w.title)} 선택"></label>
+    ${arch.picked ? `<label class="arch-pick"><input type="checkbox" data-pick="${w.id}"
+      ${arch.picked.has(w.id) ? "checked" : ""} aria-label="${esc(w.title)} 선택"></label>` : ""}
     <span class="thumb" style="${coverStyle(w)}">${coverChar(w)}</span>
     <span class="rt"><b>${esc(w.title)}</b><span>${esc(p.name)}${
       w.rating && archGrouped() ? ` · <i class="stars-h">${starText(w.rating)}</i>` : ""
     } · ${ago(w.lastAt)}</span></span>
     <span class="arch-act">
       <button class="mini-btn" data-restore="${w.id}">되돌리기</button>
-      ${trash ? `<button class="mini-btn" data-trash="${w.id}">${icon("trash")} 휴지통</button>`
+      ${/* 휴지통도 삭제도 **되돌리기와 다른 갈래의 일**이다 — 빨강으로 갈라 세운다.
+             한때 휴지통만 검게 두었는데, 되돌리기 옆에 나란히 서니 둘 다 그냥
+             「할 수 있는 일」로 보였다. */""}
+      ${trash ? `<button class="mini-btn danger" data-trash="${w.id}">${icon("trash")} 휴지통</button>`
               : `<button class="mini-btn danger" data-del="${w.id}">삭제</button>`}</span>
   </div>`;
 }
@@ -4002,25 +4078,29 @@ function archVisible() {
   return archGroups(list).find(g => g.key === arch.group)?.items ?? [];
 }
 
-/** 여러 개를 한 번에 처리하는 줄.
+/** 목록 위 줄 — 고르기 전에는 「선택」, 고르는 중에는 셈과 실행.
+    작품 격자의 workBarHtml 과 **같은 모양**이다: 고르는 일이 화면마다 다르게 생기면
+    같은 손짓을 자리마다 다시 익혀야 한다.
 
-    **고른 게 없어도 선다** — 「전체 선택」은 첫 손짓이라, 하나를 골라야 나타나면
-    그때는 이미 하나하나 누르기 시작한 뒤다. 대신 실제로 무엇을 하는 단추(되돌리기·삭제)는
-    고른 것이 있을 때만 붙인다. 줄에 늘 서 있는 것은 셈과 「전체 선택」뿐이다. */
+    고르는 중에는 **아무것도 안 골랐어도** 줄이 선다 — 「전체 선택」은 첫 손짓이라
+    하나를 골라야 나타나면 그때는 이미 하나하나 누르기 시작한 뒤다. 대신 실제로 무엇을
+    하는 단추(되돌리기·휴지통·삭제)는 고른 것이 있을 때만 붙인다. */
 function archBulk() {
-  const n = arch.picked.size;
   const vis = archVisible();
-  if (!n && !vis.length) return "";
+  if (!arch.picked)
+    return vis.length ? `<div class="fr-pick tight"><button class="mini-btn" data-asel>선택</button></div>` : "";
+  const n = arch.picked.size;
   const trash = arch.state === "watched";
   const allPicked = vis.length > 0 && vis.every(w => arch.picked.has(w.id));
   return `<div class="bulk">
     <b>${n}개 선택</b>
     ${vis.length ? `<button class="mini-btn" data-pick-all>${allPicked ? "전체 해제" : "전체 선택"}</button>` : ""}
-    ${n ? `<span class="bulk-act">
-      <button class="mini-btn" data-bulk="restore">되돌리기</button>
-      ${trash ? `<button class="mini-btn" data-bulk="trash">${icon("trash")} 휴지통</button>`
-              : `<button class="mini-btn danger" data-bulk="delete">삭제</button>`}
-    </span>` : ""}
+    <span class="bulk-act">
+      ${n ? `<button class="mini-btn" data-bulk="restore">되돌리기</button>
+      ${trash ? `<button class="mini-btn danger" data-bulk="trash">${icon("trash")} 휴지통</button>`
+              : `<button class="mini-btn danger" data-bulk="delete">삭제</button>`}` : ""}
+      <button class="mini-btn" data-asel-off>완료</button>
+    </span>
   </div>`;
 }
 
@@ -4062,7 +4142,7 @@ function archBody() {
 }
 
 function openArchive(state) {
-  arch = { state, group: null, q: "", picked: new Set() };
+  arch = { state, group: null, q: "", picked: null };
   drawArchive();
 }
 
@@ -4088,6 +4168,7 @@ function drawArchive() {
   /* 글자마다 시트를 통째로 다시 그리면 입력 칸이 포커스를 잃는다 — 결과만 갈아 끼운다.
      **머리줄도 함께 갈아 끼운다**: 묶음 안에서 찾기 시작하면 몸은 묶음을 벗어나는데
      머리줄만 묶음 이름을 붙들고 있으면, 화면이 서로 다른 말을 한다. */
+  /* 체크칸이 섰다 사라지므로 몸도 함께 갈아 끼운다 — 줄만 바꾸면 체크칸이 남는다. */
   const repaint = () => {
     sheet.querySelector("[data-arch-bulk]").innerHTML = archBulk();
     sheet.querySelector("[data-arch-body]").innerHTML = archBody();
@@ -4110,7 +4191,8 @@ function drawArchive() {
       else if (what === "trash") await api("PATCH", `/api/works/${id}`, { state: "dropped" });
       else await api("DELETE", `/api/works/${id}`);
     }
-    arch.picked = new Set();
+    // 시킨 일이 끝났으면 고르기도 끝난 것이다 — 빈 줄을 남겨 두지 않는다
+    arch.picked = null;
     await reload(); render(); drawArchive();
   };
 
@@ -4125,7 +4207,7 @@ function drawArchive() {
 
   // 리스너는 매번 새로 만들어지는 .sheet-body에 붙인다 — sheet에 붙이면 호출마다 누적된다
   sheet.querySelector(".sheet-body").addEventListener("change", e => {
-    const c = e.target.closest("[data-pick]"); if (!c) return;
+    const c = e.target.closest("[data-pick]"); if (!c || !arch.picked) return;
     if (c.checked) arch.picked.add(c.dataset.pick); else arch.picked.delete(c.dataset.pick);
     sheet.querySelector("[data-arch-bulk]").innerHTML = archBulk();   // 목록은 그대로 둔다
   });
@@ -4135,7 +4217,12 @@ function drawArchive() {
     // 머리줄이 묶음 이름을 말하므로 몸만 갈아 끼워서는 안 된다 — 통째로 다시 그린다
     if (g) { arch.group = +g.dataset.grp; return drawArchive(); }
 
+    // 「선택」을 누르면 그때부터 체크칸이 선다. 「완료」로 도로 걷는다.
+    if (e.target.closest("[data-asel]")) { arch.picked = new Set(); return drawArchive(); }
+    if (e.target.closest("[data-asel-off]")) { arch.picked = null; return drawArchive(); }
+
     if (e.target.closest("[data-pick-all]")) {
+      // 보이는 것만 집고 푼다 — 좁혀 놓은 화면에서 안 보이는 것이 딸려 오면 안 된다
       const vis = archVisible();
       const allPicked = vis.length && vis.every(w => arch.picked.has(w.id));
       for (const w of vis) allPicked ? arch.picked.delete(w.id) : arch.picked.add(w.id);
@@ -4144,7 +4231,8 @@ function drawArchive() {
 
     const bulk = e.target.closest("[data-bulk]");
     if (bulk) {
-      const what = bulk.dataset.bulk, ids = [...arch.picked];
+      const what = bulk.dataset.bulk, ids = [...(arch.picked ?? [])];
+      if (!ids.length) return;
       if (what !== "restore" && !await sureAbout(what, ids.length)) return;
       return apply(ids, what);
     }

@@ -276,9 +276,11 @@ const NEUTRALS = {
            "--ink": [8, 95], "--ink-2": [6, 74], "--ink-3": [6, 59] },
 };
 
+/** "#rrggbb" → [r, g, b] (0~255). 색을 다루는 함수 셋이 저마다 이것을 풀고 있었다. */
+const hexRgb = hex => { const n = parseInt(hex.replace("#", ""), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+
 function hexToHsl(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  const r = (n >> 16 & 255) / 255, g = (n >> 8 & 255) / 255, b = (n & 255) / 255;
+  const [r, g, b] = hexRgb(hex).map(v => v / 255);
   const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
   const l = (mx + mn) / 2;
   const sat = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
@@ -4847,11 +4849,13 @@ function openAdd(prefill, fromShare) {
 }
 
 /* ── 플랫폼 표시 설정 ────────────────────────────────────── */
+/** 이 바탕 위에 검정과 흰색 중 어느 글씨가 더 잘 읽히나.
+
+    한때 sRGB 를 선형으로 푸는 계산을 여기 한 벌 더 들고 있었다 — 위의 relLum 과
+    글자 하나 안 다른 같은 식이다. 같은 식이 두 곳에 있으면 한쪽만 고쳐지고, 어느 날
+    「왜 여기 색과 저기 색이 다르지」가 된다. 이 함수의 답(검정 vs 흰색)은 그대로다. */
 function readableOn(hex) {
-  const h = hex.replace("#", "");
-  const lin = [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255)
-    .map(v => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
-  const L = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+  const L = relLum(hexRgb(hex));
   return (L + 0.05) / 0.05 > 1.05 / (L + 0.05) ? "#1B1B1B" : "#FFFFFF";
 }
 

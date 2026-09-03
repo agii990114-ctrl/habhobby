@@ -127,9 +127,6 @@ function platformCtx(userId: string): PlatCtx {
   return { ov: getOverrides(userId), auto: getSiteNames(userId), hosts };
 }
 
-function hostsIn(userId: string, platformId: string): string[] {
-  return platformCtx(userId).hosts.get(platformId) ?? [];
-}
 const firstChar = (s: string) => [...s][0] ?? "?";
 
 /** 내장 플랫폼과 도메인 플랫폼을 같은 방식으로 다룬다 — 표시 설정은 둘 다 바꿀 수 있다. */

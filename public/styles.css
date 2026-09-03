@@ -188,6 +188,13 @@
   .chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(106px, 1fr)); gap: 14px; }
+  /* **길게 누르면 고르기에 들어가는 자리**에서는 글자가 잡히면 안 된다.
+     손가락으로 꾹 누르면 브라우저가 글자 선택을 시작해 파란 띠가 생기고, 그 뒤로는
+     끌 때마다 선택 범위가 늘어난다 — 고르려던 손짓이 글자 긁기가 된다.
+     -webkit-touch-callout 은 그때 뜨는 「복사 / 공유」 쪽지를 막는다. */
+  .work, .folder, .folder-row, .arch {
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  }
   .work { cursor: pointer; border: 0; background: none; padding: 0; text-align: left; display: block; }
   /* 고르는 카드 — 페이지 탭의 카드와 **같은 모양**이고 다른 것은 눌렀을 때 열리는 대신
      켜진다는 것뿐이다. 켜진 것은 표지를 어둡게 덮고 체크를 얹어 말한다: 목록을 훑을 때
@@ -405,12 +412,6 @@
   /* 딱지에 손이 올라가면 별도 함께 밝아진다 — 한 덩어리인데 반쪽만 반응하면 갈라져 보인다 */
   .folder.joined:hover + .star.in-folder { background: var(--surface-3); border-color: var(--line-2); }
   .star.in-folder:hover { background: var(--surface-3); }
-  .folder-more {
-    flex: none; width: 38px; border-radius: 12px; cursor: pointer;
-    border: 1px solid var(--line); background: var(--surface); color: var(--ink-3);
-    font-size: 16px; line-height: 1;
-  }
-  .folder-more:hover { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
 
   .folder.ghost:hover { color: var(--accent-ink); border-color: var(--accent); background: var(--accent-soft); }
 
@@ -1228,6 +1229,30 @@
   .mini-btn[disabled] { opacity: .45; cursor: default; }
 
   .opts { display: flex; flex-direction: column; gap: 8px; }
+  /* 가로로 놓을 때. 칸 수는 부르는 쪽이 --opt-cols 로 정한다 (여는 방식 2 · 공개 3).
+     좁은 화면에서는 글자가 뭉개지느니 두 칸으로 접는다. */
+  .opts.row {
+    display: grid; grid-template-columns: repeat(var(--opt-cols, 2), 1fr); gap: 8px;
+  }
+  .opts.row .opt {
+    flex-direction: column; align-items: center; text-align: center;
+    gap: 7px; padding: 12px 8px;
+  }
+  .opts.row .opt .ot { align-items: center; }
+  /* 좁은 화면에서도 한 줄을 지킨다 — 글자가 두 줄로 접히더라도 셋이 나란히 서는 편이
+     「고르는 것이 셋」임을 한눈에 보여 준다. 대신 글자를 조금 줄인다. */
+  .opts.row .opt .ot b { font-size: 13px; line-height: 1.35; word-break: keep-all; }
+  /* 고른 것의 설명만 아래에 작게 — 버튼 안에 넣으면 좁아서 뭉개진다 */
+  .opt-why {
+    margin-top: 9px; padding: 0 2px;
+    font-size: 12.5px; line-height: 1.55; color: var(--ink-3);
+  }
+  .opt-why:empty { display: none; }
+  @media (max-width: 430px) {
+    .opts.row { gap: 6px; }
+    .opts.row .opt { padding: 11px 5px; }
+    .opts.row .opt .ot b { font-size: 12.5px; }
+  }
   /* 고르는 줄과 그 아래 고르개 사이를 띄운다 — 붙어 있으면 어느 쪽에 딸린 것인지 흐리다 */
   [data-share-who] { margin-top: 14px; }
   .opt {

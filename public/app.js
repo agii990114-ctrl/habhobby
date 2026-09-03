@@ -2029,8 +2029,6 @@ function folderRow(fid, emoji, name, f, idx) {
     ${real && !folderSel ? `<button class="star in-folder" data-fstar="${fid}"
       aria-pressed="${!!f?.starred}" title="즐겨찾기"
       aria-label="${esc(name)} 즐겨찾기">${icon("star", f?.starred ? "on" : "")}</button>` : ""}
-    ${real && !folderSel ? `<button class="folder-more" data-folder-edit="${fid}"
-      title="폴더 설정" aria-label="${esc(name)} 설정">${icon("cog")}</button>` : ""}
   </div>`;
 }
 
@@ -3010,15 +3008,32 @@ function holdToPick(root, sel, onHold, opts = {}) {
   }, true);
 }
 
-/** 하나만 고르는 목록. 여는 방식 · 공개 대상 · 퍼가기 허용이 같은 모양을 쓴다. */
-const optsHtml = (list, current, key) => `<div class="opts" data-opts="${key}">
-    ${list.map(([v, t, d]) => `<button class="opt" data-o="${v}" aria-pressed="${current === v}">
-      <span class="mark"></span><span class="ot"><b>${t}</b><span>${d}</span></span></button>`).join("")}
-  </div>`;
+/** 하나만 고르는 목록. 여는 방식 · 공개 대상 · 퍼가기 허용이 같은 모양을 쓴다.
+
+    cols 를 주면 **가로로** 늘어놓는다. 그때는 설명을 버튼 안에 넣지 않는다 — 좁아서
+    글자가 뭉개지고, 고르기 전에 셋을 다 읽을 이유도 없다. 대신 **고른 것의 설명만**
+    아래에 작게 적는다(퍼가기 허용 태그와 같은 방식). */
+const optsHtml = (list, current, key, cols = 0) => {
+  const row = cols > 0;
+  const now = list.find(([v]) => v === current);
+  const style = row ? ' style="--opt-cols:' + cols + '"' : "";
+  return `<div class="opts${row ? " row" : ""}" data-opts="${key}"${style}>
+    ${list.map(([v, t, d]) => `<button class="opt" data-o="${v}" aria-pressed="${current === v}"${row ? ' title="' + esc(d) + '"' : ""}>
+      <span class="mark"></span><span class="ot"><b>${t}</b>${row ? "" : `<span>${d}</span>`}</span></button>`).join("")}
+  </div>` + (row
+    ? `<div class="opt-why" data-opt-why="${key}">${esc(now?.[2] ?? "")}</div>`
+    : "");
+};
 
 /** 고른 것을 눈에 보이게 하고 값을 넘겨준다 */
-function wireOpts(root, key, onPick) {
+function wireOpts(root, key, onPick, list) {
   const box = root.querySelector(`[data-opts="${key}"]`); if (!box) return;
+  /* 가로로 놓았으면 설명이 아래 한 줄에만 있다 — 고른 것이 바뀌면 그 줄도 갈아 끼운다. */
+  const why = root.querySelector(`[data-opt-why="${key}"]`);
+  if (why && list) box.addEventListener("click", e => {
+    const b = e.target.closest("[data-o]"); if (!b) return;
+    why.textContent = list.find(([v]) => v === b.dataset.o)?.[2] ?? "";
+  });
   box.addEventListener("click", e => {
     const b = e.target.closest("[data-o]"); if (!b) return;
     for (const x of box.querySelectorAll("[data-o]")) x.setAttribute("aria-pressed", x === b);
@@ -3466,7 +3481,7 @@ function openFolderForm(existing, after) {
       <div class="rest" style="text-align:left;padding:2px">
         둘러보기로는 폴더를 공개할 수 없습니다. 로그인하면 쓸 수 있어요.</div></div>` : ""}
     ${!guestMode() ? `<div class="field sep"><label>친구에게 공개</label>
-      ${optsHtml(SHARE_MODES, share.mode, "share")}
+      ${optsHtml(SHARE_MODES, share.mode, "share", 3)}
       <div data-share-who${share.mode === "some" ? "" : " hidden"}>
         <div class="rest" style="text-align:left;padding:8px 2px 0">친구를 불러오는 중…</div>
       </div>
@@ -3552,7 +3567,7 @@ function openFolderForm(existing, after) {
       // 아무에게도 안 보이는 폴더에는 퍼가기라는 말이 성립하지 않는다
       takeBox.hidden = v === "none";
       paintTake();
-    });
+    }, SHARE_MODES);
 
     takeBox.addEventListener("click", e => {
       const b = e.target.closest("[data-take]"); if (!b) return;
@@ -4722,7 +4737,7 @@ function openAppSettings() {
     ${/* 색 → 여는 방식 → 계정 → 안내. 넷이 하는 일이 서로 다르므로 선으로 가른다 —
          한 덩이로 흘려 두면 어디까지가 한 이야기인지 짚어 가며 읽어야 한다. */""}
     <div class="field sep"><label>작품을 여는 방식</label>
-      ${optsHtml(OPEN_MODES, settings.openMode, "openmode")}</div>
+      ${optsHtml(OPEN_MODES, settings.openMode, "openmode", 2)}</div>
     ${me ? `<div class="field sep"><label>계정</label>
       <div class="acct">
         ${me.avatar ? `<img class="acct-av" src="${esc(me.avatar)}" alt="">`
@@ -4790,7 +4805,7 @@ function openAppSettings() {
   wireOpts(sheet, "openmode", guard(async v => {
     await api("PUT", "/api/settings", { openMode: v });
     await reload(); openAppSettings();
-  }));
+  }), OPEN_MODES);
 
   /* 표시 이름 — 친구에게 보이는 유일한 신원이라 여기서도 고칠 수 있어야 한다.
      친구 추가하다 처음 정하는 것 말고는 손댈 길이 없었다. */

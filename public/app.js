@@ -2009,10 +2009,15 @@ function folderRow(fid, emoji, name, f, idx) {
       : idx.get(fid) ?? [])
     : worksIn(fid);
   const list = byRecent(all).slice(0, 4);
-  const mini = list.length
-    ? `<div class="mini">${list.map(w => `<i style="${coverStyle(w)}"></i>`).join("")}
-       ${"<i></i>".repeat(Math.max(0, 4 - list.length))}</div>`
-    : `<div class="mini solo">${emoji}</div>`;
+  /* **아이콘을 정해 두었으면 그것이 이 폴더의 얼굴이다.** 표지 넷을 모아 보여 주는 것은
+     아이콘이 없을 때의 대신이다 — 정해 둔 아이콘이 있는데 표지로 덮으면, 목록을 훑을 때
+     내가 붙인 표가 어디에도 안 보인다. 아이콘이 앞에 서면 제목 옆에 또 붙일 이유도 없다. */
+  const mini = emoji
+    ? `<div class="mini solo">${emoji}</div>`
+    : list.length
+      ? `<div class="mini">${list.map(w => `<i style="${coverStyle(w)}"></i>`).join("")}
+         ${"<i></i>".repeat(Math.max(0, 4 - list.length))}</div>`
+      : `<div class="mini solo empty"></div>`;
   // 전체·미분류는 진짜 폴더가 아니라 설정할 것이 없다 — 그때만 화살표를 둔다
   const real = fid !== "_all" && fid !== "_none";
   return `<div class="folder-row">
@@ -2023,7 +2028,8 @@ function folderRow(fid, emoji, name, f, idx) {
             훑는 것만으로 남의 폴더임을 알아야 한다 — 내 폴더와 한 줄로 섞여 있기 때문이다. */""}
       ${/* 함께 고치는 폴더는 **내가 연 것인지 불려 간 것인지**가 먼저 보여야 한다 —
            목록에서 둘이 나란히 서기 때문이다. */""}
-      <span class="txt"><b>${emoji ? emoji + " " : ""}${esc(name)}${
+      ${/* 아이콘은 왼쪽 미리보기 자리에 이미 서 있다 — 제목 옆에 또 붙이지 않는다 */""}
+      <span class="txt"><b>${esc(name)}${
         f?.mirror
           ? ` <i class="mtag">${f.canEdit ? `공유폴더 · ${esc(f.mirrorOf)}` : `미러링 · ${esc(f.mirrorOf)}`}</i>`
           : canEdit(f?.take) ? ` <i class="mtag">공유폴더 · 오너</i>` : ""}</b><span>${
@@ -3023,7 +3029,7 @@ const optsHtml = (list, current, key, cols = 0) => {
   const row = cols > 0;
   const now = list.find(([v]) => v === current);
   const style = row ? ' style="--opt-cols:' + cols + '"' : "";
-  return `<div class="opts${row ? " row" : ""}" data-opts="${key}"${style}>
+  return `<div class="opts${row ? " across" : ""}" data-opts="${key}"${style}>
     ${list.map(([v, t, d]) => `<button class="opt" data-o="${v}" aria-pressed="${current === v}"${row ? ' title="' + esc(d) + '"' : ""}>
       <span class="mark"></span><span class="ot"><b>${t}</b>${row ? "" : `<span>${d}</span>`}</span></button>`).join("")}
   </div>` + (row
@@ -3451,8 +3457,10 @@ function openMirrorInfo(f, after) {
 }
 
 function openFolderForm(existing, after) {
-  // 비추는 폴더는 남의 것이다 — 고치는 창을 열 이유가 없다
-  if (existing?.mirror) return openMirrorInfo(existing, after);
+  /* 비추는 폴더에서는 **이름과 아이콘만** 고친다. 그 줄은 내 표에 있어 내가 어떻게
+     부를지는 내 몫이고, 주인 화면은 그대로다. 공개 설정은 원본 폴더에 딸린 것이라
+     주인만 정한다 — 여기서는 칸 자체를 세우지 않는다. */
+  const mine = !existing?.mirror;
   let emoji = existing ? existing.emoji : "📁";
   // 견본에 없는 아이콘을 쓰고 있었다면 직접 입력칸을 열어 둔 채로 시작한다
   const own = !EMOJIS.includes(emoji);
@@ -3475,7 +3483,7 @@ function openFolderForm(existing, after) {
     const card = (v, t, on) => `<button type="button" class="opt${on ? " on" : ""}"
       ${v ? `data-take="${v}"` : "data-take-off"} aria-pressed="${on}">
       <span class="mark tick"></span><span class="ot"><b>${t}</b></span></button>`;
-    return `<div class="opts row take-flags" style="--opt-cols:4">
+    return `<div class="opts across take-flags" style="--opt-cols:4">
       ${card("", "비공개", off)}
       ${TAKE_FLAGS.map(([v, t]) => card(v, t, flags.has(v))).join("")}
     </div>
@@ -3503,7 +3511,7 @@ function openFolderForm(existing, after) {
     ${guestMode() ? `<div class="field sep"><label>친구에게 공개</label>
       <div class="rest" style="text-align:left;padding:2px">
         둘러보기로는 폴더를 공개할 수 없습니다. 로그인하면 쓸 수 있어요.</div></div>` : ""}
-    ${!guestMode() ? `<div class="field sep"><label>공개 설정</label>
+    ${!guestMode() && mine ? `<div class="field sep"><label>공개 설정</label>
       ${/* **무엇을 열어 둘지가 먼저다.** 「누구에게」는 그다음 물음이고, 아무것도
            안 열어 두었으면 물을 것도 없다. 그래서 셋이 다 꺼져 있으면 범위 칸이 사라진다. */""}
       <div data-take-box>${takeHtml()}</div>
@@ -3517,7 +3525,14 @@ function openFolderForm(existing, after) {
       </div>
       </div>
     </div>` : ""}
-    ${existing ? `<div class="link-row"><button class="btn bad" id="fdel">폴더 삭제</button></div>` : ""}
+    ${existing && mine
+      ? `<div class="link-row"><button class="btn bad" id="fdel">폴더 삭제</button></div>`
+      : existing
+        ? `<div class="field sep"><div class="rest" style="text-align:left;padding:2px">
+            ${esc(existing.mirrorOf ?? "")}님의 폴더입니다. 여기서 고친 이름과 아이콘은
+            <b>내 목록에서만</b> 바뀝니다.</div>
+          <div class="link-row"><button class="btn" id="fmore">이 폴더에 대해</button></div></div>`
+        : ""}
     <div class="link-row wide-only">
       <button class="btn" data-cancel>취소</button>
       <button class="btn primary" data-done>${existing ? "저장" : "만들기"}</button>
@@ -3636,7 +3651,7 @@ function openFolderForm(existing, after) {
   /* 공개를 거두는 설정은 **남의 화면에서 무언가를 없앤다.** 저장하기 전에 한 번 묻는다 —
      이름을 고치러 들어왔다가 옆 칸을 잘못 건드려 남의 폴더를 비워 버리면 되돌릴 길이 없다. */
   const revoking = () => {
-    if (!existing) return null;
+    if (!existing || !mine) return null;      // 공개 설정을 안 건드리므로 물을 것이 없다
     const was = existing.share;
     const wasTeam = canEdit(existing.take);
     const stillTeam = flags.has("edit") && share.mode === "some";
@@ -3700,12 +3715,14 @@ function openFolderForm(existing, after) {
   wireHead({
     save: guard(async () => {
       const name = nameEl.value.trim();
-      if (!name) { nameEl.focus(); return; }
+      /* 이름과 아이콘 중 하나만 있으면 된다 — 둘 다 비어 있을 때만 막는다. */
+      if (!name && !emoji) { nameEl.focus(); toast("이름이나 아이콘 중 하나는 정해 주세요."); return; }
       const warn = revoking();
       if (warn && !await askSure({ ...warn, back: () => openFolderForm(existing, after) })) return;
       let folder;
       if (existing) {
-        await api("PATCH", `/api/folders/${existing.id}`, { name, emoji, share, take: takeValue(flags) });
+        await api("PATCH", `/api/folders/${existing.id}`,
+          mine ? { name, emoji, share, take: takeValue(flags) } : { name, emoji });
         folder = { ...existing, name, emoji };
       } else {
         ({ folder } = await api("POST", "/api/folders", { name, emoji, share, take: takeValue(flags) }));
@@ -3714,6 +3731,8 @@ function openFolderForm(existing, after) {
     }),
     cancel: () => after(existing ?? null),      // 아무것도 바꾸지 않고 물러난다
   });
+  const more = sheet.querySelector("#fmore");
+  if (more) more.onclick = () => openMirrorInfo(existing, after);
   const del = sheet.querySelector("#fdel");
   if (del) del.onclick = guard(async () => {
     const yes = await askSure({

@@ -1231,19 +1231,22 @@
   .mini-btn[disabled] { opacity: .45; cursor: default; }
 
   .opts { display: flex; flex-direction: column; gap: 8px; }
-  /* 가로로 놓을 때. 칸 수는 부르는 쪽이 --opt-cols 로 정한다 (여는 방식 2 · 공개 3).
+  /* 가로로 놓을 때. 칸 수는 부르는 쪽이 --opt-cols 로 정한다 (여는 방식 2 · 공개 4).
+     이름이 across 인 까닭: row 는 이미 **목록 한 줄**(누르면 열리는 줄)이 쓰고 있어서,
+     그 이름을 겹쳐 쓰면 .row:hover 의 배경과 padding·cursor 까지 딸려 온다.
+     실제로 공개 설정 칸 전체에 hover 배경이 깔렸다. */
      좁은 화면에서는 글자가 뭉개지느니 두 칸으로 접는다. */
-  .opts.row {
+  .opts.across {
     display: grid; grid-template-columns: repeat(var(--opt-cols, 2), 1fr); gap: 8px;
   }
-  .opts.row .opt {
+  .opts.across .opt {
     flex-direction: column; align-items: center; text-align: center;
     gap: 7px; padding: 12px 8px;
   }
-  .opts.row .opt .ot { align-items: center; }
+  .opts.across .opt .ot { align-items: center; }
   /* 좁은 화면에서도 한 줄을 지킨다 — 글자가 두 줄로 접히더라도 셋이 나란히 서는 편이
      「고르는 것이 셋」임을 한눈에 보여 준다. 대신 글자를 조금 줄인다. */
-  .opts.row .opt .ot b { font-size: 13px; line-height: 1.35; word-break: keep-all; }
+  .opts.across .opt .ot b { font-size: 13px; line-height: 1.35; word-break: keep-all; }
   /* 고른 것의 설명만 아래에 작게 — 버튼 안에 넣으면 좁아서 뭉개진다 */
   .opt-why {
     margin-top: 9px; padding: 0 2px;
@@ -1251,9 +1254,9 @@
   }
   .opt-why:empty { display: none; }
   @media (max-width: 430px) {
-    .opts.row { gap: 6px; }
-    .opts.row .opt { padding: 11px 5px; }
-    .opts.row .opt .ot b { font-size: 12.5px; }
+    .opts.across { gap: 6px; }
+    .opts.across .opt { padding: 11px 5px; }
+    .opts.across .opt .ot b { font-size: 12.5px; }
   }
   /* 고르는 줄과 그 아래 고르개 사이를 띄운다 — 붙어 있으면 어느 쪽에 딸린 것인지 흐리다 */
   [data-share-who] { margin-top: 14px; }
@@ -1281,11 +1284,6 @@
     width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0;
     transform: rotate(42deg);
   }
-  /* **손을 올려도 테두리를 굵게 두르지 않는다.** 카드가 크다 보니 테두리가 진해지면
-     칸 전체가 눌린 것처럼 보여, 켜진 것과 그냥 지나가는 것이 헷갈린다. */
-  .take-flags .opt:hover { border-color: var(--line-2); }
-  .take-flags .opt[aria-pressed="true"]:hover { border-color: var(--accent); }
-
   /* 공개 설정은 넷이라 한 칸이 좁다 — 글자를 조금 줄이고 표시를 위에 놓는다 */
   .take-flags .opt { padding: 11px 6px; gap: 6px; }
   .take-flags .opt .ot b { font-size: 12.5px; }

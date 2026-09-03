@@ -908,8 +908,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
   if (p === "/api/folders" && m === "POST") {
     const b = await readJson(req);
     const name = String(b.name ?? "").trim();
-    if (!name) { json(res, 400, { ok: false, reason: "폴더 이름이 필요합니다." }); return true; }
-    const { id } = createFolder(user.id, { name, emoji: String(b.emoji ?? "") });
+    const emoji = String(b.emoji ?? "").trim();
+    /* **이름과 아이콘 중 하나만 있으면 된다.** 아이콘 하나로 알아보는 폴더가 있고
+       (🍿 · 📚), 이름만으로 충분한 폴더도 있다. 둘 다 없으면 목록에서 가리킬 것이
+       없으므로 그때만 막는다. */
+    if (!name && !emoji) {
+      json(res, 400, { ok: false, reason: "이름이나 아이콘 중 하나는 정해 주세요." });
+      return true;
+    }
+    const { id } = createFolder(user.id, { name, emoji });
     applyShare(id, b);
     json(res, 201, { ok: true, folder: getFolder(user.id, id) });
     return true;
@@ -950,7 +957,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
 
   if (seg[0] === "api" && seg[1] === "folders" && seg[2]) {
     const id = seg[2];
-    // 비추는 폴더는 내가 고칠 것이 없다 — 이름도 아이콘도 주인 것이다
     const mine = getFolder(user.id, id);
 
     /* 별은 **비추는 폴더에도** 켤 수 있다 — 이름·아이콘과 달리 그건 주인의 값이 아니라
@@ -963,8 +969,23 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       return true;
     }
 
+    /* **이름과 아이콘은 비추는 폴더에서도 내 것이다.**
+
+       그 줄은 내 표에 있고(createFolder 가 만든다), 주인 것을 담을 때 한 번 베껴 왔을
+       뿐이다. 내 목록에서 어떻게 부를지는 내가 정하는 것이 맞다 — 주인이 「웹툰」이라
+       불러도 나는 「지롱이 추천」이라 부를 수 있고, 그렇게 고쳐도 주인 화면은 그대로다.
+
+       공개 설정은 다르다. 그건 **원본 폴더**에 딸린 것이라 주인만 정한다. */
     if (mine?.mirror && m === "PATCH") {
-      json(res, 403, { ok: false, reason: "비추는 폴더는 고칠 수 없습니다." });
+      const b = await readJson(req);
+      if (b.share !== undefined || b.take !== undefined) {
+        json(res, 403, { ok: false, reason: "공개 설정은 폴더 주인만 정할 수 있습니다." });
+        return true;
+      }
+      db.prepare("UPDATE folder SET name = COALESCE(?, name), emoji = COALESCE(?, emoji) WHERE id = ?")
+        .run(typeof b.name === "string" ? b.name.trim() : null,
+          typeof b.emoji === "string" ? b.emoji.trim() : null, id);
+      json(res, 200, { ok: true, folder: getFolder(user.id, id) });
       return true;
     }
     if (m === "PATCH") {

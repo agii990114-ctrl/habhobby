@@ -746,11 +746,13 @@ const workGridHtml = (list, emptyMsg) => workSel
     : `<div class="empty">${emptyMsg}</div>`)
   : gridHtml(list, emptyMsg);
 
-/** 목록 위 줄 — 고르기 전에는 「선택」, 고르는 중에는 셈과 실행 */
+/** 목록 위 줄 — **고르는 중에만** 선다(셈과 실행).
+
+    고르기에 들어가는 「선택」은 창의 머리줄로 옮겼다(pickAct). 목록 위에 두었을 때는
+    아직 아무것도 안 하는 단추 하나가 목록과 제목 사이를 늘 한 줄 벌려 놓았고, 창마다
+    그 줄의 자리가 조금씩 달랐다. 창을 다루는 일(닫기 · 찾기 · 선택)은 머리줄에 모인다. */
 const workBarHtml = any => {
-  if (!any || workSelKey === null) return "";
-  if (!workSel)
-    return `<div class="fr-pick tight"><button class="mini-btn" data-wsel>선택</button></div>`;
+  if (!any || workSelKey === null || !workSel) return "";
   /* **고른 것에 남의 작품이 섞여 있을 수 있다.** 함께 쓰는 폴더에는 내 작품과 친구
      작품이 한자리에 서고, 비추는 폴더는 통째로 남의 것이다. 할 수 있는 일이 서로
      달라서 버튼도 갈라 세운다 — 남의 것은 **담아 오는 것**뿐이고(내 것이 아니라
@@ -1131,6 +1133,7 @@ function openSoon() {
   openSheet(`<div data-wbar>${workBarHtml(g.items.length)}</div>
     ${workGridHtml(g.items, "공개 예정인 작품이 없습니다.")}`,
     { full: true, title: "공개 예정", sub: `${g.items.length}편 · 가까운 날부터` });
+  pickAct(g.items.length, openSoon);
   wireWorkPick(sheet.querySelector(".sheet-body"), openSoon);
   sheet.querySelector(".sheet-body").addEventListener("click", e => {
     if (workSel) return;                       // 고르는 중에는 열어 볼 일이 없다
@@ -1211,6 +1214,7 @@ function drawIdle() {
 
   /* 리스너는 openSheet 이 매번 새로 만드는 자식에 붙인다 — sheet 자체에 붙이면
      다시 그릴 때마다 쌓인다. ‹ 는 머리로 옮겨지고 ☰ 와 카드는 본문에 남는다. */
+  pickAct(sec ? sec.items.length : idleAll.length, drawIdle);
   wireWorkPick(sheet.querySelector(".sheet-body"), drawIdle);
   const onClick = e => {
     const a = e.target.closest("[data-idle-all]");
@@ -1281,6 +1285,7 @@ function drawDayList(t) {
     sub: g ? `${g.items.length}편` : `전체 ${total}편${same ? " · 오늘" : ""}`,
     back: g ? () => { dayGrp = null; drawDayList(t); } : null,
   });
+  pickAct(g ? g.items.length : dayAll.length, () => drawDayList(t));
   wireWorkPick(sheet.querySelector(".sheet-body"), () => drawDayList(t));
   sheet.querySelector(".sheet-body").addEventListener("click", e => {
     const b = e.target.closest("[data-day-grp]");
@@ -1532,9 +1537,12 @@ function openFolderSheet(id) {
 
     /* 즐겨찾기는 **폴더를 열어 놓고** 켠다. 자주 여는 폴더인지는 들어와 보고 아는 것이지
        목록을 훑으며 정하는 것이 아니고, 목록의 줄마다 별을 달면 이름 쓸 자리가 좁아진다.
-       자리는 닫기 버튼 옆 — 없는 기기(손가락)에서는 그 자리를 그대로 물려받는다. */
+       **자리는 머리줄 맨 왼쪽, 제목 앞이다.** 한때 닫기 버튼 옆에 두었는데 그쪽은
+       「이 창을 어떻게 할까」(닫기 · 찾기 · 선택)가 모이는 자리이고, 즐겨찾기는
+       **이 폴더에 하는 일**이라 갈래가 다르다. 제목 앞에 서면 무엇에 대한 별인지가
+       바로 읽힌다 — 목록의 줄에서도 별은 이름 곁에 있다. */
     const fav = document.createElement("button");
-    fav.className = "star sheet-fav";
+    fav.className = "star head-fav";
     fav.title = "즐겨찾기";
     fav.setAttribute("aria-label", "즐겨찾기");
     const paintFav = () => paintStar(fav, f.starred);
@@ -1545,7 +1553,7 @@ function openFolderSheet(id) {
       api("PUT", `/api/folders/${f.id}/star`, { starred: f.starred })
         .catch(err => { flipStar(f); paintFav(); render(); toast(err.message); });
     };
-    sheet.querySelector(".sheet-top").append(fav);
+    sheet.querySelector(".sh-t").before(fav);
 
     /* **이 폴더에 하는 일** 둘은 아래 좌우로 내린다 — 캘린더 탭의 ＋ 와 추가 목록이 앉는
        그 자리다. 손이 닿기 쉽고, 앱 전체에서 같은 자리에 같은 뜻이 선다.
@@ -1570,6 +1578,7 @@ function openFolderSheet(id) {
     }));
   }
 
+  pickAct(shown.length, () => openFolderSheet(id));
   wireWorkPick(sheet.querySelector(".sheet-body"), () => openFolderSheet(id));
 
   sheet.querySelector(".sheet-body").addEventListener("click", e => {
@@ -2243,7 +2252,10 @@ function render() {
        단락마다 따로 고르게 하면 같은 일을 두 번 해야 한다. */
     const home = byRecent(activeWorks());
     workPickAt("home", home);
-    html += `<div class="screen-title">최근 본 순 · 플랫폼별</div>`;
+    /* 페이지 탭은 창이 아니라 화면이라 머리줄이 없다 — 「선택」은 제목줄 오른쪽 끝에
+       선다. 창에서 머리줄 오른쪽에 서는 것과 같은 자리다. */
+    html += `<div class="screen-title with-act">최근 본 순 · 플랫폼별
+      ${home.length && !workSel ? `<button class="mini-btn" data-wsel>선택</button>` : ""}</div>`;
     html += `<div data-wbar>${workBarHtml(home.length)}</div>`;
     html += railsHtml(home);
   } else if (viewing) {
@@ -2494,6 +2506,33 @@ function wireHead({ save, cancel, back = cancel }) {
   if (bk) bk.onclick = onBack;
 }
 
+/** 머리줄의 「선택」 — 고르기에 들어가는 길. 고르는 중에는 아래 셈줄이 대신 서므로
+    여기서는 사라진다. 고를 것이 없거나 고를 수 없는 화면(workSelKey === null)에도 안 선다. */
+function pickAct(any, redraw) {
+  if (!any || workSelKey === null || workSel) return;
+  const b = actBtn(null, "선택", "mini-btn");
+  b.textContent = "선택";
+  b.onclick = () => { workSel = new Set(); redraw(); };
+  sheetAct(b);
+}
+
+/** 머리줄 오른쪽에 단추 하나를 붙인다. 부르는 쪽은 자리를 몰라도 된다. */
+function sheetAct(el) {
+  sheet.querySelector(".sheet-act")?.append(el);
+  return el;
+}
+
+/** 아이콘 하나짜리 머리줄 단추를 짓는다 — 즐겨찾기 · 설정 · 찾기가 같은 모양을 쓴다. */
+function actBtn(name, label, cls = "sheet-cog") {
+  const b = document.createElement("button");
+  b.className = cls;
+  b.type = "button";
+  b.title = label;
+  b.setAttribute("aria-label", label);
+  if (name) b.innerHTML = icon(name);
+  return b;
+}
+
 /* 기본은 아래에서 올라오는 낮은 시트. 목록이 긴 화면은 full로 띄운다 —
    손잡이 대신 제목줄과 닫기 버튼이 고정되고 본문만 스크롤된다. */
 function openSheet(html, opts = {}) {
@@ -2513,9 +2552,14 @@ function openSheet(html, opts = {}) {
 
      손잡이는 모든 시트에 둔다 — 어느 창이든 같은 자리를 잡아 끌어 내리면 닫힌다.
      닫기 버튼은 마우스가 있는 기기에서만 보인다 (styles.css). */
+  /* **딸려 붙는 단추는 한 통에 모은다**(.sheet-act) — 즐겨찾기 · 설정 · 찾기 · 선택.
+     한때 저마다 absolute 로 자리를 잡고 닫기 버튼을 비켜 갈 값(right: 46px)을 각자
+     들고 있었는데, 둘이 함께 서는 화면이 생기자 서로 겹쳤다. 통 하나가 자리를 잡고
+     안에서는 나란히 서면, 몇 개가 붙든 셈이 맞는다. */
   const top = inner => `<div class="sheet-top">
       <div class="handle-zone"><div class="handle"></div></div>
       <button class="sheet-x" data-close type="button" aria-label="닫기" title="닫기">${icon("x")}</button>
+      <div class="sheet-act"></div>
       ${inner}
     </div>`;
 
@@ -2935,7 +2979,7 @@ function openWork(id, over) {
   cog.setAttribute("aria-label", "작품 설정");
   cog.innerHTML = icon("cog");
   cog.onclick = () => openWorkSettings(id, { back: () => openWork(id, over) });
-  sheet.querySelector(".sheet-top").append(cog);
+  sheetAct(cog);
   }
 
   const again = () => openWork(id, over);
@@ -4162,6 +4206,7 @@ function drawPlatformList(pid) {
     sheet.querySelector("[data-plat-body]").innerHTML = body();
   });
 
+  pickAct(shownNow().length, () => drawPlatformList(pid));
   wireWorkPick(sheet.querySelector(".sheet-body"), () => drawPlatformList(pid));
 
   sheet.querySelector(".sheet-body").addEventListener("click", e => {
@@ -4247,8 +4292,8 @@ function archVisible() {
     하는 단추(되돌리기·휴지통·삭제)는 고른 것이 있을 때만 붙인다. */
 function archBulk() {
   const vis = archVisible();
-  if (!arch.picked)
-    return vis.length ? `<div class="fr-pick tight"><button class="mini-btn" data-asel>선택</button></div>` : "";
+  // 고르기에 들어가는 길은 머리줄에 있다(아래 archPickAct) — 여기는 고르는 중에만 선다
+  if (!arch.picked) return "";
   const n = arch.picked.size;
   const trash = arch.state === "watched";
   const allPicked = vis.length > 0 && vis.every(w => arch.picked.has(w.id));
@@ -4366,6 +4411,16 @@ function drawArchive() {
     const bk = sheet.querySelector("[data-sheet-back]");
     if (bk) bk.hidden = !now;
   };
+  /* 「선택」은 창의 머리줄에 — 다른 창과 같은 자리, 같은 손짓이다.
+     레일 화면(별점 묶음)에서는 고르지 않으므로 archVisible 이 빈 목록을 내주고,
+     그때는 이 단추도 서지 않는다. */
+  if (!arch.picked && archVisible().length) {
+    const b = actBtn(null, "선택", "mini-btn");
+    b.textContent = "선택";
+    b.onclick = () => { arch.picked = new Set(); drawArchive(); };
+    sheetAct(b);
+  }
+
   const qEl = sheet.querySelector(".arch-q");
   qEl.addEventListener("input", () => { arch.q = qEl.value; repaint(); });
 
@@ -5003,7 +5058,7 @@ async function openFriends() {
        두꺼워진다. 왼쪽이 보는 방식, 오른쪽이 다루는 방식 — 자리로 갈라 놓는다. */
     const star = `<button class="mini-btn" data-only-star aria-pressed="${onlyStar}"
       >${icon("star")} 즐겨찾기</button>`;
-    if (!sel) return `<div class="fr-pick spread">${star}
+    if (!sel) return `<div class="fr-pick">${star}
       <button class="mini-btn" data-fsel>선택</button></div>`;
     /* 「전체 선택」은 **지금 화면에 서 있는 사람만** 집는다 — 찾기나 즐겨찾기로 좁혀
        놓았으면 그만큼이다. 안 보이는 사람까지 집으면 못 본 채로 끊게 된다.
@@ -5033,7 +5088,8 @@ async function openFriends() {
          「25명」 하나를 위해 서 있었다 — 짧은 값은 제목에 붙는 편이 자리를 덜 먹고
          읽기도 가깝다. .crumb .count 가 그 자리를 위해 있던 규칙이다. */""}
     ${headHtml("친구", { back: false, actions: false, count: `${friends.length}명` })}
-    <button class="btn primary" style="width:100%" data-invite>초대 링크 만들기</button>
+    ${/* 제목줄과 넉넉히 띄운다 — 이 화면에서 새로 하는 일이라 눈에 먼저 걸려야 한다 */""}
+    <button class="btn primary" style="width:100%;margin-top:30px" data-invite>초대 링크 만들기</button>
     <div class="rest" style="text-align:left;padding:7px 2px 12px">
       링크를 받은 사람만 친구가 될 수 있습니다. 아이디로 검색해 아무나 추가하는 방식이 아닙니다.</div>
     <div data-fr-bar>${barHtml()}</div>
@@ -5062,7 +5118,7 @@ async function openFriends() {
       repaintBar(); repaint();
       if (finding) sheet.querySelector(".arch-q")?.focus();
     };
-    sheet.querySelector(".sheet-top").append(find);
+    sheetAct(find);
   }
 
   const list = sheet.querySelector("[data-fr-list]");

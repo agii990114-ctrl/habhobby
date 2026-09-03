@@ -180,6 +180,13 @@
   .screen { flex: 1; overflow-y: auto; padding: 14px 16px 22px; }
   .screen-title { font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin: 2px 0 12px; }
 
+  /* 제목줄 오른쪽 끝에 단추 하나(페이지 탭의 「선택」). 글자는 대문자로 늘여 놓은
+     작은 표지라, 단추가 그 줄에 서려면 세로 가운데를 다시 잡아야 한다. */
+  .screen-title.with-act {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  }
+  .screen-title.with-act .mini-btn { letter-spacing: 0; text-transform: none; }
+
   .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
   .chip {
     border: 1px solid var(--line-2); background: var(--surface); color: var(--ink-2);
@@ -842,12 +849,21 @@
   .sheet.full { position: relative; }
   .fab.in-sheet { z-index: 6; }
 
-  /* 머리줄 오른쪽에 딸려 붙는 단추 — 폴더의 즐겨찾기(★)와 작품의 설정(⚙).
-     닫기 버튼과 같은 줄, 그 왼쪽. 닫기가 없는 기기(손가락)에서는 그 자리를
-     그대로 물려받는다. 한 창에 둘이 같이 서는 일은 없다. */
-  .sheet-fav, .sheet-cog {
+  /* 머리줄 오른쪽에 딸려 붙는 단추들을 담는 통 — 즐겨찾기 · 설정 · 찾기 · 선택.
+     닫기 버튼과 같은 줄, 그 왼쪽. 닫기가 없는 기기(손가락)에서는 그 자리를 그대로
+     물려받는다. **자리를 잡는 것은 통 하나뿐**이고, 안의 단추들은 나란히 선다 —
+     저마다 absolute 로 자리를 잡던 때는 둘이 함께 서면 서로 겹쳤다. */
+  .sheet-act {
     position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
-    z-index: 3; width: 30px; height: 30px; font-size: 15px;
+    z-index: 3; display: flex; align-items: center; gap: 6px;
+  }
+  .sheet-act:empty { display: none; }
+  /* 제목 앞에 서는 별(폴더). 「이 폴더에 하는 일」이라 오른쪽 통(창을 다루는 일)과
+     갈래를 갈라 둔다. 머리줄이 flex-start 라 세로 가운데는 제가 잡는다. */
+  .head-fav { flex: none; align-self: center; width: 30px; height: 30px; font-size: 15px;
+    display: flex; align-items: center; justify-content: center; }
+  .sheet-fav, .sheet-cog {
+    flex: none; width: 30px; height: 30px; font-size: 15px;
     display: flex; align-items: center; justify-content: center;
   }
   .sheet-cog {
@@ -984,7 +1000,7 @@
   }
   /* 고르는 줄. 「선택」은 오른쪽 끝 — 위의 즐겨찾기 단추와 같은 세로줄에 선다.
      찾는 줄과 넉넉히 띄운다: 붙여 두면 찾기 칸에 딸린 단추처럼 읽힌다. */
-  .fr-pick { display: flex; justify-content: flex-end; margin: 30px 0 20px; }
+  .fr-pick { display: flex; justify-content: flex-end; gap: 6px; margin: 20px 0 20px; }
   /* 왼쪽이 보는 방식(즐겨찾기), 오른쪽이 다루는 방식(선택) — 자리로 갈라 놓는다 */
   .fr-pick.spread { justify-content: space-between; }
   /* 팝업 안의 작품 고르기는 바로 위가 제목줄이라 위 여백이 필요 없다 — 친구 목록은
@@ -1147,7 +1163,7 @@
        닫기는 자리를 차지하지 않는 absolute 라, 비켜 주지 않으면 그 밑에 깔린다. */
     .sheet.full .sheet-head .icon-btn { margin-right: 34px; }
     .sheet.full .sheet-head .head-act { margin-right: 34px; }
-    .sheet-fav, .sheet-cog { right: 46px; }
+    .sheet-act { right: 46px; }
     /* 사이드 메뉴는 머리 영역이 따로 없다 — 오른쪽 가장자리의 손잡이만큼 안쪽에 둔다 */
     .drawer-x { right: 26px; top: 10px; }
   }

@@ -15,7 +15,7 @@ import {
   getFolder, createFolder, canCopy, canMirror, canEdit, seenByMe, markSeen,
   folderInvites, acceptFolder, declineFolder, leaveFolder,
   noticeBreak, folderNotices, readNotices, sweepNotices, inviteToFolder, unlinkFromFolder,
-  cleanName, setDisplayName, starFolder, findOrMakeUrl, knownUrl,
+  cleanName, setDisplayName, starFolder, findOrMakeUrl, knownUrl, staleCovers, refreshCover, markChecked,
   type Work, type User, type ShareMode, type TakeMode,
 } from "./db.ts";
 import {
@@ -1509,6 +1509,47 @@ const server = createServer(async (req, res) => {
   }
 });
 
+/* ── 시한부 표지를 되받는다 ──────────────────────────────────
+
+   인스타그램이나 CloudFront 가 주는 표지 주소에는 서명과 만료가 박혀 있다. 차단당해서가
+   아니라 **원래 그렇게 설계되어** 며칠이면 깨진다. 그런 것만 골라 조용히 다시 받아 온다.
+
+   **전부 돌지 않는다.** 멀쩡한 주소까지 주기적으로 확인하면 남의 서버를 쉼 없이 두드리게
+   되고, 그건 우리가 피하려던 바로 그 일이다. 지금 이 서버가 남의 사이트를 부르는 일은
+   「누가 처음 담을 때」뿐이고, 여기가 두 번째다 — 그래서 작게 유지한다.
+
+   지키는 것 넷:
+     · **표지만** 고친다. 제목까지 고치면 직접 안 고친 사람 전부의 목록에서 이름이 하룻밤에 바뀐다.
+     · **확실할 때만** 고친다(og 를 제대로 읽었고, 대문 정보가 아닐 때).
+     · **못 읽었으면 그대로 둔다.** 있던 표지를 지우면 있던 것마저 사라진다.
+     · **천천히** 한다. 한 건 하고 쉰다 — 몰아치면 그것이 곧 차단당하는 길이다.
+
+   서버가 꺼지면 함께 꺼진다. 지금 규모에서는 그게 맞다 — 컨테이너 하나로 끝난다. */
+const REFRESH_EVERY = 6 * 60 * 60 * 1000;   // 여섯 시간마다 한 차례
+const REFRESH_AFTER = 3 * 24 * 60 * 60 * 1000;   // 받아 둔 지 사흘 지난 것
+const REFRESH_MAX = 40;                      // 한 차례에 이만큼까지
+const REFRESH_GAP = 1500;                    // 한 건 사이에 쉬는 시간
+
+async function refreshStaleCovers(): Promise<void> {
+  const list = staleCovers(REFRESH_AFTER, REFRESH_MAX);
+  if (!list.length) return;
+  let fixed = 0, checked = 0;
+  for (const row of list) {
+    await new Promise(r => setTimeout(r, REFRESH_GAP));
+    try {
+      const r = await resolveUrl(row.listUrl);       // 여기서는 아는 것을 쓰면 안 된다 — 새로 받아야 한다
+      if (r.ok && !r.dead && r.origin === "og" && r.coverUrl) {
+        refreshCover(row.id, r.coverUrl, r.coverAspect);
+        fixed++;
+      } else {
+        markChecked(row.id);                         // 못 얻었으면 표지는 그대로, 본 때만 적는다
+      }
+    } catch { markChecked(row.id); }
+    checked++;
+  }
+  console.log(`  시한부 표지 ${checked}건 확인 · ${fixed}건 새로 받음`);
+}
+
 server.listen(PORT, () => {
   console.log(`HabHobby → http://localhost:${PORT}`);
   const users = (db.prepare("SELECT COUNT(*) c FROM user").get() as { c: number }).c;
@@ -1521,4 +1562,9 @@ server.listen(PORT, () => {
     : localFallbackAllowed() ? "미설정 (로컬 계정으로 동작)"
       : "아이디 로그인만";
   console.log(`  가입 ${users}명 · 로그인 ${how}` + (off.length ? ` · 꺼 둠 ${off.join(", ")}` : ""));
+
+  /* 켜자마자 돌리지 않는다 — 다시 시작하는 일이 잦으면 그때마다 남의 서버를 두드리게 된다.
+     한 시간 뒤에 첫 차례를 두고, 그 뒤로는 여섯 시간마다. */
+  const tick = () => { refreshStaleCovers().catch(e => console.log("  표지 되받기 실패:", e?.message)); };
+  setTimeout(() => { tick(); setInterval(tick, REFRESH_EVERY); }, 60 * 60 * 1000).unref();
 });

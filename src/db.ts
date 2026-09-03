@@ -790,6 +790,41 @@ export function getWork(userId: string, id: string): Work | null {
   return toWork(r, fs.map(f => f.folder_id));
 }
 
+/** 표지 주소가 **시한부**인가 — 서명과 만료가 박혀 있는 것들.
+
+    인스타그램(`_nc_*`·`oe`·`oh`), CloudFront(`Expires`·`Signature`·`Key-Pair-Id`),
+    S3(`X-Amz-*`) 가 이런 주소를 준다. 차단당해서가 아니라 **원래 그렇게 설계되어**
+    며칠이면 깨진다. 네이버 웹툰이나 넷플릭스 주소는 여기 안 걸린다 — 몇 년째 그대로다. */
+const EXPIRING = /[?&](_nc_[a-z]+|oe|oh|st|Expires|X-Amz-[A-Za-z]+|Signature|Key-Pair-Id|token|sig)=/i;
+
+/** 다시 받아 와야 할 표지들 — 시한부인데 받아 둔 지 오래된 것부터.
+
+    **전부 도는 것이 아니다.** 멀쩡한 주소까지 주기적으로 확인하면 남의 서버를 쉼 없이
+    두드리게 되고, 그건 우리가 피하려던 바로 그 일이다. 깨질 것이 확실한 것만 챙긴다. */
+export function staleCovers(olderThanMs: number, limit: number) {
+  const rows = db.prepare(`SELECT id, list_url, cover_url, fetched_at
+    FROM url WHERE cover_url IS NOT NULL AND fetched_at < ?
+    ORDER BY fetched_at ASC LIMIT ?`)
+    .all(Date.now() - olderThanMs, limit * 8) as any[];
+  return rows.filter(r => EXPIRING.test(r.cover_url))
+    .slice(0, limit)
+    .map(r => ({ id: r.id as string, listUrl: r.list_url as string }));
+}
+
+/** 새로 받아온 표지로 고친다. **표지만** 손댄다 — 제목까지 고치면 직접 안 고친 사람
+    전부의 목록에서 이름이 하룻밤에 바뀐다. 받아온 것이 없으면 그대로 둔다:
+    못 읽었다고 멀쩡한 표지를 지우면 있던 것마저 사라진다. */
+export function refreshCover(urlId: string, coverUrl: string, coverAspect: number | null): void {
+  db.prepare("UPDATE url SET cover_url = ?, cover_aspect = ?, fetched_at = ? WHERE id = ?")
+    .run(coverUrl, coverAspect, Date.now(), urlId);
+}
+
+/** 다시 읽어는 봤으나 새 표지를 못 얻은 경우 — 표지는 그대로 두고 **본 때만** 적는다.
+    그래야 다음 차례에 같은 것만 붙들고 있지 않는다. */
+export const markChecked = (urlId: string): void => {
+  db.prepare("UPDATE url SET fetched_at = ? WHERE id = ?").run(Date.now(), urlId);
+};
+
 /** 이미 담아 둔 작품인가 — **긁기 전에** 물어본다.
 
     주소에서 「어느 사이트의 몇 번 작품인가」를 뽑는 데는 네트워크가 들지 않으므로,

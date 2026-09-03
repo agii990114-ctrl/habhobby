@@ -393,7 +393,9 @@
     display: flex; align-items: center; gap: 6px; min-width: 0;
     font-size: inherit; color: inherit;
   }
-  .folder .txt .tline .mtag { margin-left: auto; flex: none; }
+  /* 딱지는 이제 글 통 밖, 줄의 직접 자식이다 — .folder 가 align-items: center 라
+     이름이 있든 없든 세로 한가운데에 선다. 글 통이 남은 자리를 다 먹으므로 오른쪽 끝. */
+  .folder > .mtag { flex: none; align-self: center; margin-left: 0; }
   .folder .txt b { display: block; flex: 1; font-size: 13.5px; font-weight: 600; line-height: 1.35;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .folder .txt span { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
@@ -407,9 +409,9 @@
   /* 곁창의 단락 머리 — 페이지 탭(.plat-h)과 같은 모양을 쓰되 마크 대신 점을 둔다 */
   .plat-h .idot { flex: none; }
   .mtag {
-    font-style: normal; font-size: 10px; font-weight: 600; vertical-align: 1px;
+    font-style: normal; font-size: 11.5px; font-weight: 600; vertical-align: 1px;
     color: var(--accent-ink); background: var(--accent-soft);
-    border-radius: 99px; padding: 1px 6px; margin-left: 4px;
+    border-radius: 99px; padding: 2px 8px; margin-left: 4px; white-space: nowrap;
   }
   .folder-row { display: flex; align-items: stretch; gap: 6px; }
   .folder-row .folder { flex: 1; min-width: 0; }

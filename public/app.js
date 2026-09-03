@@ -2181,16 +2181,19 @@ function folderRow(fid, emoji, name, f, idx) {
   /* 아이콘만으로 세운 폴더는 **윗줄 자체가 없다** — 그때는 딱지를 갯수와 한 줄에 세운다.
      빈 이름 줄을 남겨 두면 그 폴더만 저 혼자 키가 크고, 딱지는 아무것도 없는 줄의
      오른쪽 끝에 떠 있게 된다. */
+  /* **딱지는 글 통 밖에 선다.** 안에 두었을 때는 이름이 있으면 첫 줄에, 없으면 갯수와
+     한 줄에 붙어 — 폴더마다 높이가 달라 딱지가 위아래로 들쭉날쭉했다. 밖으로 빼면
+     .folder 가 align-items: center 라 **이름이 있든 없든 줄의 세로 한가운데**에 선다. */
   const txt = name
-    ? `<span class="tline"><b>${esc(name)}</b>${tag}</span><span class="tline">${cnt}</span>`
-    : `<span class="tline">${cnt}${tag}</span>`;
+    ? `<span class="tline"><b>${esc(name)}</b></span><span class="tline">${cnt}</span>`
+    : `<span class="tline">${cnt}</span>`;
 
   return `<div class="folder-row">
     ${folderSel && real ? `<label class="arch-pick"><input type="checkbox" data-fpick="${fid}"
       ${folderSel.has(fid) ? "checked" : ""} aria-label="${esc(name)} 선택"></label>` : ""}
     <button class="folder${real && !folderSel ? " joined" : ""}" data-folder="${fid}">${mini}
       ${/* 아이콘은 왼쪽 미리보기 자리에 이미 서 있다 — 제목 옆에 또 붙이지 않는다 */""}
-      <span class="txt">${txt}</span>
+      <span class="txt">${txt}</span>${tag}
       ${real ? "" : `<span class="chev">${icon("right")}</span>`}</button>
     ${/* 별은 폴더 딱지의 **오른쪽 끝에 이어 붙인다**. 딱지 자체가 button 이라 그 안에
          또 button 을 넣을 수는 없다(문법에도 어긋나고 누를 때 둘이 엉킨다). 형제로 두되
@@ -5056,8 +5059,14 @@ async function openFriends() {
     /* **즐겨찾기와 「선택」은 같은 줄의 양 끝이다.** 하나는 목록을 좁히는 일이고 하나는
        고르기에 들어가는 일이라 서로 다른 갈래인데, 줄을 나눠 두면 목록 위가 두 줄로
        두꺼워진다. 왼쪽이 보는 방식, 오른쪽이 다루는 방식 — 자리로 갈라 놓는다. */
-    const star = `<button class="mini-btn" data-only-star aria-pressed="${onlyStar}"
-      >${icon("star")} 즐겨찾기</button>`;
+    /* **켜진 모양까지 여기서 짓는다.** 한때 이 자리에는 꺼진 모양만 두고, 켜진 모양은
+       바깥에서 손으로 칠했다(paintFilter). 그런데 이 조각은 셈이 바뀔 때마다 통째로
+       갈아 끼워지는 자리라 — 고르기를 켰다 끄기만 해도 — 손으로 칠해 둔 것이 그때
+       사라졌다. 짓는 곳이 하나면 몇 번을 다시 그려도 같은 모양이 나온다. */
+    const star = `<button class="mini-btn${onlyStar ? " on" : ""}" data-only-star
+      aria-pressed="${onlyStar}">${onlyStar
+        ? icon("star", "on") + ` 즐겨찾기 ${starred()}명`
+        : icon("star") + " 즐겨찾기"}</button>`;
     if (!sel) return `<div class="fr-pick">${star}
       <button class="mini-btn" data-fsel>선택</button></div>`;
     /* 「전체 선택」은 **지금 화면에 서 있는 사람만** 집는다 — 찾기나 즐겨찾기로 좁혀
@@ -5159,6 +5168,13 @@ async function openFriends() {
   };
 
   function wireBulk() {
+    /* **별을 잇는 자리는 별이 사는 조각과 같아야 한다.** 한때 wireBar 에서 이었는데,
+       별은 bulkHtml 이 짓는 조각 안에 있고 그 조각은 repaintBulk 이 통째로 갈아 끼운다 —
+       갈아 끼운 새 단추에는 손짓이 없어서, 한 번 켠 즐겨찾기를 **다시 끌 수 없었다.**
+       고르기를 켰다 끄기만 해도 같은 일이 났다. */
+    const st = bar.querySelector("[data-only-star]");
+    if (st) st.onclick = () => { onlyStar = !onlyStar; repaintBulk(); repaint(); };
+
     const off = bar.querySelector("[data-fsel-off]");
     if (off) off.onclick = () => { sel = null; repaintBar(); repaint(); };
     const all = bar.querySelector("[data-fsel-all]");
@@ -5194,20 +5210,6 @@ async function openFriends() {
       repaintBulk();
     });
 
-    const st = bar.querySelector("[data-only-star]");
-    if (st) {
-      /* 이름이 바깥의 paintStar(별 하나를 칠하는 것)와 겹치면 안 된다 — 여기 것은
-         즐겨찾기 **거르개**를 칠한다. 같은 이름이면 읽는 사람이 매번 어느 쪽인지 가려야 한다. */
-      const paintFilter = () => {
-        st.classList.toggle("on", onlyStar);
-        st.setAttribute("aria-pressed", onlyStar);
-        st.innerHTML = onlyStar ? icon("star", "on") + ` 즐겨찾기 ${starred()}명`
-          : icon("star") + " 즐겨찾기";
-      };
-      paintFilter();
-      // 제 글자만 고쳐 쓴다 — 옆의 찾기 칸을 함께 갈아 끼울 이유가 없다
-      st.onclick = () => { onlyStar = !onlyStar; paintFilter(); repaint(); repaintBulk(); };
-    }
   }
 
   /** 고른 사람들을 한꺼번에 즐겨찾기로 켠다.

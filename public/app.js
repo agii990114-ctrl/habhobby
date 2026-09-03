@@ -452,7 +452,22 @@ const folderNames = w => w.folders
   .filter(Boolean)
   .map(f => (f.emoji ? f.emoji + " " : "") + f.name)
   .join(", ");
-const byRecent = list => [...list].sort((a, b) => b.lastAt - a.lastAt);
+/** 목록에서 **손댄 지 가장 가까운 것**이 위로 온다.
+
+    lastAt(마지막 실행)만 보던 때는 **복구한 작품이 맨 아래에 앉았다.** 몇 달 전에 보고
+    치워 둔 것을 방금 되살렸는데, 목록에서는 몇 달 전 자리에 그대로 서 있으니 찾을 수가
+    없었다 — 되살린 사람은 그것을 보려고 되살린 것이다.
+
+    그렇다고 복구할 때 lastAt 을 지금으로 적을 수는 없다. 그 칸은 「마지막 실행」이라는
+    이름으로 작품 창에 그대로 나오고, 실제로 연 때(POST /works/:id/open)만 적히는 값이다.
+    복구는 연 것이 아니다.
+
+    **잰 것을 고치는 대신 재는 자를 넓힌다** — 실행한 때와 상태가 바뀐 때 중 나중의 것을
+    본다. 보통 작품은 stateAt 이 비어 있어 예전과 똑같이 서고, 복구한 것만 위로 올라온다.
+    이 함수 하나를 모든 목록이 지나므로(폴더·전체·미분류·페이지 탭·구간 목록·캘린더)
+    한 자리만 고치면 어디서나 같은 차례가 된다. */
+const touchedAt = w => Math.max(w.lastAt ?? 0, w.stateAt ?? 0);
+const byRecent = list => [...list].sort((a, b) => touchedAt(b) - touchedAt(a));
 
 /* 캘린더 점 색. 정해 두지 않았으면 플랫폼 색을 쓴다 —
    같은 플랫폼 작품이 여럿이면 달력에서 서로 구분이 안 되니 직접 고를 수 있게 한다. */
@@ -669,7 +684,10 @@ function workCard(w, when) {
            하나 있어야 "새로 온 것" 과 "늘 거기 있던 것" 이 갈린다. */""}
       ${w.visits ? "" : `<span class="new-dot" aria-label="아직 안 본 작품"></span>`}
     </div>
-    <h4>${esc(w.title)}</h4><time>${esc(when ?? ago(w.lastAt))}</time>
+    ${/* 찍는 시각은 **차례를 정한 그 값**이다(touchedAt). lastAt 만 찍던 때는 복구한
+         작품이 맨 위에 서면서 「3일 전」이라 적혀, 그 아래 「방금」보다 위에 있는 것이
+         고장으로 보였다. 자리와 글씨가 서로 다른 것을 말하면 안 된다. */""}
+    <h4>${esc(w.title)}</h4><time>${esc(when ?? ago(touchedAt(w)))}</time>
   </button>`;
 }
 
@@ -709,7 +727,7 @@ const pickCardHtml = (w, attr, picked) => `<button class="work pick-work${picked
       ${w.episode ? `<span class="ep">${esc(w.episode)}</span>` : ""}
       <span class="tick">${icon("check")}</span>
     </div>
-    <h4>${esc(w.title)}</h4><time>${ago(w.lastAt)}</time>
+    <h4>${esc(w.title)}</h4><time>${ago(touchedAt(w))}</time>
   </button>`;
 
 const workPickCard = w => pickCardHtml(w, "data-wpick", workSel);
@@ -4039,7 +4057,7 @@ function openFind() {
     return byRecent(hit).sort((a, b) => rank(a) - rank(b))
       .map(w => rowHtml(w, `${platformOf(w.platformId).name}`
         + (w.state === "active" ? "" : ` · ${icon(STATES[w.state].icon)} ${STATES[w.state].label}`)
-        + ` · ${ago(w.lastAt)}`)).join("");
+        + ` · ${ago(touchedAt(w))}`)).join("");
   };
 
   openSheet(`
@@ -4152,9 +4170,12 @@ function archRow(w) {
     ${arch.picked ? `<label class="arch-pick"><input type="checkbox" data-pick="${w.id}"
       ${arch.picked.has(w.id) ? "checked" : ""} aria-label="${esc(w.title)} 선택"></label>` : ""}
     <span class="thumb" style="${coverStyle(w)}">${coverChar(w)}</span>
+    ${/* **언제 내렸는지**를 적는다. 마지막으로 연 때를 적던 때는, 목록이 내린 순서로
+         서 있는데(byDone) 글씨는 딴 순서를 말해 헷갈렸다 — 보관함에서 궁금한 것은
+         「언제 봤나」가 아니라 「언제 끝냈나」이기도 하다. */""}
     <span class="rt"><b>${esc(w.title)}</b><span>${esc(p.name)}${
       w.rating && archGrouped() ? ` · <i class="stars-h">${starText(w.rating)}</i>` : ""
-    } · ${ago(w.lastAt)}</span></span>
+    } · ${ago(w.stateAt ?? w.addedAt)}</span></span>
     <span class="arch-act">
       ${/* 목록에 같은 작품이 이미 있으면 복구할 자리가 없다. 눌러 놓고 나서 「안 됩니다」를
            듣는 것보다, 누를 수 없는 것으로 서 있는 편이 낫다 — 왜인지는 title 에 적는다. */""}

@@ -2848,9 +2848,22 @@ function openWork(id, over) {
 
          이미 내려 둔 작품이면 되돌리는 길만 둔다. 감상 완료를 다시 누를 일도,
          휴지통에 있는 것을 또 버릴 일도 없다. */""}
+    ${/* **내려 둔 작품에는 「복구」와 「치우기」뿐이다.** 감상 완료에서 한 단계 더 내리는
+         것은 휴지통이고, 휴지통에서 더 내릴 곳은 없으므로 거기서는 영구 삭제다.
+
+         복구는 **자리가 비어 있을 때만** 눌린다 — 목록에 같은 작품이 이미 서 있으면
+         살아 있는 것끼리의 규칙에 걸린다. 눌러 놓고 나서 「안 됩니다」를 듣는 것보다,
+         누를 수 없는 것으로 서 있는 편이 낫다. */""}
     ${st
       ? `<div class="link-row" style="margin-top:9px">
-           <button class="btn" data-act="active">${icon("left")} 목록으로 복구</button></div>`
+           <button class="btn" data-act="active"${
+             alreadyLive(w) ? ' disabled title="이미 목록에 있는 작품입니다"' : ""
+           }>${icon("left")} 목록으로 복구</button>
+           ${w.state === "watched"
+             ? `<button class="btn bad" data-act="dropped">${icon("trash")} 휴지통</button>`
+             : `<button class="btn bad" data-act="delete">${icon("trash")} 영구 삭제</button>`}</div>
+         ${alreadyLive(w) ? `<div class="rest" style="text-align:left;padding:6px 2px 0">
+             이 작품은 이미 목록에 있습니다.</div>` : ""}`
       : `<div class="link-row" style="margin-top:9px">
            <button class="btn" data-act="watched">${icon("check")} 감상 완료</button>
            <button class="btn bad" data-act="dropped">${icon("trash")} 휴지통</button></div>`}
@@ -2858,7 +2871,12 @@ function openWork(id, over) {
   wireGo(w);
 
   /* 톱니는 닫기 버튼 옆 — 폴더 창의 즐겨찾기(.sheet-fav)와 같은 자리다.
-     닫기가 없는 기기(손가락)에서는 그 자리를 그대로 물려받는다. */
+     닫기가 없는 기기(손가락)에서는 그 자리를 그대로 물려받는다.
+
+     **내려 둔 작품에는 달지 않는다.** 보관함에 있는 것은 제목도 일정도 폴더도 고칠 일이
+     없다 — 고치려면 먼저 목록으로 복구하는 것이 순서다. 열어 두면 「고쳤는데 목록에는
+     없는」 어정쩡한 상태가 생긴다. */
+  if (!st) {
   const cog = document.createElement("button");
   cog.className = "sheet-cog";
   cog.type = "button";
@@ -2867,6 +2885,7 @@ function openWork(id, over) {
   cog.innerHTML = icon("cog");
   cog.onclick = () => openWorkSettings(id, { back: () => openWork(id, over) });
   sheet.querySelector(".sheet-top").append(cog);
+  }
 
   const again = () => openWork(id, over);
   const move = guard(async to => {
@@ -2887,6 +2906,18 @@ function openWork(id, over) {
     if (yes) await move("dropped");
   });
   if (act("active")) act("active").onclick = () => move("active");
+  /* 휴지통에서 한 번 더 내릴 곳은 없다 — 거기서는 지우는 것이 남은 일이다. 되돌릴 수
+     없으므로 반드시 묻는다(보관함 줄의 「삭제」와 같은 말로). */
+  if (act("delete")) act("delete").onclick = guard(async () => {
+    const yes = await askSure({
+      title: "영구 삭제할까요?", ok: "삭제", back: again,
+      body: `${esc(w.title)} 을(를) 완전히 지웁니다. 되돌릴 수 없습니다.`,
+    });
+    if (!yes) return;
+    await api("DELETE", `/api/works/${id}`);
+    await reload(); render(); closeSheet();
+    toast("삭제했습니다");
+  });
 }
 
 function openWorkSettings(id, opts) {
@@ -4116,7 +4147,8 @@ function archRow(w) {
      되묻는 일은 askSure 가 창으로 맡는다 — 한때 이 줄 안에서 글씨를 바꿔 물었는데,
      같은 자리를 두 번 누르는 손짓이라 잘못 누른 사람은 두 번 다 잘못 눌렀다. */
   const trash = arch.state === "watched";
-  return `<div class="arch">
+  // 꾹 눌러 고르기가 이 줄이 누구인지 알아야 한다 — 자식 단추를 뒤지지 않게 여기 적어 둔다
+  return `<div class="arch" data-id="${w.id}">
     ${arch.picked ? `<label class="arch-pick"><input type="checkbox" data-pick="${w.id}"
       ${arch.picked.has(w.id) ? "checked" : ""} aria-label="${esc(w.title)} 선택"></label>` : ""}
     <span class="thumb" style="${coverStyle(w)}">${coverChar(w)}</span>
@@ -4124,7 +4156,10 @@ function archRow(w) {
       w.rating && archGrouped() ? ` · <i class="stars-h">${starText(w.rating)}</i>` : ""
     } · ${ago(w.lastAt)}</span></span>
     <span class="arch-act">
-      <button class="mini-btn" data-restore="${w.id}">복구</button>
+      ${/* 목록에 같은 작품이 이미 있으면 복구할 자리가 없다. 눌러 놓고 나서 「안 됩니다」를
+           듣는 것보다, 누를 수 없는 것으로 서 있는 편이 낫다 — 왜인지는 title 에 적는다. */""}
+      <button class="mini-btn" data-restore="${w.id}"${
+        alreadyLive(w) ? ' disabled title="이미 목록에 있는 작품입니다"' : ""}>복구</button>
       ${/* 휴지통도 삭제도 **되돌리기와 다른 갈래의 일**이다 — 빨강으로 갈라 세운다.
              한때 휴지통만 검게 두었는데, 되돌리기 옆에 나란히 서니 둘 다 그냥
              「할 수 있는 일」로 보였다. */""}
@@ -4133,14 +4168,20 @@ function archRow(w) {
   </div>`;
 }
 
+/** 이 작품과 **같은 url** 이 내 살아 있는 목록에 이미 서 있는가.
+
+    같음을 가리는 것은 urlId 다 — 제목은 저마다 고쳐 쓸 수 있고 platformId 는 내 분류다.
+    이러면 복구할 자리가 없다: 살아 있는 것끼리는 한 작품에 한 줄이어야 한다(idx_work_live). */
+const alreadyLive = w => activeWorks().some(a => a.urlId === w.urlId);
+
 /** 지금 화면에 보이는 작품들 — 전체 선택이 "보이는 것"만 집도록 */
 function archVisible() {
   const list = worksInState(arch.state);
   const q = arch.q.trim().toLowerCase();
-  if (q) return list.filter(w => w.title.toLowerCase().includes(q));
-  if (!archGrouped()) return list;             // 휴지통은 한 화면에 다 있다
-  if (arch.group === null) return [];          // 묶음 목록 화면에는 항목이 없다
-  return archGroups(list).find(g => g.key === arch.group)?.items ?? [];
+  if (q) return byDone(list.filter(w => w.title.toLowerCase().includes(q)));
+  if (!archGrouped()) return byDone(list);     // 최신 목록과 휴지통은 한 화면에 다 있다
+  if (arch.group === null) return [];          // 묶음 목록(레일) 화면에서는 고르지 않는다
+  return byDone(archGroups(list).find(g => g.key === arch.group)?.items ?? []);
 }
 
 /** 목록 위 줄 — 고르기 전에는 「선택」, 고르는 중에는 셈과 실행.
@@ -4169,9 +4210,19 @@ function archBulk() {
   </div>`;
 }
 
-/* 별점으로 묶는 건 감상 완료에서만 뜻이 있다.
-   버린 작품에 점수를 매길 일은 없으니, 휴지통은 그냥 한 줄로 펼친다. */
-const archGrouped = () => arch.state === "watched";
+/* 감상 완료를 어떻게 세울 것인가. **최신이 기본**이다 — 「끝까지 본 시리즈」를 열 때
+   가장 먼저 궁금한 것은 「요즘 뭘 끝냈더라」이지 「5점짜리가 뭐였더라」가 아니다.
+   별점은 되짚어 볼 때 쓰는 갈래라 한 번 더 눌러 들어간다.
+
+   휴지통에는 이 물음이 없다 — 버린 것에 점수를 매길 일이 없어 세울 갈래가 하나뿐이다. */
+const ARCH_SORTS = [["recent", "최신"], ["star", "별점"]];
+const archSorted = () => arch.state === "watched";
+/** 별점 묶음으로 세우는 중인가 — 찾는 중에는 묶음을 무시한다(어느 별점인지 모르니 찾는 것이다) */
+const archGrouped = () => archSorted() && arch.sort === "star" && !arch.q.trim();
+
+/** 감상 완료한 **최근 순**. state_at 이 없던 옛 줄은 담은 때로 대신한다. */
+const byDone = list => [...list].sort((a, b) =>
+  (b.stateAt ?? b.addedAt) - (a.stateAt ?? a.addedAt));
 
 function archBody() {
   const list = worksInState(arch.state);
@@ -4179,35 +4230,41 @@ function archBody() {
 
   // 검색 중에는 묶음을 무시한다 — 어느 별점에 있는지 모르니까 찾는 것이다
   if (q) {
-    const hits = list.filter(w => w.title.toLowerCase().includes(q));
+    const hits = byDone(list.filter(w => w.title.toLowerCase().includes(q)));
     return `<div class="rest" style="text-align:left;padding:0 2px 8px">
         &ldquo;${esc(arch.q.trim())}&rdquo; · ${hits.length}편</div>
       ${hits.length ? hits.map(archRow).join("") : `<div class="empty">찾는 작품이 없습니다.</div>`}`;
   }
 
   if (!archGrouped())
-    return list.length ? list.map(archRow).join("") : `<div class="empty">비어 있습니다.</div>`;
+    return list.length ? byDone(list).map(archRow).join("") : `<div class="empty">비어 있습니다.</div>`;
 
   const groups = archGroups(list);
+  /* 별점 묶음은 다섯뿐이라 **가로로 훑고 들어간다** — 캘린더의 「추가 목록」과 같은 모양이다.
+     묶음마다 표지를 늘어놓아 눈으로 고르고, ☰ 로 그 묶음 전부를 편다. */
   if (arch.group === null)
     return groups.length
-      ? `<div class="folders">${groups.map(g => `<button class="folder" data-grp="${g.key}">
-          <div class="mini">${g.items.slice(0, 4)
-            .map(w => `<i style="${coverStyle(w)}"></i>`).join("")}</div>
-          <span class="txt"><b${g.stars ? ' class="stars-h"' : ""}>${g.label}</b>
-            <span>${g.items.length}편</span></span>
-          <span class="chev">${icon("right")}</span></button>`).join("")}</div>`
+      ? groups.map(g => `<section class="plat">
+          <div class="plat-h">
+            <b${g.stars ? ' class="stars-h"' : ""}>${g.label}</b><span>${g.items.length}편</span>
+            <span class="plat-act">
+              <button class="edit-dom" data-grp="${g.key}"
+                title="전체 목록" aria-label="${esc(g.label)} 전체 목록">${icon("list")}</button>
+            </span>
+          </div>
+          <div class="rail">${byDone(g.items).map(w => workCard(w)).join("")}</div>
+        </section>`).join("")
       : `<div class="empty">비어 있습니다.</div>`;
 
   const g = groups.find(x => x.key === arch.group);
   // 마지막 항목을 지우면 그 묶음 자체가 없어진다 — 빈 화면에 붙들려 있지 말고 목록으로
   if (!g) { arch.group = null; return archBody(); }
 
-  return g.items.map(archRow).join("");
+  return byDone(g.items).map(archRow).join("");
 }
 
 function openArchive(state) {
-  arch = { state, group: null, q: "", picked: null };
+  arch = { state, group: null, q: "", picked: null, sort: "recent" };
   drawArchive();
 }
 
@@ -4221,7 +4278,12 @@ function drawArchive() {
   const openGroup = () => archGrouped() && arch.group !== null && !arch.q.trim()
     ? archGroups(worksInState(arch.state)).find(x => x.key === arch.group) : null;
   const g = openGroup();
+  /* 세우는 갈래를 고르는 줄. 캘린더의 주간↔월간과 **같은 물건**이라 같은 모양을 쓴다.
+     묶음 안에 들어가 있을 때는 세우지 않는다 — 거기서는 갈래가 이미 정해진 뒤다. */
   openSheet(`
+    ${archSorted() && !g ? `<div class="cal-switch" style="margin-bottom:12px">${
+      ARCH_SORTS.map(([v, t]) => `<button data-asort="${v}"
+        aria-selected="${arch.sort === v}">${t}</button>`).join("")}</div>` : ""}
     ${searchHtml("작품명으로 검색", arch.q)}
     <div data-arch-bulk>${archBulk()}</div>
     <div data-arch-body>${archBody()}</div>`,
@@ -4249,13 +4311,24 @@ function drawArchive() {
   const qEl = sheet.querySelector(".arch-q");
   qEl.addEventListener("input", () => { arch.q = qEl.value; repaint(); });
 
-  // 한 건이든 여러 건이든 같은 처리로 모은다
+  /* 한 건이든 여러 건이든 같은 처리로 모은다.
+
+     **하나가 물려도 나머지는 간다.** 화면이 미리 걸러 주지만, 다른 창에서 같은 작품을
+     담는 사이에 자리가 찰 수 있다(서버가 409 로 물린다). 그때 통째로 멈추면 이미 처리된
+     것과 안 된 것이 섞인 채 남는다 — 물린 것만 세어 두었다가 끝에 한 번 말한다. */
   const apply = async (ids, what) => {
+    let blocked = 0;
     for (const id of ids) {
-      if (what === "restore") await api("PATCH", `/api/works/${id}`, { state: "active" });
-      else if (what === "trash") await api("PATCH", `/api/works/${id}`, { state: "dropped" });
-      else await api("DELETE", `/api/works/${id}`);
+      try {
+        if (what === "restore") await api("PATCH", `/api/works/${id}`, { state: "active" });
+        else if (what === "trash") await api("PATCH", `/api/works/${id}`, { state: "dropped" });
+        else await api("DELETE", `/api/works/${id}`);
+      } catch (err) {
+        if (what !== "restore") throw err;
+        blocked++;
+      }
     }
+    if (blocked) toast(`${blocked}편은 이미 목록에 있어 복구하지 않았습니다`);
     // 시킨 일이 끝났으면 고르기도 끝난 것이다 — 빈 줄을 남겨 두지 않는다
     arch.picked = null;
     await reload(); render(); drawArchive();
@@ -4270,6 +4343,19 @@ function drawArchive() {
         body: n === 1 ? `${esc(title ?? "")} 을(를) 완전히 지웁니다. 되돌릴 수 없습니다.`
                       : `${n}편을 완전히 지웁니다. 되돌릴 수 없습니다.` });
 
+  /* 꾹 누르면 그 줄이 골라진 채로 고르기에 들어간다 — 작품 격자와 같은 손짓이다.
+     손가락으로 「선택」을 찾아 누르는 것보다 짧고, 무엇보다 **같은 물건을 같은 손짓으로**
+     다루게 된다.
+
+     **레일 화면(별점 묶음 목록)에서는 잡지 않는다.** 거기 서 있는 것은 묶음을 훑어보는
+     카드고, 고르기는 묶음에 들어가서 하는 일이다 — 「추가 목록」이 묶음 화면에서 고르기를
+     열지 않는 것과 같은 규칙이다. archVisible 도 그 화면에서는 빈 목록을 내준다. */
+  holdToPick(sheet.querySelector(".sheet-body"), ".arch[data-id]", el => {
+    if (!arch.picked) arch.picked = new Set();
+    arch.picked.add(el.dataset.id);
+    drawArchive();
+  });
+
   // 리스너는 매번 새로 만들어지는 .sheet-body에 붙인다 — sheet에 붙이면 호출마다 누적된다
   sheet.querySelector(".sheet-body").addEventListener("change", e => {
     const c = e.target.closest("[data-pick]"); if (!c || !arch.picked) return;
@@ -4281,6 +4367,17 @@ function drawArchive() {
     const g = e.target.closest("[data-grp]");
     // 머리줄이 묶음 이름을 말하므로 몸만 갈아 끼워서는 안 된다 — 통째로 다시 그린다
     if (g) { arch.group = +g.dataset.grp; return drawArchive(); }
+
+    /* 세우는 갈래를 바꾸면 **고르던 것도 놓는다.** 최신 목록에서 고른 것들이 별점 묶음
+       화면에서는 흩어져 있어, 셈줄이 「3개 선택」이라 말하는데 화면에는 하나도 안 보이는
+       일이 생긴다. 폴더를 옮길 때 고른 것을 놓는 것과 같은 규칙이다. */
+    const so = e.target.closest("[data-asort]");
+    if (so) {
+      if (arch.sort === so.dataset.asort) return;
+      arch.sort = so.dataset.asort;
+      arch.group = null; arch.picked = null;
+      return drawArchive();
+    }
 
     // 「선택」을 누르면 그때부터 체크칸이 선다. 「완료」로 도로 걷는다.
     if (e.target.closest("[data-asel]")) { arch.picked = new Set(); return drawArchive(); }
@@ -4296,14 +4393,41 @@ function drawArchive() {
 
     const bulk = e.target.closest("[data-bulk]");
     if (bulk) {
-      const what = bulk.dataset.bulk, ids = [...(arch.picked ?? [])];
+      const what = bulk.dataset.bulk;
+      let ids = [...(arch.picked ?? [])];
       if (!ids.length) return;
+      /* **복구는 자리가 비어 있는 것만.** 고른 것 중에 목록에 이미 있는 작품이 섞여 있으면
+         그것만 빼고 나머지를 복구한다 — 통째로 물리면 「그럼 뭘 골라야 하나」가 되고,
+         조용히 빼면 몇 편이 안 돌아왔는지 세어 봐야 안다. 몇 편이 빠지는지 말하고 묻는다. */
+      if (what === "restore") {
+        const all = ids.map(id => works.find(w => w.id === id)).filter(Boolean);
+        const blocked = all.filter(alreadyLive);
+        ids = all.filter(w => !alreadyLive(w)).map(w => w.id);
+        if (blocked.length) {
+          const yes = await askSure({
+            title: `${blocked.length}편은 복구되지 않습니다`,
+            body: `${esc(blocked.slice(0, 3).map(w => w.title).join(", "))}${
+              blocked.length > 3 ? ` 외 ${blocked.length - 3}편` : ""} 은(는) 이미 목록에 있습니다.${
+              ids.length ? ` 나머지 ${ids.length}편만 복구합니다.` : ""}`,
+            ok: ids.length ? "복구" : "확인", back: drawArchive,
+          });
+          if (!yes || !ids.length) return;
+        }
+      }
       if (what !== "restore" && !await sureAbout(what, ids.length)) return;
       return apply(ids, what);
     }
 
     const b = e.target.closest("button[data-restore],button[data-trash],button[data-del]");
-    if (!b) return;
+    /* 단추가 아닌 자리를 누르면 **작품 정보**가 열린다. 보관함에서도 「이게 뭐였더라」를
+       열어 볼 수 있어야 한다 — 표지와 제목만으로는 어느 것인지 헷갈릴 때가 있다.
+       고르는 중에는 열지 않는다: 그때 톡은 고르는 손짓이다. */
+    if (!b) {
+      if (arch.picked) return;
+      const row = e.target.closest(".arch[data-id]");
+      if (row) return openWork(row.dataset.id, drawArchive);
+      return;
+    }
     const { restore, trash, del } = b.dataset;
     if (restore) return apply([restore], "restore");
     const one = works.find(x => x.id === (trash ?? del));

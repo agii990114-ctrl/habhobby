@@ -131,9 +131,19 @@ CREATE TABLE IF NOT EXISTS work (
 );
 `;
 
+/* 부분 UNIQUE 인덱스 둘. **한 사람이 같은 작품을 두 줄 갖는 것**을 상태별로 가른다.
+
+     살아 있는 것 — 한 줄. 목록에 같은 작품이 둘 서 있을 까닭이 없다.
+     감상 완료   — 한 줄. 「끝까지 본 시리즈」는 몇 번 봤는지가 아니라 무엇을 봤는지다.
+     휴지통      — 여러 줄. 담았다 버린 일은 저마다 다른 판단이고, 공유 폴더에서 온
+                   같은 작품을 따로 버릴 수도 있어야 한다.
+
+   화면과 서버가 지키는 규칙을 여기서 한 번 더 못 박는다 — 짜맞춘 요청이 와도 표가 거절한다. */
 const SCHEMA_WORK_INDEX = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_work_live
   ON work(user_id, url_id) WHERE state = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_work_done
+  ON work(user_id, url_id) WHERE state = 'watched';
 CREATE INDEX IF NOT EXISTS idx_work_url ON work(url_id);
 `;
 
@@ -366,7 +376,7 @@ const schemaV = (): number =>
 /* **마지막 이관 번호와 맞춰 둔다.** 뒤에 once() 를 더하면 이 숫자도 함께 올린다 —
    안 올려도 빈 표에 돌아 탈은 없지만, 새 파일이 「끝난 것」인데 끝나지 않은 번호를
    달고 있으면 다음 사람이 그 어긋남부터 풀어야 한다. */
-const LATEST_V = 9;
+const LATEST_V = 10;
 if (schemaV() === 0) {
   const empty = !db.prepare("SELECT 1 FROM user LIMIT 1").get();
   if (empty) db.exec("PRAGMA user_version = " + LATEST_V);
@@ -537,6 +547,24 @@ once(9, () => {
      다음에 이 컬럼을 읽는 사람이 그것부터 풀어야 한다. */
   const n = db.prepare("UPDATE folder SET take_mode = '' WHERE take_mode = 'none'").run().changes;
   if (n) console.log(`  옛 낱말 none 을 빈 글자로: ${n}개`);
+});
+
+/* 감상 완료에 같은 작품이 여러 줄 있던 것을 한 줄로 줄인다.
+
+   **가장 나중에 끝낸 것을 남긴다** — 제목·별점·폴더가 지금 것이기 때문이다.
+   이 이관이 먼저 돌아야 아래의 idx_work_done(부분 UNIQUE)이 세워진다: 겹친 줄이 남아
+   있으면 인덱스 만들기가 실패하고, 그러면 서버가 아예 안 뜬다. */
+once(10, () => {
+  /* **더 나중의 것이 하나라도 있으면 이 줄은 지운다.** 「남길 것을 고른다」로 쓰면
+     동점을 가르는 데가 없어 둘 다 남거나 둘 다 사라진다. 지울 것을 고르는 쪽이
+     한 줄만 살아남는 것을 저절로 보장한다 — 나중(state_at), 같으면 rowid 로 가른다. */
+  const n = db.prepare(`DELETE FROM work WHERE state = 'watched' AND EXISTS (
+      SELECT 1 FROM work o
+       WHERE o.user_id = work.user_id AND o.url_id = work.url_id AND o.state = 'watched'
+         AND ( COALESCE(o.state_at, 0) > COALESCE(work.state_at, 0)
+            OR (COALESCE(o.state_at, 0) = COALESCE(work.state_at, 0) AND o.rowid > work.rowid) ))`)
+    .run().changes;
+  if (n) console.log(`  겹친 감상 완료를 한 줄로: ${n}줄 거둠`);
 });
 
 /* 작품 하나를 url(공용)과 work(내 것)로 가른다.
@@ -774,7 +802,11 @@ export function kvSet(userId: string, key: string, value: unknown): void {
 
 /* ── 작품 ────────────────────────────────────────────────── */
 export type Work = {
-  id: string; platformId: string; seriesId: string; title: string; mediaType: string;
+  id: string;
+  /** 이 작품이 가리키는 **공용 url 줄**. 「내 목록에 같은 작품이 있는가」를 묻는 열쇠다 —
+      제목은 저마다 고쳐 쓸 수 있고 platformId 는 내 분류라, 같음을 가리는 것은 이것뿐이다. */
+  urlId: string;
+  platformId: string; seriesId: string; title: string; mediaType: string;
   listUrl: string; appUrl: string | null; coverUrl: string | null; coverAspect: number | null;
   episode: string | null;
   state: "active" | "watched" | "dropped"; filed: boolean; visits: number;
@@ -805,7 +837,7 @@ const WORK_FROM = "FROM work w JOIN url u ON u.id = w.url_id";
 
 function toWork(r: any, folders: string[]): Work {
   return {
-    id: r.id, platformId: r.platform_id, seriesId: r.series_id, title: r.title,
+    id: r.id, urlId: r.url_id, platformId: r.platform_id, seriesId: r.series_id, title: r.title,
     mediaType: r.media_type, listUrl: r.list_url, appUrl: r.app_url,
     coverUrl: r.cover_url, coverAspect: r.cover_aspect, episode: r.episode,
     state: r.state, filed: !!r.filed, visits: r.visits, rating: r.rating ?? null,

@@ -858,9 +858,35 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
         db.prepare("UPDATE work SET title=? WHERE id=?")
           .run(base && base.title === want ? null : want, id);
       }
-      // 언제 내렸는지 남긴다 — 캘린더에 "보던 기간" 을 그리는 데 쓴다
-      if (typeof b.state === "string" && ["active", "watched", "dropped"].includes(b.state))
+      /* 언제 내렸는지 남긴다 — 캘린더에 "보던 기간" 을 그리는 데 쓴다.
+
+         **감상 완료는 한 작품에 한 줄이다.** 같은 것을 두 번 보고 두 번 끝내면 목록에
+         똑같은 줄이 둘 선다 — 「끝까지 본 시리즈」는 몇 번 봤는지가 아니라 무엇을 봤는지의
+         목록이라, 거기서 같은 작품이 둘인 것은 알려 주는 바가 없다. 옛 줄을 거두고 새 줄이
+         그 자리를 잇는다: 방금 끝낸 쪽이 제목·별점·폴더까지 지금 것을 들고 있다.
+
+         **휴지통은 다르다.** 담았다 버리고 다시 담았다 또 버린 것은 저마다 다른 판단이고,
+         공유 폴더에서 온 같은 작품을 따로 버릴 수도 있어야 한다(그 이야기가 「휴지통에
+         있어도 url 추가가 가능」이다). 그래서 여기서 거르지 않는다. */
+      /* **복구는 자리가 비어 있을 때만 된다.** 목록에 같은 작품이 이미 서 있으면
+         살아 있는 것끼리의 UNIQUE 인덱스(idx_work_live)가 거절하는데, 그건 500 으로
+         떨어져 「무슨 일이 났는지」를 말해 주지 못한다. 여기서 미리 가려 뜻이 담긴 답을
+         준다 — 화면은 이 답을 그대로 사람에게 옮긴다. */
+      if (b.state === "active") {
+        const taken = db.prepare(`SELECT 1 FROM work a
+            WHERE a.user_id = ? AND a.state = 'active' AND a.id <> ?
+              AND a.url_id = (SELECT url_id FROM work WHERE id = ?)`).get(user.id, id, id);
+        if (taken) {
+          json(res, 409, { ok: false, reason: "이미 목록에 있는 작품입니다." });
+          return true;
+        }
+      }
+      if (typeof b.state === "string" && ["active", "watched", "dropped"].includes(b.state)) {
+        if (b.state === "watched")
+          db.prepare(`DELETE FROM work WHERE user_id = ? AND state = 'watched' AND id <> ?
+              AND url_id = (SELECT url_id FROM work WHERE id = ?)`).run(user.id, id, id);
         db.prepare("UPDATE work SET state=?, state_at=? WHERE id=?").run(b.state, Date.now(), id);
+      }
       /* 표지 주소 — 사이트가 막아 표지를 못 받아온 경우에 직접 넣는다.
          빈 문자열이면 지운다. http(s) 만 받는다 — 다른 얼개(data:, javascript:)를
          그대로 담으면 화면에 그대로 실린다. */

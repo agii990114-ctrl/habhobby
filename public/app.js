@@ -677,6 +677,14 @@ function lockScroll(on) {
     **`.map(workCard)` 로 부르지 말 것.** map 은 둘째 자리에 번호를 넘기므로 카드마다
     0·1·2… 가 시각 자리에 찍힌다. 부르는 쪽은 `.map(w => workCard(w))` 로 적는다. */
 function workCard(w, when) {
+  /* **고르는 중이면 고르는 카드로 바뀐다.** 한때 격자(workGridHtml)만 이 갈래를 알아서,
+     가로로 훑는 레일에서는 고를 수가 없었다 — 단락마다 ☰ 로 세부 목록에 들어가야
+     비로소 고르기가 열렸고, 단락을 넘나들며 고르는 일은 아예 할 수 없었다.
+
+     카드가 스스로 알면 레일이든 격자든 어디서나 같은 손짓이 된다. 「고르는 중」인지는
+     workSel 하나가 말하고, 그 범위는 workPickAt 이 정한다 — 그러니 레일을 그리는 화면은
+     반드시 workPickAt 을 불러 제 범위를 밝혀야 한다(안 밝히면 남의 고르기가 새어 든다). */
+  if (workSel) return workPickCard(w);
   return `<button class="work${w.visits ? "" : " unseen"}" data-id="${w.id}">
     <div class="cover" style="${coverStyle(w)}">${coverChar(w)}
       ${w.episode ? `<span class="ep">${esc(w.episode)}</span>` : ""}
@@ -1173,9 +1181,10 @@ function drawIdle() {
     platformOf(w.platformId).name,
   ].filter(Boolean).join(" · "));
 
-  // 세부 목록에서만 고를 수 있다 — 묶음 화면에는 고를 카드가 흩어져 있다.
-  // **몸을 짓기 전에** 정해야 한다: 줄을 그릴 때 이 값을 본다.
-  workPickAt(sec ? "idle:" + sec.key : null, sec?.items ?? []);
+  /* 묶음 화면에서도 단락을 넘나들며 고른다 — 날짜 더보기·페이지 탭과 같은 규칙이다.
+     **몸을 짓기 전에** 정해야 한다: 줄과 카드가 이 값을 보고 모양을 정한다. */
+  const idleAll = secs.flatMap(g => g.items);
+  workPickAt(sec ? "idle:" + sec.key : "idle", sec ? sec.items : idleAll);
 
   const head = (title, back) => `<div class="crumb">
       ${back ? `<button data-idle-back aria-label="돌아가기">${icon("left")}</button>` : ""}
@@ -1190,6 +1199,7 @@ function drawIdle() {
        훑는 것과 다루는 것은 다른 일이라 화면을 나눈다. */
     body = head("추가 목록", false)
       + `<p class="sub">전체 ${total}편 · 달력에 놓일 근거가 아직 없는 것들입니다.</p>`
+      + `<div data-wbar>${workBarHtml(idleAll.length)}</div>`
       + secs.map(g => secHtml(g, `data-idle-all="${esc(g.key)}"`)).join("");
   } else {
     body = head(`<i class="idot" style="background:${sec.color}"></i>${esc(sec.label)}`, true)
@@ -1238,8 +1248,13 @@ function drawDayList(t) {
   const g = dayGrp === null ? null : groups.find(x => x.key === dayGrp);
   if (dayGrp !== null && !g) dayGrp = null;      // 다 정리해 그 묶음이 비었다
 
-  // 세부 목록에서만 고를 수 있다 — 몸을 짓기 전에 정해야 줄이 제대로 선다
-  workPickAt(g ? `day:${t}:${g.key}` : null, g?.items ?? []);
+  /* **묶음 화면에서도 고른다 — 단락을 넘나들며 통째로.** 한때 세부 목록에서만 열어
+     두었는데, 「매주에서 둘, 항상에서 하나」를 한 번에 옮기려면 묶음마다 들어갔다 나오며
+     같은 일을 세 번 해야 했다. 고르는 범위를 화면 전체로 두면 그 왕복이 없어진다.
+
+     몸을 짓기 전에 정해야 줄과 카드가 제대로 선다 — workCard 가 이 값을 보고 모양을 정한다. */
+  const dayAll = groups.flatMap(x => x.items);
+  workPickAt(g ? `day:${t}:${g.key}` : `day:${t}`, g ? g.items : dayAll);
 
   const title = `${d.getMonth() + 1}월 ${d.getDate()}일 (${DOW[d.getDay()]})`;
   const body = !total
@@ -1247,7 +1262,7 @@ function drawDayList(t) {
     : g
       ? `<div data-wbar>${workBarHtml(g.items.length)}</div>
          ${workGridHtml(g.items, "비어 있습니다.")}`
-      : groups.map(x => `<section class="plat">
+      : `<div data-wbar>${workBarHtml(dayAll.length)}</div>` + groups.map(x => `<section class="plat">
           <div class="plat-h"><b>${esc(x.label)}</b><span>${x.items.length}편</span>
             <span class="plat-act">
               <button class="edit-dom" data-day-grp="${esc(x.key)}"
@@ -2210,12 +2225,27 @@ function render() {
   for (const [id, t] of [["tab-cal", "cal"], ["tab-home", "home"], ["tab-lib", "lib"]])
     document.getElementById(id).setAttribute("aria-selected", tab === t);
 
+  /* **고를 수 없는 탭에서만 범위를 비운다.** workCard 는 workSel 하나만 보고 모양을
+     정하므로, 범위를 안 밝힌 화면에 남의 고르기가 남아 있으면 엉뚱한 카드가 고르는
+     모양이 된다.
+
+     비우는 것을 페이지 탭에까지 걸면 안 된다 — workPickAt(null) 은 범위 이름(workSelKey)
+     까지 지우므로, 곧이어 workPickAt("home") 을 부르면 늘 「범위가 바뀌었다」로 읽혀
+     고른 것이 그 자리에서 버려진다. 실제로 「선택」을 눌러도 아무 일이 안 일어났다. */
+  if (tab !== "home") workPickAt(null);
+
   let html = "";
   if (tab === "cal") {
     html = renderCalendar();
   } else if (tab === "home") {
+    /* **단락을 넘나들며 고른다.** 플랫폼별로 나뉘어 있어도 고르는 범위는 화면 전체다 —
+       「넷플릭스에서 둘, 웹툰에서 셋」을 한 번에 옮기는 것이 실제로 하고 싶은 일이고,
+       단락마다 따로 고르게 하면 같은 일을 두 번 해야 한다. */
+    const home = byRecent(activeWorks());
+    workPickAt("home", home);
     html += `<div class="screen-title">최근 본 순 · 플랫폼별</div>`;
-    html += railsHtml(byRecent(activeWorks()));
+    html += `<div data-wbar>${workBarHtml(home.length)}</div>`;
+    html += railsHtml(home);
   } else if (viewing) {
     // 친구의 폴더 — 보기만 한다. 고치거나 지우는 것은 주인만 할 수 있다.
     /* 친구 폴더도 줄마다 두 번 훑고 있었다(미리보기 · 개수). 한 번 훑어 갈라 둔다 —
@@ -4236,7 +4266,11 @@ function archBulk() {
    별점은 되짚어 볼 때 쓰는 갈래라 한 번 더 눌러 들어간다.
 
    휴지통에는 이 물음이 없다 — 버린 것에 점수를 매길 일이 없어 세울 갈래가 하나뿐이다. */
-const ARCH_SORTS = [["recent", "최신"], ["star", "별점"]];
+/* 「전체」가 기본이고 **별점을 왼쪽에 둔다.** 갈래 이름이 「최신」이었을 때는 옆의
+   「별점」과 나란히 서서 「최신순 ↔ 별점순」이라는 두 정렬로 읽혔는데, 실제로 하는 일은
+   「다 펼쳐 보기 ↔ 별점별로 묶어 보기」다. 「전체」라 부르면 그 뜻이 그대로 읽힌다.
+   왼쪽이 좁히는 쪽, 오른쪽이 다 보는 쪽 — 폴더 탭의 갈래 거르개와 같은 방향이다. */
+const ARCH_SORTS = [["star", "별점"], ["recent", "전체"]];
 const archSorted = () => arch.state === "watched";
 /** 별점 묶음으로 세우는 중인가 — 찾는 중에는 묶음을 무시한다(어느 별점인지 모르니 찾는 것이다) */
 const archGrouped = () => archSorted() && arch.sort === "star" && !arch.q.trim();
@@ -4425,7 +4459,10 @@ function drawArchive() {
         const blocked = all.filter(alreadyLive);
         ids = all.filter(w => !alreadyLive(w)).map(w => w.id);
         if (blocked.length) {
+          /* 복구는 **되살리는 일**이라 빨강이 아니다. askSure 는 기본이 빨강(danger)인데
+             그건 지우거나 거두는 자리를 위한 것이고, 여기서는 테마색이 맞다. */
           const yes = await askSure({
+            danger: false,
             title: `${blocked.length}편은 복구되지 않습니다`,
             body: `${esc(blocked.slice(0, 3).map(w => w.title).join(", "))}${
               blocked.length > 3 ? ` 외 ${blocked.length - 3}편` : ""} 은(는) 이미 목록에 있습니다.${
@@ -5516,6 +5553,13 @@ holdToPick(screenEl, ".folder[data-folder]", row => {
   folderSel.add(id);
   render();
 });
+
+/* 페이지 탭의 고르기. **한 번만 잇는다** — 화면은 render 마다 통째로 다시 그려지지만
+   이 손짓들은 위임이라 바깥 통에 걸어 두면 그대로 살아 있다. render 안에서 이으면
+   그릴 때마다 하나씩 쌓여 한 번 누른 것이 여러 번 먹는다.
+
+   시트는 이 통 밖에 있으므로(.sheet-back 은 형제) 서로 걸리지 않는다. */
+wireWorkPick(screenEl, render);
 
 screenEl.addEventListener("click", e => {
   if (e.target.closest("[data-idle]")) return openIdle();

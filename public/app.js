@@ -2460,10 +2460,13 @@ sheet.addEventListener("click", e => { if (e.target.closest("[data-close]")) clo
    버튼이 놓이는 자리는 기기에 따라 갈린다 — 마우스가 있으면 시트 맨 아래 버튼줄,
    손가락이면 여기 오른쪽 끝. 둘 중 하나만 보인다. */
 function headHtml(title, opts = {}) {
-  const { back = true, save = "저장", cancel = "취소", sub = "", actions = true } = opts;
+  const { back = true, save = "저장", cancel = "취소", sub = "", actions = true,
+    count = "" } = opts;
+  /* count 는 제목 바로 옆에 붙는 짧은 값(「25명」). 문장으로 적을 것은 sub 로 내려보낸다 —
+     제목 옆이 길어지면 이름이 밀려 잘린다(h3 가 말줄임을 하는 통이다). */
   return `<div class="crumb">
       ${back ? `<button data-head-back aria-label="돌아가기">${icon("left")}</button>` : ""}
-      <h3>${title}</h3>
+      <h3>${title}</h3>${count ? `<span class="count">${count}</span>` : ""}
       ${actions ? `<span class="crumb-act">
         <button class="mini-btn" data-cancel>${cancel}</button>
         <button class="mini-btn on" data-done>${save}</button>
@@ -4920,6 +4923,8 @@ async function openFriends() {
   if (!me.displayName) { openNameForm(openFriends); return; }
   try { await loadFriends(); } catch (e) { toast(e.message); return; }
   let query = "", onlyStar = false;
+  // 찾기 칸이 펼쳐져 있는가. 머리줄의 돋보기가 여닫는다.
+  let finding = false;
   /* 여럿을 한 번에 끊는 자리. null 이면 그냥 보는 중이고, Set 이면 고르는 중이다 —
      폴더 목록의 folderSel 과 같은 규칙이라 두 화면이 같은 손짓으로 움직인다. */
   let sel = null;
@@ -4977,21 +4982,29 @@ async function openFriends() {
       **고르는 중에도 찾기를 남긴다.** 좁혀 놓은 채로 고르기에 들어가면 목록이 짧은데,
       그 까닭인 찾기 칸까지 사라지면 왜 두 명뿐인지 알 길이 없다. 스물다섯 명에서 한 명을
       끊으려고 이름을 치는 것도 여기서 하는 일이다. */
+  /* **찾기 칸은 접어 둔다.** 스물다섯 명이든 셋이든 이 화면에 와서 가장 자주 하는 일은
+     목록을 훑는 것이지 이름을 치는 것이 아닌데, 늘 펼쳐 둔 칸이 목록 위 한 줄을 통째로
+     차지하고 있었다. 머리줄의 돋보기를 누르면 그 자리에 칸이 선다.
+
+     친구가 적으면 접을 것도 없다 — 훑어서 찾는 편이 빠르다. */
   const barHtml = () => {
     if (!friends.length) return "";
-    const top = `<div class="fr-bar">
-      ${friends.length > 6 ? searchHtml("이름으로 찾기", query) : ""}
-      <button class="mini-btn" data-only-star aria-pressed="${onlyStar}"
-        >${icon("star")} 즐겨찾기</button>
-    </div>`;
+    const top = finding
+      ? `<div class="fr-bar">${searchHtml("이름으로 찾기", query)}</div>`
+      : "";
     return top + `<div data-fr-bulk>${bulkHtml()}</div>`;
   };
 
   /* 셈이 바뀔 때 갈아 끼우는 것은 **이 조각뿐**이다 — 위의 찾기 칸까지 함께 다시 그리면
      이름을 치다가 네모칸을 하나 누른 순간 치던 글자가 끊긴다. */
   const bulkHtml = () => {
-    // 고르기 전에는 「선택」 하나만. 왼쪽 끝에 두어 찾기 칸의 왼쪽 모서리와 줄을 맞춘다.
-    if (!sel) return `<div class="fr-pick"><button class="mini-btn" data-fsel>선택</button></div>`;
+    /* **즐겨찾기와 「선택」은 같은 줄의 양 끝이다.** 하나는 목록을 좁히는 일이고 하나는
+       고르기에 들어가는 일이라 서로 다른 갈래인데, 줄을 나눠 두면 목록 위가 두 줄로
+       두꺼워진다. 왼쪽이 보는 방식, 오른쪽이 다루는 방식 — 자리로 갈라 놓는다. */
+    const star = `<button class="mini-btn" data-only-star aria-pressed="${onlyStar}"
+      >${icon("star")} 즐겨찾기</button>`;
+    if (!sel) return `<div class="fr-pick spread">${star}
+      <button class="mini-btn" data-fsel>선택</button></div>`;
     /* 「전체 선택」은 **지금 화면에 서 있는 사람만** 집는다 — 찾기나 즐겨찾기로 좁혀
        놓았으면 그만큼이다. 안 보이는 사람까지 집으면 못 본 채로 끊게 된다.
        단추 하나가 상황을 따라 이름을 바꾼다(폴더 목록과 같은 규칙) — 다 골라 놓고
@@ -5003,7 +5016,12 @@ async function openFriends() {
       ${vis.length ? `<button class="mini-btn" data-fsel-all>${
         allPicked ? "전체 해제" : "전체 선택"}</button>` : ""}
       <span class="bulk-act">
-        <button class="mini-btn danger" data-fsel-del${sel.size ? "" : " disabled"}>친구 끊기</button>
+        ${/* **여럿을 한꺼번에 즐겨찾기로.** 한 명씩 별을 누르는 것은 목록을 훑다 눈에 띈
+             사람에게 하는 일이고, 스물다섯 명 중 다섯을 추리는 일은 골라서 한 번에 하는
+             것이 맞다. 끊기 옆에 두되 빨강은 그쪽에만 — 되돌릴 수 있는 일과 없는 일이다. */""}
+        <button class="mini-btn" data-fsel-star${sel.size ? "" : " disabled"}
+          >${icon("star")} 즐겨찾기로</button>
+        <button class="mini-btn danger" data-fsel-del${sel.size ? "" : " disabled"}>삭제</button>
         <button class="mini-btn" data-fsel-off>완료</button>
       </span></div>`;
   };
@@ -5011,8 +5029,10 @@ async function openFriends() {
   /* 초대 링크는 맨 위에 둔다. 아래에 있으면 친구가 쌓일수록 손이 멀어지는데,
      이 화면에서 새로 하는 일은 그것 하나뿐이다. */
   openSheet(`
-    ${headHtml("친구", { back: false, actions: false,
-      sub: `${friends.length}명` })}
+    ${/* **셈은 제목 옆에 붙인다.** 아래 작은 줄(sub)에 두었을 때는 그 한 줄이 통째로
+         「25명」 하나를 위해 서 있었다 — 짧은 값은 제목에 붙는 편이 자리를 덜 먹고
+         읽기도 가깝다. .crumb .count 가 그 자리를 위해 있던 규칙이다. */""}
+    ${headHtml("친구", { back: false, actions: false, count: `${friends.length}명` })}
     <button class="btn primary" style="width:100%" data-invite>초대 링크 만들기</button>
     <div class="rest" style="text-align:left;padding:7px 2px 12px">
       링크를 받은 사람만 친구가 될 수 있습니다. 아이디로 검색해 아무나 추가하는 방식이 아닙니다.</div>
@@ -5024,6 +5044,26 @@ async function openFriends() {
     ${/* 마지막 칸도 맨 위까지 올라올 수 있게 뒤에 빈 자리를 둔다 — 얼마나 둘지는
          화면 크기에 달렸으므로 아래에서 재서 정한다 */""}
     <div class="fr-pad"></div>`, { flush: true });
+
+  /* 찾기를 여닫는 돋보기 — 닫기 버튼 옆, 폴더 창의 즐겨찾기(.sheet-fav)와 같은 자리다.
+     친구가 적으면 훑어서 찾는 편이 빠르므로 아예 달지 않는다. */
+  if (friends.length > 6) {
+    const find = document.createElement("button");
+    find.className = "sheet-cog";
+    find.type = "button";
+    find.title = "이름으로 찾기";
+    find.setAttribute("aria-label", "이름으로 찾기");
+    find.innerHTML = icon("search");
+    find.setAttribute("aria-pressed", String(finding));
+    find.onclick = () => {
+      finding = !finding;
+      if (!finding) query = "";        // 접으면 좁힌 것도 푼다 — 안 보이는 조건이 남지 않게
+      find.setAttribute("aria-pressed", String(finding));
+      repaintBar(); repaint();
+      if (finding) sheet.querySelector(".arch-q")?.focus();
+    };
+    sheet.querySelector(".sheet-top").append(find);
+  }
 
   const list = sheet.querySelector("[data-fr-list]");
 
@@ -5073,6 +5113,8 @@ async function openFriends() {
       else for (const f of vis) sel.add(f.id);
       repaintBulk(); repaint();
     };
+    const st2 = bar.querySelector("[data-fsel-star]");
+    if (st2) st2.onclick = starFriends;
     const del = bar.querySelector("[data-fsel-del]");
     if (del) del.onclick = cutFriends;
     // 「선택」은 이제 아래 줄에 있다 — 갈래가 바뀌므로 칸을 통째로 다시 그린다
@@ -5112,14 +5154,33 @@ async function openFriends() {
     }
   }
 
+  /** 고른 사람들을 한꺼번에 즐겨찾기로 켠다.
+
+      **끄지는 않는다** — 켠 사람과 안 켠 사람을 함께 골랐을 때 「뒤집기」로 하면 무엇이
+      켜지고 무엇이 꺼질지 고른 사람이 미리 알 수 없다. 「켠다」 하나로 두면 결과가 하나다.
+      끄는 것은 줄의 별을 눌러 한 명씩 한다. */
+  const starFriends = guard(async () => {
+    const ids = [...sel].filter(id => !friends.find(f => f.id === id)?.starred);
+    if (!ids.length) { toast("고른 사람은 이미 즐겨찾기입니다"); return; }
+    for (const id of ids) {
+      const f = friends.find(x => x.id === id);
+      f.starred = true;
+      await api("PATCH", `/api/friends/${id}`, { starred: true });
+    }
+    sortFriends();
+    sel = null;
+    repaintBar(); repaint();
+    toast(`${ids.length}명을 즐겨찾기에 넣었습니다`);
+  });
+
   /** 고른 사람들을 한꺼번에 끊는다 */
   const cutFriends = guard(async () => {
     const ids = [...sel];
     if (!ids.length) return;
     const names = ids.map(id => friends.find(f => f.id === id)?.displayName).filter(Boolean);
     const yes = await askSure({
-      title: `${ids.length}명과 친구를 끊을까요?`,
-      ok: "친구 끊기", back: openFriends,
+      title: `${ids.length}명을 삭제할까요?`,
+      ok: "삭제", back: openFriends,
       body: `${esc(names.slice(0, 3).join(", "))}${names.length > 3 ? ` 외 ${names.length - 3}명` : ""}과
         서로의 공개 폴더가 보이지 않게 됩니다. 담아 둔 작품은 그대로 남습니다.`,
     });

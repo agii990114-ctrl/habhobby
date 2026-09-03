@@ -1199,6 +1199,13 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .arch .rt span { font-size: 11px; color: var(--ink-3); }
   .arch-act { display: flex; align-items: center; gap: 5px; flex: none; }
+  /* **두 단추는 같은 크기로 선다.** 글자 수가 달라 폭이 들쭉날쭉하면 줄마다 단추의
+     왼쪽 끝이 어긋나고, 목록을 훑을 때 눈이 그 어긋남을 따라간다. 가장 넓은 것
+     (🗑 휴지통)에 맞춰 min-width 를 주고, 좁은 쪽(복구·삭제)은 가운데로 모은다. */
+  .arch-act .mini-btn {
+    min-width: 74px;                   /* 「🗑 휴지통」이 저 혼자 69px 라 그보다 넉넉히 */
+    display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  }
   .arch-act em { font-style: normal; font-size: 11.5px; font-weight: 600; color: var(--accent-ink); }
   .mini-btn {
     border: 1px solid var(--line-2); background: var(--surface); color: var(--ink-2);

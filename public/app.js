@@ -2850,7 +2850,7 @@ function openWork(id, over) {
          휴지통에 있는 것을 또 버릴 일도 없다. */""}
     ${st
       ? `<div class="link-row" style="margin-top:9px">
-           <button class="btn" data-act="active">${icon("left")} 목록으로 되돌리기</button></div>`
+           <button class="btn" data-act="active">${icon("left")} 목록으로 복구</button></div>`
       : `<div class="link-row" style="margin-top:9px">
            <button class="btn" data-act="watched">${icon("check")} 감상 완료</button>
            <button class="btn bad" data-act="dropped">${icon("trash")} 휴지통</button></div>`}
@@ -4124,7 +4124,7 @@ function archRow(w) {
       w.rating && archGrouped() ? ` · <i class="stars-h">${starText(w.rating)}</i>` : ""
     } · ${ago(w.lastAt)}</span></span>
     <span class="arch-act">
-      <button class="mini-btn" data-restore="${w.id}">되돌리기</button>
+      <button class="mini-btn" data-restore="${w.id}">복구</button>
       ${/* 휴지통도 삭제도 **되돌리기와 다른 갈래의 일**이다 — 빨강으로 갈라 세운다.
              한때 휴지통만 검게 두었는데, 되돌리기 옆에 나란히 서니 둘 다 그냥
              「할 수 있는 일」로 보였다. */""}
@@ -4161,7 +4161,7 @@ function archBulk() {
     <b>${n}개 선택</b>
     ${vis.length ? `<button class="mini-btn" data-pick-all>${allPicked ? "전체 해제" : "전체 선택"}</button>` : ""}
     <span class="bulk-act">
-      ${n ? `<button class="mini-btn" data-bulk="restore">되돌리기</button>
+      ${n ? `<button class="mini-btn" data-bulk="restore">복구</button>
       ${trash ? `<button class="mini-btn danger" data-bulk="trash">${icon("trash")} 휴지통</button>`
               : `<button class="mini-btn danger" data-bulk="delete">삭제</button>`}` : ""}
       <button class="mini-btn" data-asel-off>완료</button>

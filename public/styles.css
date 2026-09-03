@@ -1335,23 +1335,46 @@
   }
   .opt:hover { border-color: var(--ink-3); }
   .opt[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
-  .opt .mark {
-    width: 17px; height: 17px; border-radius: 99px; flex: none; margin-top: 2px;
+  /* 켜고 끄는 표시. **.opt 안에만 묶어 두었더니** 다른 모양의 줄(친구 고르기)에 같은
+     표시를 놓았을 때 크기도 테두리도 없이 아무것도 안 보였다 — 모양을 정하는 규칙은
+     그 모양의 이름(.mark)에 붙어야 한다. 자리를 정하는 것만 담는 쪽이 맡는다. */
+  .mark {
+    width: 17px; height: 17px; border-radius: 99px; flex: none;
     border: 2px solid var(--line-2); background: var(--surface);
   }
-  .opt[aria-pressed="true"] .mark { border-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 3px var(--surface); }
+  .opt .mark { margin-top: 2px; }
+  [aria-pressed="true"] > .mark { border-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 3px var(--surface); }
   /* **여럿을 켤 수 있는 자리**의 표시. 동그라미는 「셋 중 하나」로 읽히므로 네모에 체크를
      넣는다 — 켜고 끄는 것임을 모양이 먼저 말한다. */
+  /* 켜진 체크 표시는 **누른 것 안에 있으면 어디서든** 같다 — .opt 에만 묶어 두었더니
+     다른 모양의 줄(친구 고르기)에서 같은 표시를 쓰려고 규칙을 한 벌 더 적어야 했다. */
   .mark.tick { border-radius: 6px; position: relative; }
-  .opt[aria-pressed="true"] .mark.tick {
+  [aria-pressed="true"] > .mark.tick {
     box-shadow: none;
     background: var(--accent); border-color: var(--accent);
   }
-  .opt[aria-pressed="true"] .mark.tick::after {
+  [aria-pressed="true"] > .mark.tick::after {
     content: ""; position: absolute; left: 4px; top: 1px;
     width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0;
     transform: rotate(42deg);
   }
+  /* 친구 고르기 창의 한 줄. 목록이 길어 카드가 아니라 **줄**이다 — 쉰 명이 카드로
+     서면 훑어 내리는 데만 한참 걸린다. */
+  .fp-row {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    padding: 10px 6px; border: 0; border-bottom: 1px solid var(--line);
+    background: none; cursor: pointer; color: inherit;
+  }
+  .fp-row:last-child { border-bottom: 0; }
+  .fp-row:hover { background: var(--surface-2); }
+  .fp-row b { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fp-row .ic { flex: none; color: var(--star); }
+  .fp-row[aria-pressed="true"] b { color: var(--accent-ink); }
+  /* 고른 사람 이름표 — 눌러서 뺀다 */
+  .fp-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+  .fp-tags:empty { display: none; }
+
   /* 공개 설정은 넷이라 한 칸이 좁다 — 글자를 조금 줄이고 표시를 위에 놓는다 */
   .take-flags .opt { padding: 11px 6px; gap: 6px; }
   .take-flags .opt .ot b { font-size: 12.5px; }

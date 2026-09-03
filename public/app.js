@@ -3822,16 +3822,110 @@ function openFolderKind(after) {
 }
 
 /** @param kind 새 폴더일 때의 갈래("plain" · "share"). 고칠 때는 폴더에서 읽는다. */
-function openFolderForm(existing, after, kind) {
+/** 친구를 골라 담는 창.
+
+    **폴더 설정 안에 끼워 두지 않고 제 창으로 뺐다.** 한때 설정 한복판에 찾기 칸과
+    고르개(select)와 이름표를 한꺼번에 세웠는데, 좁은 자리에 목록을 욱여넣은 꼴이라
+    쉰 명 중에서 셋을 고르기가 어려웠다. 넓은 창에서 하면 목록이 목록답게 선다.
+
+    고른 것은 **이 창을 나갈 때만** 넘긴다(선택 완료). 취소나 뒤로가기는 아무것도
+    바꾸지 않는다 — 고르는 도중에 마음이 바뀌면 그냥 물러날 수 있어야 한다.
+
+    @param chosen  들어올 때 이미 골라져 있던 아이디들
+    @param already 고를 수 없는 사람(이미 초대된 사람) — 줄은 서되 눌리지 않는다
+    @param onDone  「선택 완료」를 눌렀을 때. 고른 아이디 배열을 받는다
+    @param back    「취소」·뒤로가기·배경 톡 — 아무것도 바꾸지 않고 물러난다 */
+function openFriendPick({ chosen = [], already = [], title = "친구 선택", onDone, back }) {
+  let query = "";
+  const pick = new Set(chosen);
+  const done = new Set(already);
+
+  /* 지금 화면에 서 있는 사람들 — 찾기로 좁힌 만큼이다. */
+  const shown = () => {
+    const q = query.trim().toLowerCase();
+    return q ? friends.filter(f => f.displayName.toLowerCase().includes(q)) : friends;
+  };
+
+  /* 고른 사람은 **위에 이름표로** 모아 둔다. 목록을 아래로 훑어 내려가면 방금 무엇을
+     골랐는지 눈에서 사라지는데, 이름표는 늘 같은 자리에 있어 셈이 맞는지 바로 보인다.
+     눌러서 뺄 수 있다 — 목록을 다시 찾아 올라가지 않아도 된다. */
+  const tagsHtml = () => `<div class="fp-tags">${[...pick]
+    .map(id => friends.find(f => f.id === id)).filter(Boolean)
+    .map(f => `<button type="button" class="pick on" data-fp-off="${esc(f.id)}" title="빼기"
+        >${esc(f.displayName)} <i>${icon("x")}</i></button>`).join("")}</div>`;
+
+  const listHtml = () => {
+    const list = shown();
+    if (!list.length)
+      return `<div class="empty">${query.trim() ? "찾는 이름이 없습니다." : "아직 친구가 없습니다."}</div>`;
+    return list.map(f => {
+      const off = done.has(f.id);
+      return `<button type="button" class="fp-row" data-fp="${esc(f.id)}"
+        aria-pressed="${pick.has(f.id)}"${off ? " disabled" : ""}>
+        <span class="mark tick"></span>
+        <b>${esc(f.displayName)}</b>
+        ${f.starred ? icon("star", "on") : ""}
+        ${off ? `<span class="rest">이미 초대됨</span>` : ""}
+      </button>`;
+    }).join("");
+  };
+
+  const draw = () => {
+    openSheet(`
+      ${headHtml(esc(title), { back: true, save: "선택 완료", count: `${pick.size}명` })}
+      ${friends.length > 8 ? searchHtml("이름으로 찾기", query) : ""}
+      <div data-fp-tags>${tagsHtml()}</div>
+      <div class="fr-list" data-fp-list>${listHtml()}</div>
+      <div class="link-row wide-only" style="margin-top:10px">
+        <button class="btn" data-cancel>취소</button>
+        <button class="btn primary" data-done>선택 완료</button>
+      </div>`, { over: back });
+
+    /* 셈과 이름표와 목록만 갈아 끼운다 — 찾기 칸까지 다시 그리면 치던 글자가 끊긴다. */
+    const repaint = () => {
+      sheet.querySelector("[data-fp-tags]").innerHTML = tagsHtml();
+      sheet.querySelector("[data-fp-list]").innerHTML = listHtml();
+      const c = sheet.querySelector(".crumb .count");
+      if (c) c.textContent = `${pick.size}명`;
+    };
+
+    const q = sheet.querySelector(".arch-q");
+    if (q) q.addEventListener("input", () => {
+      query = q.value;
+      sheet.querySelector("[data-fp-list]").innerHTML = listHtml();
+    });
+
+    sheet.querySelector(".sheet-body").addEventListener("click", e => {
+      const off = e.target.closest("[data-fp-off]");
+      if (off) { pick.delete(off.dataset.fpOff); return repaint(); }
+      const row = e.target.closest("[data-fp]");
+      if (!row || row.disabled) return;
+      const id = row.dataset.fp;
+      pick.has(id) ? pick.delete(id) : pick.add(id);
+      repaint();
+    });
+
+    /* 되돌아갈 자리는 부르는 쪽이 정한다 — 이 창은 제가 어디서 왔는지 모른다. */
+    wireHead({ save: () => onDone([...pick]), cancel: back });
+  };
+  draw();
+}
+
+/** @param draft 친구 고르기 창에 다녀오는 동안 들고 있던 값. 창이 갈리면 이 함수가
+    처음부터 다시 도므로, 없으면 치던 이름도 켜 둔 것도 그 자리에서 사라진다. */
+function openFolderForm(existing, after, kind, draft) {
   /* 비추는 폴더에서는 **이름과 아이콘만** 고친다. 그 줄은 내 표에 있어 내가 어떻게
      부를지는 내 몫이고, 주인 화면은 그대로다. 공개 설정은 원본 폴더에 딸린 것이라
      주인만 정한다 — 여기서는 칸 자체를 세우지 않는다. */
   const mine = !existing?.mirror;
-  let emoji = existing ? existing.emoji : "📁";
+  let emoji = draft?.emoji ?? (existing ? existing.emoji : "📁");
   // 견본에 없는 아이콘을 쓰고 있었다면 직접 입력칸을 열어 둔 채로 시작한다
   const own = !EMOJIS.includes(emoji);
   // 지금 이 폴더를 누구에게 열어 두었는가. 새 폴더는 늘 나만 본다.
-  const share = { mode: existing?.share?.mode ?? "none", with: [...(existing?.share?.with ?? [])] };
+  const share = draft?.share
+    ? { mode: draft.share.mode, with: [...draft.share.with] }
+    : { mode: existing?.share?.mode ?? "none", with: [...(existing?.share?.with ?? [])] };
+  const name0 = draft?.name ?? existing?.name ?? "";
   /* **갈래는 폴더에 붙어 있다.** 고칠 때는 폴더에서 읽고(바꿀 수 없다), 만들 때는
      앞 창에서 고른 것을 받는다. */
   const sort = existing ? takeKind(existing.take) : (kind ?? "plain");
@@ -3842,11 +3936,24 @@ function openFolderForm(existing, after, kind) {
      폴더는 우선 내 것이고 여는 것은 그다음의 결정이다. 처음부터 켜져 있으면 「열지 않을
      것인가」를 매번 되묻게 되고, 무심코 만든 폴더가 친구에게 열린다. */
   const flags = team ? new Set(["edit"])
-    : new Set(String(existing?.take ?? "").split(",").filter(v => v && v !== "edit"));
+    : new Set(draft?.flags ?? String(existing?.take ?? "").split(",").filter(v => v && v !== "edit"));
   /* 공유 폴더는 **명단이 곧 폴더**라 범위가 늘 「친구 선택」이다. 일반 폴더의 범위는
      켜는 순간에 채워진다(아래 takeBox 손짓) — 새 폴더는 아무것도 안 켠 채라 여기서
      채울 것이 없다. */
   if (team) share.mode = "some";
+
+  /** 「누구에게」 — **고르는 일은 제 창에서 한다.**
+
+      한때 이 자리에 찾기 칸과 고르개(select)와 이름표를 한꺼번에 세웠는데, 폴더 설정
+      한복판에 작은 목록이 끼어 있는 꼴이라 좁고 다루기 어려웠다. 여기서는 **누가
+      골라져 있는지만** 보여 주고, 고르는 것은 넓은 창에서 한다. */
+  const whoHtml = () => {
+    const got = share.with.map(id => (friends ?? []).find(f => f.id === id)).filter(Boolean);
+    return `<button type="button" class="btn" style="width:100%" data-who-pick
+        >${icon("users")} 친구 선택${share.with.length ? ` · ${share.with.length}명` : ""}</button>
+      ${got.length ? `<div class="pickers" style="margin-top:8px">${got.map(f =>
+          `<span class="pick on">${esc(f.displayName)}</span>`).join("")}</div>` : ""}`;
+  };
 
   /** 켜고 끄는 단추 둘 — 클로닝과 미러링.
 
@@ -3890,7 +3997,7 @@ function openFolderForm(existing, after, kind) {
                placeholder="🙂" aria-label="아이콘 직접 입력">
       </div></div>
     <div class="field"><label for="fname">이름</label>
-      <input id="fname" value="${esc(existing?.name ?? "")}" placeholder="예: 주말에 몰아볼 것" maxlength="24"></div>
+      <input id="fname" value="${esc(name0)}" placeholder="예: 주말에 몰아볼 것" maxlength="24"></div>
     ${/* 여기서부터 **남에게 보이는 이야기**다 — 위(아이콘·이름)는 내 폴더를 꾸미는
          일이고 아래는 남과 나누는 일이라, 선 하나로 갈라 둔다. */""}
     ${guestMode() ? `<div class="field sep"><label>친구에게 공개</label>
@@ -3901,9 +4008,7 @@ function openFolderForm(existing, after, kind) {
     ${!guestMode() && mine && team ? `<div class="field sep"><label>함께 쓸 친구</label>
       <div class="rest" style="text-align:left;padding:0 2px 8px">
         ${TAKE_FLAGS.find(([v]) => v === "edit")[2]}</div>
-      <div data-share-who>
-        <div class="rest" style="text-align:left;padding:8px 2px 0">친구를 불러오는 중…</div>
-      </div>
+      <div data-share-who>${whoHtml()}</div>
     </div>` : ""}
     ${!guestMode() && mine && !team ? `<div class="field sep"><label>공개 설정</label>
       ${/* **무엇을 열어 둘지가 먼저다.** 「누구에게」는 그다음 물음이고, 아무것도
@@ -3914,9 +4019,7 @@ function openFolderForm(existing, after, kind) {
            정하고 나면, 여기서는 그 대상을 좁히기만 하면 된다. */""}
       <div class="scope-lab">공개 범위</div>
       ${tagOptsHtml(SHARE_MODES, share.mode, "share")}
-      <div data-share-who${share.mode === "some" ? "" : " hidden"}>
-        <div class="rest" style="text-align:left;padding:8px 2px 0">친구를 불러오는 중…</div>
-      </div>
+      <div data-share-who${share.mode === "some" ? "" : " hidden"}>${whoHtml()}</div>
       </div>
     </div>` : ""}
     ${existing && mine
@@ -3966,26 +4069,31 @@ function openFolderForm(existing, after, kind) {
   });
   const whoBox = sheet.querySelector("[data-share-who]");
   if (whoBox) {
-    let drawn = false;
-
-    /* 친구를 **고르개(select)로 하나씩** 담는다. 한때 모든 친구를 이름 칩으로 깔아 두고
-       눌러서 켜고 껐는데, 수십 명이 되면 그것만으로 화면이 가득 차서 정작 아래에 있는
-       퍼가기 설정이 안 보였다. 지금은 담은 사람만 보이므로 목록 길이가 고른 수만큼이다.
-
-       고르개·찾기 칸·이름표는 「공유자」 창의 「더 부르기」와 **같은 물건**이라 한 자리에서
-       만든다(friendPicker). 한때 두 벌이 따로 있었고, 한쪽만 고친 탓에 같은 창의 같은
-       칸이 서로 다르게 굴었다. */
+    /* 이름표에 사람 이름을 적으려면 친구 목록이 있어야 한다. 창을 세울 때는 아직 없을 수
+       있으므로 받아 온 뒤 그 조각만 다시 그린다 — 창 전체를 다시 그리면 치던 이름이 끊긴다. */
     const drawWho = async () => {
-      if (drawn) return;
-      drawn = true;
-      await loadFriends();
-      if (!friends.length) {
-        whoBox.innerHTML = `<div class="rest" style="text-align:left;padding:2px">아직 친구가 없습니다.</div>`;
-        return;
-      }
-      friendPicker(whoBox, { all: friends, out: share.with });
+      try { await loadFriends(); } catch { return; }
+      whoBox.innerHTML = whoHtml();
     };
     if (share.mode === "some") drawWho();
+
+    /* **고르는 일은 제 창에서 한다.** 여기서는 그 창으로 가는 길만 연다.
+       가는 동안 이 창은 갈리므로, 치던 값을 통째로 들고 갔다가 그대로 되살린다. */
+    whoBox.addEventListener("click", guard(async e => {
+      if (!e.target.closest("[data-who-pick]")) return;
+      await loadFriends();
+      const keep = { emoji, name: nameEl.value, flags: [...flags], share };
+      const home = picked => {
+        if (picked) share.with = picked;
+        openFolderForm(existing, after, kind, { ...keep, share });
+      };
+      openFriendPick({
+        chosen: share.with,
+        title: team ? "함께 쓸 친구" : "볼 수 있는 친구",
+        onDone: home,
+        back: () => home(null),
+      });
+    }));
 
     /* 켜고 끄는 칸은 **일반 폴더에만** 있다 — 공유 폴더는 갈래가 곧 답이라 고를 것이 없다.
        한때 여기서 쉐어링도 함께 켜고 껐고, 그래서 「범위를 넓히면 쉐어링이 저절로 꺼진다」

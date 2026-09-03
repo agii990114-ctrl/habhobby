@@ -484,9 +484,19 @@ async function takeWork(userId: string, src: Work, folderIds: string[]):
 /* 퍼가기 값은 쉼표로 이은 집합이다("copy,mirror"). 빈 글자는 비공개.
    모르는 낱말이 섞여 있으면 통째로 물린다 — 반만 받아들이면 고른 것과 저장된 것이 달라진다. */
 const TAKE_WORDS = ["copy", "mirror", "edit"];
+/* **폴더의 갈래는 둘이고 섞이지 않는다.**
+
+   ┌ 일반 폴더 — ""(비공개) · "copy" · "mirror" · "copy,mirror"
+   └ 공유 폴더 — "edit" 하나뿐
+
+   한때 셋을 자유롭게 조합할 수 있었다. 그러면 함께 쓰자고 만든 폴더가 편집 한 번으로
+   아무나 담아갈 수 있는 것이 되고, 갈래마다 대상이 다른데(「함께 쓰자」와 「아무나
+   담아가라」) 범위는 하나뿐이라 그 하나가 둘을 동시에 뜻하게 된다. 화면은 만들 때
+   갈래를 갈라 그 조합이 아예 안 생기게 하고, 여기서는 그것을 값으로 못 박는다. */
 const validTake = (v: unknown): boolean =>
   typeof v === "string" &&
-  (v === "" || v.split(",").every(w => TAKE_WORDS.includes(w)));
+  (v === "" || v.split(",").every(w => TAKE_WORDS.includes(w))) &&
+  (!v.split(",").includes("edit") || v === "edit");
 /** 차례를 고정한다 — 같은 조합이 늘 같은 글자가 되어야 견주기 쉽다 */
 const normTake = (v: string): string =>
   TAKE_WORDS.filter(w => v.split(",").includes(w)).join(",");
@@ -496,6 +506,9 @@ const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8",
   ".webmanifest": "application/manifest+json; charset=utf-8",
+  /* nosniff 를 켜 두었으므로 여기 없는 확장자는 octet-stream 으로 나가고, 크롤러는
+     robots.txt 를 글로 읽지 못한다 — 막으려고 둔 파일이 막지 못하게 된다. */
+  ".txt": "text/plain; charset=utf-8",
   ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon",
 };
 
@@ -894,6 +907,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
 
      공개 대상은 **실제 친구만** 받는다. 친구가 아닌 사람의 아이디를 끼워 넣어도 저장되지
      않게 여기서 거른다 — 지우는 쪽이 아니라 담는 쪽에서 막는 것이 안전하다. */
+  /** 보낸 퍼가기 값이 규칙에 맞는가. 안 보냈으면 손댈 것이 없으니 통과다.
+
+      **조용히 버리면 안 된다.** 한때 applyShare 가 validTake 를 통과하지 못한 값을 그냥
+      건너뛰었는데, 그러면 만들기는 201, 고치기는 200 으로 답하면서 저장된 값은 딴 것이었다
+      — 고른 것과 저장된 것이 달라지는, 바로 그 자리를 막으려던 검사가 그 탈을 냈다. */
+  const badTake = (b: any) => b.take !== undefined && !validTake(b.take);
+
   const applyShare = (id: string, b: any) => {
     if (b.share && ["none", "all", "some"].includes(b.share.mode) && !isGuest(user)) {
       const want: string[] = Array.isArray(b.share.with)
@@ -906,7 +926,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
         canEdit(take as TakeMode));
     }
     /* 퍼가기 권한 — 공개하지 않은 폴더에는 뜻이 없지만, 껐다 켰다 할 때마다 값이
-       날아가면 다시 정해야 하므로 공개 여부와 상관없이 그대로 담아 둔다. */
+       날아가면 다시 정해야 하므로 공개 여부와 상관없이 그대로 담아 둔다.
+
+       갈래를 못 바꾼다는 빗장은 **여기가 아니라 고치는 자리(PATCH)에 있다** — 만들 때도
+       이 함수를 지나가는데, 그때는 아직 기본값(copy)만 앉아 있어 공유 폴더를 세우려는
+       첫 요청이 제 손에 걸린다. */
     if (validTake(b.take)) setFolderTake(id, normTake(b.take) as TakeMode);
   };
 
@@ -919,6 +943,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
        없으므로 그때만 막는다. */
     if (!name && !emoji) {
       json(res, 400, { ok: false, reason: "이름이나 아이콘 중 하나는 정해 주세요." });
+      return true;
+    }
+    if (badTake(b)) {
+      json(res, 400, { ok: false, reason: "폴더는 일반 폴더이거나 공유 폴더입니다 — 섞을 수 없습니다." });
       return true;
     }
     const { id } = createFolder(user.id, { name, emoji });
@@ -1010,6 +1038,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       const nextEmoji = field(b, "emoji", mine.emoji);
       if (!next && !nextEmoji) {
         json(res, 400, { ok: false, reason: "이름이나 아이콘 중 하나는 정해 주세요." });
+        return true;
+      }
+      /* **갈래는 만들 때 정해지고 바뀌지 않는다.** 일반 폴더를 공유 폴더로, 또는 그 반대로
+         뒤집는 길이 있으면 만들 때 가른 것이 뜻을 잃는다 — 함께 쓰던 폴더가 편집 한 번에
+         아무나 담아가는 것이 되는 바로 그 길이다. 화면에는 그 칸이 아예 없으므로,
+         여기 닿는 것은 짜맞춘 요청뿐이다. */
+      if (badTake(b)) {
+        json(res, 400, { ok: false, reason: "폴더는 일반 폴더이거나 공유 폴더입니다 — 섞을 수 없습니다." });
+        return true;
+      }
+      if (b.take !== undefined && canEdit(mine.take) !== canEdit(b.take as TakeMode)) {
+        json(res, 403, { ok: false, reason: "폴더의 갈래는 만든 뒤에 바꿀 수 없습니다." });
         return true;
       }
       db.prepare("UPDATE folder SET name = ?, emoji = ? WHERE id = ?").run(next, nextEmoji, id);
@@ -1488,9 +1528,63 @@ async function auth(req: IncomingMessage, res: ServerResponse, url: URL): Promis
   return false;
 }
 
+/* ── 보안 머리글 ───────────────────────────────────────────
+
+   모든 응답에 같은 것을 얹는다. 자리마다 따로 붙이면 새로 만든 길에서 빠뜨린다 —
+   실제로 이 서버에는 여섯 군데의 writeHead 가 있고, 그중 어디가 빠졌는지는
+   눈으로 세어야 알 수 있었다. 라우팅 앞에서 한 번에 얹으면 404 와 500 에도 붙는다.
+
+   **CSP** — 표지는 남의 CDN 에서 그대로 가져다 쓰므로 img-src 는 https 전체를 연다.
+   그 밖에는 우리 자신과 글꼴뿐이다. 인라인 스타일(style="…")은 화면 곳곳에서 값을
+   실어 나르는 방식이라 열어 두지만, **인라인 스크립트는 열지 않는다** — index.html 의
+   테마 복원 한 조각만 해시로 통과시킨다(scriptHashes 가 그것을 읽어 만든다).
+
+   **X-Robots-Tag** — 이 서비스는 검색에도 학습에도 실릴 이유가 없는 개인 목록이다.
+   robots.txt 가 「오지 마라」라면 이쪽은 「가져갔더라도 싣지 마라」다. 둘 다 지키는
+   쪽에만 먹히지만, 지키는 쪽이 대부분이고 안 지키는 쪽은 어차피 로그인에 막힌다. */
+const SEC_HEADERS: Record<string, string> = {
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "no-referrer",
+  "X-Frame-Options": "DENY",
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Resource-Policy": "same-origin",
+  "X-Robots-Tag": "noindex, nofollow, noarchive, nosnippet, noimageindex, noai, noimageai",
+};
+
+/** index.html 안의 인라인 <script> 조각들을 CSP 해시로. 파일이 바뀌면 함께 바뀐다. */
+function scriptHashes(html: string): string {
+  /* 여는 태그에 src 가 없는 <script> 의 몸통. 정규식을 글자로 지어 넘기는 까닭은
+     소스에 백슬래시가 줄줄이 들어가면 옮겨 붙이는 과정에서 조용히 상하기 때문이다 —
+     실제로 한 번 [sS] 가 [sS] 로 뭉개져 아무것도 안 잡는 정규식이 되었다. */
+  const INLINE_SCRIPT = new RegExp(
+    "<script(?![^>]*" + "\\" + "bsrc=)[^>]*>([" + "\\" + "s" + "\\" + "S]*?)<" + "\\" + "/script>", "g");
+  const out: string[] = [];
+  for (const m of html.matchAll(INLINE_SCRIPT))
+    out.push("'sha256-" + createHash("sha256").update(m[1], "utf8").digest("base64") + "'");
+  return out.join(" ");
+}
+let CSP = "";
+{
+  const html = await readFile(pathResolve(PUBLIC, "index.html"), "utf8");
+  CSP = [
+    "default-src 'self'",
+    `script-src 'self' ${scriptHashes(html)}`.trim(),
+    "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'",
+    "font-src https://fonts.gstatic.com",
+    "img-src 'self' data: https:",              // 표지는 남의 CDN 에서 온다
+    "connect-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "object-src 'none'",
+  ].join("; ");
+}
+
 /* ── 서버 ─────────────────────────────────────────────────── */
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+  for (const [k, v] of Object.entries(SEC_HEADERS)) res.setHeader(k, v);
+  res.setHeader("Content-Security-Policy", CSP);
   try {
     if (await auth(req, res, url)) return;
 

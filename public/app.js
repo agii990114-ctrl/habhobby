@@ -385,20 +385,33 @@ const guestMode = () => me?.provider === "guest";
    한때 「고른 친구와 함께 쓰기」를 공개 갈래에 끼워 두었는데, 그건 공개 대상과 퍼가기를
    한 항목에 뭉쳐 놓은 것이라 갈래가 셋인지 넷인지도 헷갈렸다. 함께 쓰기는 **퍼가기 쪽**
    이야기다 — 「폴더 공유」로 그리로 옮겼다. */
-/* **「나만 보기」는 범위에 두지 않는다.** 공개 설정의 「비공개」가 이미 그 자리다 —
-   같은 뜻이 두 곳에 있으면 어느 쪽을 눌러야 하는지 알 수 없고, 애초에 셋이 다 꺼져
+/* **「나만 보기」는 범위에 두지 않는다.** 둘을 다 꺼 두는 것이 이미 그 자리다 —
+   같은 뜻이 두 곳에 있으면 어느 쪽을 눌러야 하는지 알 수 없고, 애초에 둘이 다 꺼져
    있으면 범위 칸이 뜨지도 않는다. 값 자체(none)는 남는다 — 저장될 때 그 모양이 필요하다. */
 const SHARE_MODES = [
   ["all", "전체 공개", "친구가 늘어나면 그 사람에게도 보입니다."],
   ["some", "친구 선택", "고른 사람이 볼 수 있습니다."],
 ];
-/* **켜고 끄는 셋.** 하나만 고르는 것이 아니라 원하는 만큼 켠다 — 클로닝과 미러링을
-   함께 열어 두면 친구가 둘 중에 고른다. 셋을 다 끄면 비공개다. */
+/* **폴더의 갈래는 둘이고, 만들 때 정해져 바뀌지 않는다.**
+
+   ┌ 일반 폴더 — 내 폴더다. 남이 담아가게(클로닝) 하거나 비춰 보게(미러링) 열 수 있고,
+   │             그 범위는 하나로 통일된다. 둘 다 끄면 비공개.
+   └ 공유 폴더 — 부른 사람과 **함께 쓰는** 폴더다(쉐어링). 명단에 오른 사람만 오간다.
+
+   한때 셋을 한 창에서 자유롭게 켜고 껐다. 그러면 갈래마다 범위를 따로 두어야 하고
+   (「함께 쓰자」와 「아무나 담아가라」는 대상이 다르다), 무엇보다 **함께 쓰자고 만든 폴더가
+   나중에 편집 한 번으로 아무나 담아갈 수 있는 것이 되었다.** 만들 때 갈라 두면 그 일이
+   일어날 자리가 없어진다 — 규칙을 지키는 대신 규칙이 깨질 수 없는 모양으로 만든다. */
 const TAKE_FLAGS = [
   ["copy", "클로닝", "한 벌 떠 갑니다. 그 뒤로는 내가 고쳐도 그쪽엔 안 갑니다."],
   ["mirror", "미러링", "내 폴더를 그대로 비춥니다. 내가 고치면 그쪽에도 바뀝니다."],
   ["edit", "쉐어링", "고른 사람에게 초대를 보냅니다. 수락하면 함께 넣고 뺍니다. 작품 자체는 넣은 사람만 고칩니다."],
 ];
+/** 일반 폴더에서 켜고 끄는 둘 — 쉐어링은 여기 없다(그건 폴더의 갈래 자체다) */
+const PLAIN_FLAGS = TAKE_FLAGS.filter(([v]) => v !== "edit");
+/** 만들 때 정해지는 갈래. 값에 edit 가 있으면 공유 폴더다.
+    (목록을 거르는 folderKind 와는 다른 물건이다 — 그쪽은 비추는 것까지 넷으로 가른다.) */
+const takeKind = take => canEdit(take) ? "share" : "plain";
 /** 켜진 것들을 값으로 — 차례를 고정해 같은 조합이 늘 같은 글자가 되게 한다 */
 const takeValue = set => TAKE_FLAGS.map(([v]) => v).filter(v => set.has(v)).join(",");
 // 함께 고치는 사이라면 담아가는 것도 된다 — 가장 너그러운 갈래다
@@ -859,7 +872,7 @@ function wireWorkPick(box, redraw) {
         }
         // 새로 만들면 그 폴더에 바로 넣는다. 물러났으면 고르던 자리로 돌아온다.
         if (ev.target.closest("[data-put-new]"))
-          openFolderForm(null, f => f ? put(f.id, f.name) : draw());
+          openFolderKind(f => f ? put(f.id, f.name) : draw());
       });
     };
     draw();
@@ -3452,7 +3465,7 @@ function wirePicker(root, selected, onChange, reopen) {
   box.addEventListener("click", e => {
     const b = e.target.closest("button"); if (!b) return;
     if (b.dataset.pickerNew !== undefined) {
-      openFolderForm(null, f => { if (f) selected.push(f.id); reopen(); });
+      openFolderKind(f => { if (f) selected.push(f.id); reopen(); });
       return;
     }
     const i = selected.indexOf(b.dataset.fid);
@@ -3637,7 +3650,45 @@ function openMirrorInfo(f, after) {
   });
 }
 
-function openFolderForm(existing, after) {
+/** 새 폴더를 만들기 전에 **갈래부터 고른다.**
+
+    한 창에서 다 하려면 「이 폴더로 무엇을 할 수 있나」를 켜고 끄는 칸이 늘 서 있어야 하고,
+    그러면 만들고 나서 그 칸을 다시 열어 갈래를 바꿀 수 있다 — 함께 쓰자고 만든 폴더가
+    편집 한 번에 아무나 담아가는 것이 되는 길이다. 앞에서 가르면 그 길이 없어진다.
+
+    둘러보기(로그인 전)에는 공유할 상대가 없으므로 이 창을 건너뛰고 바로 일반 폴더로 간다. */
+function openFolderKind(after) {
+  if (guestMode()) return openFolderForm(null, after, "plain");
+  const card = (kind, ico, title, desc) => `<button class="opt" data-kind="${kind}">
+    <span class="ot"><b>${icon(ico)} ${title}</b><span>${desc}</span></span></button>`;
+  openSheet(`
+    ${headHtml("새 폴더", { back: false, actions: false, sub: "어떤 폴더를 만들까요?" })}
+    <div class="opts">
+      ${card("plain", "inbox", "일반 폴더",
+        "내 폴더입니다. 친구가 담아가거나 비춰 보게 열어 둘 수 있습니다.")}
+      ${card("share", "users", "공유 폴더",
+        "부른 친구와 함께 씁니다. 명단에 오른 사람만 넣고 뺄 수 있습니다.")}
+    </div>
+    ${/* 갈래는 나중에 못 바꾼다 — 고르기 전에 말해 두어야 고르고 나서 찾지 않는다 */""}
+    <div class="rest" style="text-align:left;padding:10px 2px 0">
+      갈래는 만든 뒤에 바꿀 수 없습니다. 이름과 아이콘은 언제든 고칠 수 있어요.</div>
+    ${/* **wide-only 를 붙이면 안 된다.** 그 갈래는 「마우스면 아래 버튼줄, 손가락이면
+         제목줄(.crumb-act)」이라는 짝인데, 이 창은 actions:false 라 제목줄 쪽이 없다.
+         둘 다 없으면 손가락 기기에서 **나갈 길이 하나도 안 보인다** — 닫기 ✕ 마저
+         마우스 기기에서만 서기 때문이다. 여기서는 늘 보이는 한 줄로 둔다. */""}
+    <div class="link-row" style="margin-top:4px">
+      <button class="btn" data-cancel>취소</button></div>`, { over: () => after(null) });
+  const back = () => after(null);
+  for (const b of sheet.querySelectorAll("[data-cancel]")) b.onclick = back;
+  sheet.querySelector(".opts").addEventListener("click", e => {
+    const b = e.target.closest("[data-kind]"); if (!b) return;
+    // 갈래 창으로 되돌아올 길을 남긴다 — 잘못 골랐을 때 폴더 목록까지 나가지 않아도 되게
+    openFolderForm(null, f => f ? after(f) : openFolderKind(after), b.dataset.kind);
+  });
+}
+
+/** @param kind 새 폴더일 때의 갈래("plain" · "share"). 고칠 때는 폴더에서 읽는다. */
+function openFolderForm(existing, after, kind) {
   /* 비추는 폴더에서는 **이름과 아이콘만** 고친다. 그 줄은 내 표에 있어 내가 어떻게
      부를지는 내 몫이고, 주인 화면은 그대로다. 공개 설정은 원본 폴더에 딸린 것이라
      주인만 정한다 — 여기서는 칸 자체를 세우지 않는다. */
@@ -3647,34 +3698,52 @@ function openFolderForm(existing, after) {
   const own = !EMOJIS.includes(emoji);
   // 지금 이 폴더를 누구에게 열어 두었는가. 새 폴더는 늘 나만 본다.
   const share = { mode: existing?.share?.mode ?? "none", with: [...(existing?.share?.with ?? [])] };
-  /* **켜고 끄는 셋.** 무엇을 열어 둘지 먼저 정하고, 그다음에 누구에게 열지 정한다 —
-     「이 폴더로 무엇을 할 수 있나」가 「누구에게」보다 앞선 물음이다.
-     기본은 클로닝 하나. 미러링은 "내가 고르는 걸 계속 보라" 는 뜻이라 직접 켜야 열린다. */
-  const flags = new Set(String(existing?.take ?? "copy").split(",").filter(Boolean));
+  /* **갈래는 폴더에 붙어 있다.** 고칠 때는 폴더에서 읽고(바꿀 수 없다), 만들 때는
+     앞 창에서 고른 것을 받는다. */
+  const sort = existing ? takeKind(existing.take) : (kind ?? "plain");
+  const team = sort === "share";
+  /* 켜고 끄는 것은 **일반 폴더에서만** 있는 일이다. 공유 폴더의 값은 늘 edit 하나 —
+     고를 것이 없으므로 칸도 세우지 않는다.
+     일반 폴더의 기본은 클로닝 하나. 미러링은 "내가 고르는 걸 계속 보라" 는 뜻이라 직접 켠다. */
+  const flags = team ? new Set(["edit"])
+    : new Set(String(existing?.take ?? "copy").split(",").filter(v => v && v !== "edit"));
+  /* 공유 폴더는 **명단이 곧 폴더**라 범위가 늘 「친구 선택」이다. 새로 만드는 일반 폴더는
+     클로닝이 켜진 채로 시작하므로 범위도 함께 채워 둔다 — 켜 보이는데 실은 아무에게도
+     안 보이는 상태로 저장되면, 화면이 한 말과 저장된 것이 달라진다. */
+  if (team) share.mode = "some";
+  else if (!existing && flags.size && share.mode === "none") share.mode = "all";
 
-  /** 켜고 끄는 단추 넷 — 비공개는 고르는 것이 아니라 **셋이 다 꺼진 결과**다.
+  /** 켜고 끄는 단추 둘 — 클로닝과 미러링.
 
       이 창에서 **먼저 정하는 것**이라 큰 칸으로 세운다. 범위(누구에게)는 그다음이라
       작은 태그로 딸려 붙는다 — 앞선 물음이 눈에 먼저 들어와야 차례가 읽힌다.
 
-      켜고 끄는 것이라 표시가 동그라미가 아니라 **체크**다. 동그라미는 「셋 중 하나」로
-      읽히는데 여기서는 여럿을 켤 수 있다. */
+      켜고 끄는 것이라 표시가 동그라미가 아니라 **체크**다. 동그라미는 「둘 중 하나」로
+      읽히는데 여기서는 둘 다 켤 수 있다. */
+  /* **「비공개」 단추는 없다.** 그건 고르는 것이 아니라 **둘이 다 꺼진 결과**다.
+
+     단추로 세워 두었을 때는 넷이 나란히 서서 「넷 중 하나 고르기」로 읽혔고, 켜고 끄는
+     것과 결과가 한 줄에 섞여 있었다 — 비공개를 누르면 옆의 둘이 함께 꺼지는데 그 까닭이
+     화면에 없었다. 지금은 아래 설명 줄이 그 자리를 대신한다: 둘 다 끄면 「아무에게도
+     보이지 않습니다」라고 말한다. 상태를 글로 말하는 편이 단추로 말하는 것보다 정확하다. */
   const takeHtml = () => {
     const off = flags.size === 0;
     const card = (v, t, on) => `<button type="button" class="opt${on ? " on" : ""}"
-      ${v ? `data-take="${v}"` : "data-take-off"} aria-pressed="${on}">
+      data-take="${v}" aria-pressed="${on}">
       <span class="mark tick"></span><span class="ot"><b>${t}</b></span></button>`;
-    return `<div class="opts across take-flags" style="--opt-cols:4">
-      ${card("", "비공개", off)}
-      ${TAKE_FLAGS.map(([v, t]) => card(v, t, flags.has(v))).join("")}
+    return `<div class="opts across take-flags" style="--opt-cols:2">
+      ${PLAIN_FLAGS.map(([v, t]) => card(v, t, flags.has(v))).join("")}
     </div>
     <div class="opt-why">${off
       ? "아무에게도 보이지 않습니다."
-      : TAKE_FLAGS.filter(([v]) => flags.has(v)).map(([, , d]) => d).join(" ")}</div>`;
+      : PLAIN_FLAGS.filter(([v]) => flags.has(v)).map(([, , d]) => d).join(" ")}</div>`;
   };
   openSheet(`
-    ${headHtml(existing ? "폴더 편집" : "새 폴더", { back: false,
-      save: existing ? "저장" : "만들기" })}
+    ${/* 갈래를 머리줄에 적어 둔다 — 만든 뒤에는 못 바꾸는 값이라, 어느 폴더를 보고
+         있는지가 늘 보여야 한다. 편집 창에 켜고 끄는 칸이 없는 까닭도 여기서 읽힌다. */""}
+    ${headHtml(existing ? "폴더 편집" : (team ? "새 공유 폴더" : "새 폴더"), { back: false,
+      save: existing ? "저장" : "만들기",
+      sub: mine ? (team ? "공유 폴더 — 부른 친구와 함께 씁니다" : "일반 폴더") : "" })}
     <div class="field"><label>아이콘</label>
       <div class="emoji-row" id="emo">${EMOJIS.map(e =>
     `<button data-e="${e}" aria-pressed="${e === emoji}">${e}</button>`).join("")}
@@ -3692,9 +3761,18 @@ function openFolderForm(existing, after) {
     ${guestMode() ? `<div class="field sep"><label>친구에게 공개</label>
       <div class="rest" style="text-align:left;padding:2px">
         둘러보기로는 폴더를 공개할 수 없습니다. 로그인하면 쓸 수 있어요.</div></div>` : ""}
-    ${!guestMode() && mine ? `<div class="field sep"><label>공개 설정</label>
+    ${/* **공유 폴더에는 고를 것이 없다.** 갈래가 곧 「함께 쓴다」이고 대상은 명단이라,
+         켜고 끄는 칸도 범위 칸도 물을 것이 없다 — 누구를 부를지만 남는다. */""}
+    ${!guestMode() && mine && team ? `<div class="field sep"><label>함께 쓸 친구</label>
+      <div class="rest" style="text-align:left;padding:0 2px 8px">
+        ${TAKE_FLAGS.find(([v]) => v === "edit")[2]}</div>
+      <div data-share-who>
+        <div class="rest" style="text-align:left;padding:8px 2px 0">친구를 불러오는 중…</div>
+      </div>
+    </div>` : ""}
+    ${!guestMode() && mine && !team ? `<div class="field sep"><label>공개 설정</label>
       ${/* **무엇을 열어 둘지가 먼저다.** 「누구에게」는 그다음 물음이고, 아무것도
-           안 열어 두었으면 물을 것도 없다. 그래서 셋이 다 꺼져 있으면 범위 칸이 사라진다. */""}
+           안 열어 두었으면 물을 것도 없다. 그래서 둘이 다 꺼져 있으면 범위 칸이 사라진다. */""}
       <div data-take-box>${takeHtml()}</div>
       <div data-scope${flags.size ? "" : " hidden"}>
       ${/* 범위는 **그다음 물음**이라 작은 태그로 딸려 붙는다. 위에서 무엇을 열지
@@ -3774,60 +3852,47 @@ function openFolderForm(existing, after) {
     };
     if (share.mode === "some") drawWho();
 
+    /* 켜고 끄는 칸은 **일반 폴더에만** 있다 — 공유 폴더는 갈래가 곧 답이라 고를 것이 없다.
+       한때 여기서 쉐어링도 함께 켜고 껐고, 그래서 「범위를 넓히면 쉐어링이 저절로 꺼진다」
+       같은 서로 물린 규칙이 필요했다. 갈래를 앞에서 가르니 그 규칙들이 통째로 없어졌다. */
     const takeBox = sheet.querySelector("[data-take-box]");
     const scopeBox = sheet.querySelector("[data-scope]");
-    const paintTake = () => {
-      takeBox.innerHTML = takeHtml();
-      /* 아무것도 안 열어 두었으면 「누구에게」를 물을 것이 없다. */
-      scopeBox.hidden = flags.size === 0;
-    };
-    paintTake();
-
-    wireOpts(sheet, "share", v => {
-      share.mode = v;
-      whoBox.hidden = v !== "some";
-      if (v === "some") drawWho();
-      /* 쉐어링은 **고른 친구에게만** 일 때만 켤 수 있다 — 초대를 보내려면 이름이 적힌
-         명단이 있어야 하는데 「모든 친구에게」에는 그 명단이 없다. 범위를 넓히면
-         쉐어링은 저절로 꺼진다. */
-      if (v !== "some" && flags.has("edit")) { flags.delete("edit"); paintTake(); }
-    }, SHARE_MODES);
-
-    takeBox.addEventListener("click", e => {
-      if (e.target.closest("[data-take-off]")) {      // 비공개 — 셋을 한꺼번에 끈다
-        flags.clear(); share.mode = "none"; paintTake(); return;
-      }
-      const b = e.target.closest("[data-take]"); if (!b) return;
-      const v = b.dataset.take;
-      if (flags.has(v)) flags.delete(v);
-      else {
-        /* 비공개에서 처음 켜는 참이면 범위가 「none」이라 아무것도 골라져 있지 않다.
-           고르라고 빈 채로 두면 안 고르고 저장하기 쉬우므로 **전체 공개**로 시작한다 —
-           좁히는 것은 한 번 더 누르면 되고, 친구에게만 보이는 것이라 위험이 크지 않다. */
-        if (share.mode === "none") {
-          share.mode = "all";
-          const opts = sheet.querySelector('[data-opts="share"]');
-          opts?.querySelectorAll("[data-o]").forEach(x =>
-            x.setAttribute("aria-pressed", String(x.dataset.o === "all")));
-          const why = sheet.querySelector('[data-opt-why="share"]');
-          if (why) why.textContent = SHARE_MODES.find(([m]) => m === "all")?.[2] ?? "";
-        }
-        /* 쉐어링을 켜면 범위가 「고른 친구에게만」이어야 한다 — 초대할 명단이 필요하다.
-           나만 보기였다면 그리로 옮겨 주고, 고르개도 함께 켠다. */
-        if (v === "edit" && share.mode !== "some") {
-          share.mode = "some";
-          const opts = sheet.querySelector('[data-opts="share"]');
-          opts?.querySelectorAll("[data-o]").forEach(x =>
-            x.setAttribute("aria-pressed", String(x.dataset.o === "some")));
-          const why = sheet.querySelector('[data-opt-why="share"]');
-          if (why) why.textContent = SHARE_MODES.find(([m]) => m === "some")?.[2] ?? "";
-          whoBox.hidden = false; drawWho();
-        }
-        flags.add(v);
-      }
-      if (flags.size === 0) share.mode = "none";     // 손으로 마지막 하나를 꺼도 같다
+    if (takeBox) {
+      const paintTake = () => {
+        takeBox.innerHTML = takeHtml();
+        /* 아무것도 안 열어 두었으면 「누구에게」를 물을 것이 없다. */
+        scopeBox.hidden = flags.size === 0;
+      };
       paintTake();
-    });
+
+      wireOpts(sheet, "share", v => {
+        share.mode = v;
+        whoBox.hidden = v !== "some";
+        if (v === "some") drawWho();
+      }, SHARE_MODES);
+
+      takeBox.addEventListener("click", e => {
+        const b = e.target.closest("[data-take]"); if (!b) return;
+        const v = b.dataset.take;
+        if (flags.has(v)) flags.delete(v);
+        else {
+          /* 비공개에서 처음 켜는 참이면 범위가 「none」이라 아무것도 골라져 있지 않다.
+             고르라고 빈 채로 두면 안 고르고 저장하기 쉬우므로 **전체 공개**로 시작한다 —
+             좁히는 것은 한 번 더 누르면 되고, 친구에게만 보이는 것이라 위험이 크지 않다. */
+          if (share.mode === "none") {
+            share.mode = "all";
+            const opts = sheet.querySelector('[data-opts="share"]');
+            opts?.querySelectorAll("[data-o]").forEach(x =>
+              x.setAttribute("aria-pressed", String(x.dataset.o === "all")));
+            const why = sheet.querySelector('[data-opt-why="share"]');
+            if (why) why.textContent = SHARE_MODES.find(([m]) => m === "all")?.[2] ?? "";
+          }
+          flags.add(v);
+        }
+        if (flags.size === 0) share.mode = "none";     // 손으로 마지막 하나를 꺼도 같다
+        paintTake();
+      });
+    }
   }
   /* 공개를 거두는 설정은 **남의 화면에서 무언가를 없앤다.** 저장하기 전에 한 번 묻는다 —
      이름을 고치러 들어왔다가 옆 칸을 잘못 건드려 남의 폴더를 비워 버리면 되돌릴 길이 없다. */
@@ -5388,7 +5453,7 @@ screenEl.addEventListener("click", e => {
   const f = e.target.closest("[data-folder]");
   if (f) { filter = "all"; return openFolderSheet(f.dataset.folder); }
   if (e.target.closest("[data-new-folder]"))
-    return openFolderForm(null, f2 => {
+    return openFolderKind(f2 => {
       closeSheet(); render();
       if (f2) { filter = "all"; openFolderSheet(f2.id); }   // 만들자마자 열어 준다
     });

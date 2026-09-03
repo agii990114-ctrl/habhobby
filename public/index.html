@@ -10,6 +10,9 @@
      아예 안 보내면 "어디서 왔는지 모르는 요청" 이 되어 통과하는 경우가 많다.
      덤으로, 우리 주소를 CDN 마다 알리지 않는다. -->
 <meta name="referrer" content="no-referrer">
+<!-- 개인의 감상 목록이라 검색에도 학습에도 실릴 이유가 없다. robots.txt 가 「오지 마라」라면
+     이쪽은 「가져갔더라도 싣지 마라」다 — 응답 머리글의 X-Robots-Tag 와 같은 말을 한다. -->
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
 <title>HabHobby</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">

@@ -3,6 +3,7 @@
    모든 사용자 데이터는 user_id로 격리된다. 조회 함수가 전부 userId를 받도록 만들어,
    깜빡하고 남의 데이터를 섞어 내보내는 일이 타입 단계에서 걸리게 했다. */
 import { DatabaseSync } from "node:sqlite";
+import { randomBytes } from "node:crypto";
 import { DOMAIN_PREFIX } from "./platforms.ts";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -362,7 +363,10 @@ const schemaV = (): number =>
 
    그래서 처음 만들어진 파일은 **끝난 것으로 표시하고 시작한다.** 옮길 줄이 없으니
    건너뛰는 것이 곧 옳은 결과다. */
-const LATEST_V = 7;
+/* **마지막 이관 번호와 맞춰 둔다.** 뒤에 once() 를 더하면 이 숫자도 함께 올린다 —
+   안 올려도 빈 표에 돌아 탈은 없지만, 새 파일이 「끝난 것」인데 끝나지 않은 번호를
+   달고 있으면 다음 사람이 그 어긋남부터 풀어야 한다. */
+const LATEST_V = 9;
 if (schemaV() === 0) {
   const empty = !db.prepare("SELECT 1 FROM user LIMIT 1").get();
   if (empty) db.exec("PRAGMA user_version = " + LATEST_V);
@@ -508,6 +512,31 @@ once(8, () => {
     n++;
   }
   if (n) console.log(`  퍼가기 갈래를 켜고 끄는 방식으로 옮김: ${n}개`);
+});
+
+/* 폴더의 갈래를 둘로 못 박는다 — 일반("" · copy · mirror · copy,mirror)과 공유("edit").
+
+   셋을 자유롭게 조합할 수 있던 때에 만들어진 폴더 중 **edit 와 copy·mirror 를 함께 켠
+   것**이 남아 있다. 그런 폴더는 「함께 쓰는 사이인데 아무나 담아갈 수도 있는」 상태라
+   범위 하나로 두 가지를 뜻하고 있었다.
+
+   **edit 를 남긴다.** 함께 쓰자고 부른 사람이 이미 있고 그쪽 화면에 그 폴더가 서 있는데
+   edit 를 떼면 그 사람들이 통째로 떨어져 나간다. 담아가기를 잃는 쪽이 되돌리기 쉽다 —
+   필요하면 일반 폴더를 새로 만들어 열면 된다. */
+once(9, () => {
+  const rows = db.prepare(
+    "SELECT id, take_mode FROM folder WHERE take_mode LIKE '%edit%' AND take_mode <> 'edit'",
+  ).all() as { id: string; take_mode: string }[];
+  const upd = db.prepare("UPDATE folder SET take_mode = 'edit' WHERE id = ?");
+  for (const r of rows) upd.run(r.id);
+  if (rows.length) console.log(`  갈래가 섞인 폴더를 공유 폴더로 좁힘: ${rows.length}개`);
+
+  /* 같은 김에 규칙 밖의 낱말 하나를 씻는다. createFolder 가 비추는 폴더에 "none" 을
+     적고 있었는데, 그건 갈래가 다섯이던 때의 값이고 지금은 빈 글자가 그 뜻이다.
+     canCopy 들이 모두 거짓을 내주어 탈은 안 났지만, 표에 규칙 밖의 값이 남아 있으면
+     다음에 이 컬럼을 읽는 사람이 그것부터 풀어야 한다. */
+  const n = db.prepare("UPDATE folder SET take_mode = '' WHERE take_mode = 'none'").run().changes;
+  if (n) console.log(`  옛 낱말 none 을 빈 글자로: ${n}개`);
 });
 
 /* 작품 하나를 url(공용)과 work(내 것)로 가른다.
@@ -900,7 +929,18 @@ export function setWorkFolders(userId: string, workId: string, folderIds: string
 
 export type ShareMode = "none" | "all" | "some";
 /** 공개한 폴더를 친구가 가져갈 수 있는 방식 */
-export type TakeMode = "none" | "copy" | "mirror" | "both" | "edit";
+/** 퍼가기 갈래 — **쉼표로 이은 집합**이다.
+
+    한때 다섯 중 하나였고(`none|copy|mirror|both|edit`) 타입도 그렇게 적혀 있었는데,
+    once(8) 에서 켜고 끄는 방식으로 옮기면서 값이 `"copy,mirror"` 같은 모양이 되었다.
+    그런데 타입은 그대로여서, 실제로 담기는 값이 타입에 **하나도 안 맞는데** 여기저기
+    `as TakeMode` 로 우겨 넣고 있었다 — 타입이 거짓말을 하면 없느니만 못하다.
+
+    지금 설 수 있는 값은 여섯이다:
+      일반 폴더 — "" · "copy" · "mirror" · "copy,mirror"
+      공유 폴더 — "edit"
+    (섞이지 않는다는 것은 server.ts 의 validTake 가 지킨다.) */
+export type TakeMode = string;
 /* 함께 고치는 사이라면 담아가는 것도 된다 — 가장 너그러운 갈래다.
    같이 꾸린 폴더에서 마음에 드는 것을 내 것으로 만드는 일은 그 폴더의 쓰임 그대로다. */
 /* **셋은 서로 독립이다.** 예전에는 하나만 고를 수 있어서 「둘 다」라는 갈래를 따로 두었고,
@@ -1030,7 +1070,11 @@ export function createFolder(userId: string, p: {
        잣대가 달라진다(고치는 쪽은 빈 값을 그대로 담는다). 둘 다 비는 일은 API 가 막는다. */
     .run(id, userId, p.name, p.emoji, ord,
       // 비추는 폴더는 내 것이 아니라 남에게 넘길 수 없다 (sharedView 도 걸러 낸다)
-      p.mirror ? "none" : "copy",
+      /* 비추는 폴더는 내 것이 아니라 남에게 넘길 수 없다 (sharedView 도 걸러 준다).
+         **빈 글자다.** 한때 "none" 이라 적었는데 그건 갈래가 다섯이던 때의 낱말이고,
+         지금 값은 쉼표로 이은 집합이라 「아무것도 안 켬」은 빈 글자다. canCopy 들이
+         모두 거짓을 내주어 눈에 띄지 않았을 뿐, 규칙 밖의 값이 표에 앉아 있었다. */
+      p.mirror ? "" : "copy",
       p.mirror?.owner ?? null, p.mirror?.folder ?? null);
   return getFolder(userId, id)!;
 }
@@ -1354,9 +1398,19 @@ export function sharedView(ownerId: string, viewerId: string): { folders: Folder
 /* ── 초대 ────────────────────────────────────────────────── */
 const INVITE_DAYS = 14;
 
+/* **초대 코드는 진짜 난수여야 한다.**
+
+   한때 `newId("i").slice(1, 11)` 였다. newId 는 「시각 + Math.random」이라, 그 열 글자 중
+   **앞 여덟이 Date.now() 를 36진법으로 적은 것**이었다 — 실제로 흔들리는 것은 두 글자,
+   많아야 1300 가지였다. 초대가 언제쯤 만들어졌는지만 알면(「방금 링크 만들었어」)
+   나머지는 세어 볼 수 있는 크기다.
+
+   이 코드를 맞히면 그 사람의 **친구가 된다** — 초대 수락은 주인에게 되묻지 않는다.
+   Math.random 은 예측할 수 있는 난수이기도 하다(같은 프로세스에서 몇 개만 보면
+   다음 값이 따라 나온다). 세션 토큰과 같은 randomBytes 를 쓴다. */
 export function createInvite(userId: string): { code: string; expiresAt: number } {
   db.prepare("DELETE FROM invite WHERE user_id = ? OR expires_at < ?").run(userId, Date.now());
-  const code = newId("i").slice(1, 11);
+  const code = randomBytes(9).toString("base64url");     // 72비트 · 주소에 그대로 쓰는 글자만
   const expiresAt = Date.now() + INVITE_DAYS * 864e5;
   db.prepare("INSERT INTO invite(code, user_id, created_at, expires_at) VALUES(?,?,?,?)")
     .run(code, userId, Date.now(), expiresAt);

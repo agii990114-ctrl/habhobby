@@ -66,7 +66,7 @@
   * { box-sizing: border-box; }
   /* 두 번 톡 쳤을 때 화면이 확대되지 않게 한다. 손가락으로 벌리는 확대는 그대로 둔다 —
      막아 버리면 눈이 불편한 사람이 화면을 키울 길이 없어진다. */
-  button, a, label, input, select, textarea, .work, .row, .arch, .folder, .mon-cell, .opt, .pick {
+  button, a, label, input, select, textarea, .work, .row, .folder, .mon-cell, .opt, .pick {
     touch-action: manipulation;
   }
   /* 문서 끝에서 고무줄처럼 튕기는 것은 그대로 둔다 — 손맛이고, 아이폰다운 움직임이다.
@@ -216,7 +216,7 @@
      손가락으로 꾹 누르면 브라우저가 글자 선택을 시작해 파란 띠가 생기고, 그 뒤로는
      끌 때마다 선택 범위가 늘어난다 — 고르려던 손짓이 글자 긁기가 된다.
      -webkit-touch-callout 은 그때 뜨는 「복사 / 공유」 쪽지를 막는다. */
-  .work, .folder, .folder-row, .arch {
+  .work, .folder, .folder-row {
     -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
   }
   .work { cursor: pointer; border: 0; background: none; padding: 0; text-align: left; display: block; }
@@ -1278,10 +1278,6 @@
   /* 여러 개 고르기 */
   /* 구간 머리 오른쪽에 붙는 「구간 선택」 — 묶음마다 한 번에 담고 푼다 */
   .plat-h .mini-btn { margin-left: auto; flex: none; }
-  /* 줄 전체가 체크 상자다(label). 손가락으로 작은 네모를 겨누지 않아도 되게 —
-     여기 줄에는 누를 것이 그것뿐이라 어디를 눌러도 뜻이 하나다. */
-  label.arch { cursor: pointer; }
-  label.arch:hover { background: var(--surface-2); }
   .arch-pick { display: flex; align-items: center; flex: none; padding: 0 2px; cursor: pointer; }
   .arch-pick input { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
   .bulk {
@@ -1293,24 +1289,8 @@
   .bulk b { color: var(--accent-ink); }
   .bulk .bulk-act { display: flex; gap: 6px; margin-left: auto; }
 
-  .arch {
-    display: flex; align-items: center; gap: 10px;
-    padding: 8px 4px; border-bottom: 1px solid var(--line);
-  }
-  .arch:last-child { border-bottom: 0; }
-  .arch .rt { min-width: 0; flex: 1; }
-  .arch .rt b { display: block; font-size: 13px; font-weight: 600; line-height: 1.35;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .arch .rt span { font-size: 11px; color: var(--ink-3); }
-  .arch-act { display: flex; align-items: center; gap: 5px; flex: none; }
-  /* **두 단추는 같은 크기로 선다.** 글자 수가 달라 폭이 들쭉날쭉하면 줄마다 단추의
-     왼쪽 끝이 어긋나고, 목록을 훑을 때 눈이 그 어긋남을 따라간다. 가장 넓은 것
-     (🗑 휴지통)에 맞춰 min-width 를 주고, 좁은 쪽(복구·삭제)은 가운데로 모은다. */
-  .arch-act .mini-btn {
-    min-width: 74px;                   /* 「🗑 휴지통」이 저 혼자 69px 라 그보다 넉넉히 */
-    display: inline-flex; align-items: center; justify-content: center; gap: 4px;
-  }
-  .arch-act em { font-style: normal; font-size: 11.5px; font-weight: 600; color: var(--accent-ink); }
+  /* 보관함의 한 줄(.arch)과 그 안의 단추(.arch-act)는 걷었다 — 이제 여느 격자와 같은
+     카드로 선다. 체크칸(.arch-pick)만 남는다: 폴더 줄이 그것을 쓴다. */
   .mini-btn {
     border: 1px solid var(--line-2); background: var(--surface); color: var(--ink-2);
     font-size: 11.5px; font-weight: 600; padding: 4px 9px; border-radius: 7px; cursor: pointer;

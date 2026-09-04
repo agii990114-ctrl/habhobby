@@ -2356,7 +2356,12 @@ function render() {
        고른 것이 따라와, 안 보이는 화면의 카드까지 함께 옮기게 된다. */
     const list = byRecent(listedWorks("all"));
     workPickAt("all", list);
-    html += `<div class="screen-title with-act">최근 본 순 · ${list.length}편
+    /* **셈이 무엇을 세는지 밝힌다.** 보관까지 세우고 있으면 이 수는 옆 메뉴의 「작품 N」
+       (살아 있는 것만 센다)과 다르다 — 두 수가 같은 말을 다르게 하면, 보는 사람은
+       어느 쪽이 맞는지부터 가려야 한다. 섞여 있을 때만 한마디 붙인다. */
+    const done = list.filter(w => w.state === "watched").length;
+    html += `<div class="screen-title with-act">최근 본 순 · ${list.length}편${
+      done ? ` (보관 ${done}편 포함)` : ""}
       ${list.length && !workSel ? `<button class="mini-btn" data-wsel>선택</button>` : ""}</div>`;
     html += `<div data-wbar>${workBarHtml(list.length)}</div>`;
     html += workGridHtml(list, "아직 담아 둔 작품이 없습니다.<br>왼쪽 아래 ＋ 버튼으로 추가해보세요.");
@@ -3255,26 +3260,23 @@ function openWorkSettings(id, opts) {
     const title = draft.title.trim();
     if (!title) { titleEl.focus(); return; }
 
-    /* 주소를 새로 넣었으면 제목·표지·플랫폼을 그 페이지에서 다시 얻어야 한다.
-       고쳐 담을 수는 없어서 새로 담고 옛 항목을 지운다 — 일정·폴더·색·제목은 그대로 옮긴다.
-       한때 이 일을 "붙이기" 라는 따로 된 버튼이 맡았는데, 주소를 넣고 저장만 누른 사람에게는
-       아무 일도 일어나지 않았다. 넣었으면 적용되는 것이 당연한 기대다. */
-    const url = urlEl?.value.trim();
-    if (url) {
-      await api("POST", "/api/works", { url, title, schedule: draft.schedule,
-        folders: draft.folders, color: draft.color, filed: true });
-      await api("DELETE", `/api/works/${id}`);
-      await reload(); render(); closeSheet();
-      toast("주소를 붙였습니다");
-      return;
-    }
+    /* 주소를 새로 넣었으면 **그 줄이 가리키는 곳을 옮긴다**(서버의 PATCH url).
 
+       한때 화면이 이 일을 「새로 담고 옛것을 지우는」 것으로 했다. 그러면 무엇을 새 줄에
+       넘길지 여기서 손으로 세어야 했고, 실제로 **별점과 소개글이 빠져 있었다** — 보관해
+       둔 것이 목록으로 되살아나기도 했다. 값이 하나 늘 때마다 조용히 틀리는 방식이다.
+
+       이제 저장 하나로 끝난다: 옮겨 달고, 같은 요청이 제목·일정·폴더까지 적는다. */
+    const url = urlEl?.value.trim();
     await api("PATCH", `/api/works/${id}`, {
+      ...(url ? { url } : {}),
       title, description: draft.description, schedule: draft.schedule,
       folders: draft.folders, color: draft.color,
       coverUrl: draft.coverUrl, filed: mode === "add" ? true : undefined,
     });
-    await reload(); render(); goBack();
+    await reload(); render();
+    if (url) { closeSheet(); toast("주소를 붙였습니다"); return; }
+    goBack();
   });
 
   const cancel = () => { Object.assign(draft, structuredClone(snap)); goBack(); };
@@ -4395,7 +4397,10 @@ function openFind() {
   openSheet(`
     ${searchHtml("작품명으로 검색")}
     <div data-find-body>${body()}</div>`,
-    { full: true, title: "검색", sub: `전체 ${works.length}편에서 찾습니다` });
+    /* **수를 말하지 않는다.** 여기서 뒤지는 것에는 비쳐 온 남의 줄과 휴지통까지 들어 있어,
+       그 수는 내가 담아 둔 편수와도 화면의 편수와도 다르다. 어긋나는 수를 적느니
+       **어디를 뒤지는지**를 적는 편이 알려 주는 바가 많다. */
+    { full: true, title: "검색", sub: "내 목록 · 보관함 · 친구 폴더에서 찾습니다" });
 
   const qEl = sheet.querySelector(".arch-q");
   qEl.addEventListener("input", () => {
@@ -4587,8 +4592,12 @@ const archGrid = list => `<div class="grid">${list.map(archCard).join("")}</div>
 
     제 줄은 빼고 본다. 보관 줄에게는 저 자신이 「이미 들고 있는 것」이라, 안 빼면
     보관은 무엇 하나 복구할 수 없다. */
+/* **비쳐 온 남의 줄은 세지 않는다.** 그건 내 목록의 자리를 차지하지 않는다 — 친구 폴더에
+   있는 것일 뿐이고, 서버도 내 줄만 보고 막는다. 한때 이것을 안 걸러서, 내가 버린 작품이
+   친구 폴더에 있다는 이유로 「이미 목록에 있는 작품입니다」라며 복구가 막혔다.
+   화면이 서버보다 더 막으면, 눌러 볼 수도 없는 채로 안 되는 이유마저 틀리게 된다. */
 const keptSame = w => works.find(a =>
-  a.id !== w.id && a.state !== "dropped" && a.urlId === w.urlId)?.state ?? null;
+  a.id !== w.id && !a.mirror && a.state !== "dropped" && a.urlId === w.urlId)?.state ?? null;
 const whereKept = w => keptSame(w) === "watched" ? "이미 보관에 있는 작품입니다"
   : "이미 목록에 있는 작품입니다";
 

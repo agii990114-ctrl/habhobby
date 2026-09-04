@@ -26,7 +26,7 @@ import {
   hashPassword, verifyPassword, validLoginId, validPassword,
 } from "./auth.ts";
 import { PLATFORMS, platformById, readableOn, DOMAIN_PREFIX, registrableDomain } from "./platforms.ts";
-import { resolveUrl, originLabel, fetchSiteName } from "./resolve.ts";
+import { resolveUrl, originLabel, fetchSiteName, type Resolved } from "./resolve.ts";
 
 const PORT = Number(process.env.PORT ?? 8080);
 const PUBLIC = pathResolve(process.cwd(), "public");
@@ -388,6 +388,29 @@ function stateSnapshot(user: User) {
 }
 
 /* ── 작품 쓰기 ────────────────────────────────────────────── */
+/** 주소를 읽고 **담아도 되는지 가린다.** 담기와 붙이기가 같은 잣대를 쓰도록 한 자리에 둔다.
+
+    **없는 페이지는 담지 않는다.** 여기서 막는 것은 「없다고 확신할 수 있는 것」뿐이다 —
+    그쪽이 404 라 했거나, 깊은 주소를 물었는데 대문으로 튕겼거나(없는 작품 번호).
+
+    못 읽은 것(403·시간 초과)은 막지 않는다. 사람이 눈으로 보고 온 페이지를 우리가
+    못 읽었다고 거절하면 안 된다 — CGV 가 그렇다. 그쪽은 화면에서 경고만 한다.
+
+    **generic 도 막지 않는다.** 그건 「없다」가 아니라 「우리가 못 읽었다」이다 —
+    카카오페이지는 화면을 브라우저에서 그려서 어느 작품 주소든 같은 대문 태그를 주고,
+    네이버 지도도 그렇다. 멀쩡한 페이지라 사람이 제목을 직접 적어 담으면 되는데,
+    여기서 막으면 그 플랫폼이 통째로 담을 수 없게 된다(실제로 두 곳이 걸렸다). */
+async function readUrl(raw: string): Promise<{ r: Extract<Resolved, { ok: true }> } | { bad: any }> {
+  const r = await resolveUrl(raw, knownUrl);
+  if (r.ok && r.dead && r.dead !== "generic")
+    return { bad: { ok: false, dead: r.dead, reason:
+      r.dead === "notfound" ? "그 주소에 페이지가 없습니다. 주소를 다시 확인해 주세요."
+        : r.dead === "moved" ? "그 작품을 찾을 수 없습니다 — 주소가 대문으로 넘어갑니다."
+          : "그런 주소가 없습니다. 도메인을 다시 확인해 주세요." } };
+  if (!r.ok) return { bad: r };
+  return { r };
+}
+
 function upsertWork(userId: string, input: {
   platformId: string; seriesId: string; title: string; description: string | null; mediaType: string;
   listUrl: string; appUrl: string | null; coverUrl: string | null; coverAspect: number | null;
@@ -747,27 +770,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       return true;
     }
 
-    const r = await resolveUrl(String(b.url ?? ""), knownUrl);
-
-    /* **없는 페이지는 담지 않는다.** 여기서 막는 것은 「없다고 확신할 수 있는 것」뿐이다 —
-       그쪽이 404 라 했거나, 깊은 주소를 물었는데 대문으로 튕겼거나(없는 작품 번호),
-       받아온 것이 그 작품 이야기가 아니라 대문 정보이거나.
-
-       못 읽은 것(403·시간 초과)은 막지 않는다. 사람이 눈으로 보고 온 페이지를 우리가
-       못 읽었다고 거절하면 안 된다 — CGV 가 그렇다. 그쪽은 화면에서 경고만 한다. */
-    /* **generic 은 막지 않는다.** 그건 「없다」가 아니라 「우리가 못 읽었다」이다 —
-       카카오페이지는 화면을 브라우저에서 그려서 어느 작품 주소든 같은 대문 태그를 주고,
-       네이버 지도도 그렇다. 멀쩡한 페이지라 사람이 제목을 직접 적어 담으면 되는데,
-       여기서 막으면 그 플랫폼이 통째로 담을 수 없게 된다(실제로 두 곳이 걸렸다). */
-    if (r.ok && r.dead && r.dead !== "generic") {
-      json(res, 400, { ok: false, dead: r.dead, reason:
-        r.dead === "notfound" ? "그 주소에 페이지가 없습니다. 주소를 다시 확인해 주세요."
-          : r.dead === "moved" ? "그 작품을 찾을 수 없습니다 — 주소가 대문으로 넘어갑니다."
-            : r.dead === "generic" ? "그 페이지에서 작품 정보를 찾지 못했습니다. 작품 페이지 주소가 맞나요?"
-            : "그런 주소가 없습니다. 도메인을 다시 확인해 주세요." });
-      return true;
-    }
-    if (!r.ok) { json(res, 400, r); return true; }
+    const got = await readUrl(String(b.url ?? ""));
+    if ("bad" in got) { json(res, 400, got.bad); return true; }
+    const r = got.r;
     const title = String(b.title ?? r.title ?? "").trim();
     if (!title) { json(res, 400, { ok: false, reason: "제목이 필요합니다." }); return true; }
     const platformId = applyMerge(user.id, r.platform.id);
@@ -943,6 +948,50 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       const b = await readJson(req);
       const w = getWork(user.id, id);
       if (!w) { json(res, 404, { ok: false, reason: "없는 작품입니다." }); return true; }
+
+      /* **주소를 붙이는 일은 옮겨 다는 일이다.**
+
+         주소 없이 담아 둔 항목(개봉을 기다리는 영화 같은 것)에 나중에 페이지가 생기면
+         그 주소를 붙인다. 한때 화면이 이 일을 「새로 담고 옛것을 지우는」 것으로 했는데,
+         그러면 무엇을 새 줄에 넘길지 매번 손으로 세어야 했다 — 실제로 **별점과 소개글이
+         빠져 있었고**, 보관해 둔 것이 목록으로 되살아났다. 넘길 것을 세는 방식은 값이
+         하나 늘 때마다 조용히 틀린다.
+
+         옮겨 달면 셀 것이 없다. 이 줄은 그대로 두고 **가리키는 곳만 바꾼다** — 별점 ·
+         본 횟수 · 담은 때 · 상태 · 폴더 · 일정 · 표지가 다 제자리에 남는다.
+
+         **자리가 비어 있을 때만 옮긴다.** 그 주소를 이미 들고 있으면 한 사람에게 같은
+         작품이 두 줄이 된다(idx_work_kept). 표가 거절하기 전에 뜻이 담긴 답을 준다. */
+      if (typeof b.url === "string" && b.url.trim()) {
+        const got = await readUrl(b.url.trim());
+        if ("bad" in got) { json(res, 400, got.bad); return true; }
+        const r = got.r;
+        const platformId = applyMerge(user.id, r.platform.id);
+        const urlId = findOrMakeUrl({
+          platformId, seriesId: r.seriesId, listUrl: r.listUrl, appUrl: r.appUrl,
+          mediaType: r.mediaType, title: String(b.title ?? r.title ?? "").trim() || w.title,
+          description: r.description,
+          coverUrl: r.coverUrl, coverAspect: r.coverAspect, episode: r.episode,
+        });
+        if (urlId !== w.urlId) {
+          const taken = db.prepare(`SELECT state FROM work
+              WHERE user_id = ? AND url_id = ? AND id <> ? AND state <> 'dropped'`)
+            .get(user.id, urlId, id) as { state: string } | undefined;
+          if (taken) {
+            json(res, 409, { ok: false, reason: taken.state === "watched"
+              ? "그 주소는 이미 보관에 있는 작품입니다." : "그 주소는 이미 목록에 있는 작품입니다." });
+            return true;
+          }
+          const old = w.urlId;
+          db.prepare("UPDATE work SET url_id = ?, platform_id = ? WHERE id = ?")
+            .run(urlId, platformId, id);
+          /* 주소 없이 담은 줄은 저 혼자 쓰던 공용 줄을 남긴다(seriesId 를 그때 새로
+             지었으므로 남이 쓸 일이 없다). 아무도 안 가리키면 거둔다 — 안 그러면
+             「직접 입력」 자국이 표에 쌓이기만 한다. */
+          const still = db.prepare("SELECT 1 FROM work WHERE url_id = ? LIMIT 1").get(old);
+          if (!still) db.prepare("DELETE FROM url WHERE id = ?").run(old);
+        }
+      }
       if (b.schedule) {
         // 일정을 새로 정하면 그 시점부터 적용된다 — 과거 요일까지 소급하지 않는다
         db.prepare(`UPDATE work SET sched_mode=?, sched_days=?, sched_next=?,

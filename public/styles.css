@@ -1604,8 +1604,15 @@
     html.locked body { position: fixed; left: 0; right: 0; width: 100%; }
     /* 문서를 고정하는 동안에는 sticky 가 붙을 곳이 없어진다 — 상단바가 제 문서 자리
        (스크롤한 만큼 위)로 돌아가 화면 밖으로 나가고, 시트 위에 남겨 둔 자리에는
-       상단바 대신 페이지 내용이 비쳤다. 그동안만 화면에 직접 붙여 둔다. */
+       상단바 대신 페이지 내용이 비쳤다. 그동안만 화면에 직접 붙여 둔다.
+
+       **빠진 자리는 남겨 둔다.** sticky 는 제 자리를 차지하지만 fixed 는 흐름에서
+       빠진다 — 그대로 두면 아래 내용이 상단바 높이만큼 통째로 올라와 첫 줄이 상단바
+       밑에 깔린다. 폴더 탭의 「누구의 폴더」 줄과 캘린더 탭의 주간↔월간 줄이 시트를
+       열 때마다 사라져 보이던 것이 이것이다(윗변 82px → 16px, 상단바 아랫변 66px).
+       재어 둔 높이(--bar-h)로 그만큼을 되돌린다. */
     html.locked .app-bar { position: fixed; top: 0; left: 0; right: 0; }
+    html.locked .screen { margin-top: var(--bar-h, 62px); }
 
     /* 시트는 화면 맨 아래에 붙는다 — 홈 인디케이터에 마지막 줄이 가리지 않게 띄운다 */
     .sheet-body { padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }

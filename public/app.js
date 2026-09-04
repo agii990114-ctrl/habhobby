@@ -4804,10 +4804,16 @@ function openAdd(prefill, fromShare) {
     draft.url = input.value;
   };
 
+  /* **치던 제목은 draft 가 들고 있는다.**
+
+     일정 단추(매주·매월…)를 누르면 이 미리보기를 통째로 다시 그린다. 제목 칸의 값을
+     resolved 에서만 읽던 때는, 그때 사람이 고쳐 쓴 제목이 사이트가 준 제목으로 되돌아갔다 —
+     제목을 먼저 고치고 일정을 정하는 것이 오히려 흔한 차례라 자주 걸렸다. */
   const paint = () => {
     if (!resolved) { preview.innerHTML = ""; return; }
     if (!resolved.ok) { preview.innerHTML = `<div class="note">${esc(resolved.reason)}</div>`; return; }
     const auto = resolved.origin === "og";
+    const title = draft.title ?? resolved.title;
     preview.innerHTML = `
       ${resolved.note ? `<div class="note sep">${esc(resolved.note)}</div>` : ""}
       <div class="sep">
@@ -4816,11 +4822,12 @@ function openAdd(prefill, fromShare) {
         <label for="in-title">제목
           <span style="text-transform:none;letter-spacing:0">— <span style="color:var(--${auto ? "good" : "warn"})">${auto ? "자동" : "직접 입력"}</span> · ${esc(resolved.originLabel)}</span>
         </label>
-        <input id="in-title" value="${esc(resolved.title)}" placeholder="작품 제목을 입력하세요"></div></div>
+        <input id="in-title" value="${esc(title)}" placeholder="작품 제목을 입력하세요"></div></div>
       ${schedHtml(draft.schedule, "어느 플랫폼도 공개하지 않아 직접 고릅니다. 한 번만 정하면 됩니다",
         { value: draft.color, fallback: resolved.platform.color })}
       ${pickerHtml(draft.folders)}
       ${actionRow("do-add", "목록에 등록")}`;
+    preview.querySelector("#in-title").addEventListener("input", e => { draft.title = e.target.value; });
     wireSched(preview, draft.schedule, redraw => { if (redraw) paint(); });
     wireColorPicker(preview, draft, resolved.platform.color);
     /* 새 폴더를 만들고 돌아오면 이 시트가 덮여 있다 — 통째로 다시 그린 뒤 미리보기를 채운다.
@@ -4848,7 +4855,9 @@ function openAdd(prefill, fromShare) {
     const mine = ++seq;
     preview.innerHTML = `<div class="note">확인 중…</div>`;
     api("POST", "/api/resolve", { url: value })
-      .then(r => { if (mine !== seq) return; resolved = r; Object.assign(draft.schedule, r.schedule); paint(); })
+      // 새 주소를 확인했으면 들고 있던 제목은 버린다 — 다른 작품의 제목이다
+      .then(r => { if (mine !== seq) return; resolved = r; draft.title = null;
+        Object.assign(draft.schedule, r.schedule); paint(); })
       .catch(err => { if (mine !== seq) return; resolved = { ok: false, reason: err.message }; paint(); });
   };
 
@@ -4873,17 +4882,23 @@ function openPlatformEdit(platformId) {
   // fg 가 null 이면 "배경에 맞춰 알아서" 라는 뜻이다
   const draft = { name: p.overridden ? p.name : "", initial: p.initial, color: p.color,
                   fg: p.fgSet ? p.fg : null };
+  /* **사이트가 제 표를 밝혔으면 마크는 물을 것이 없다.** 그 자리에 그림이 서므로 글자를
+     정해 봐야 보이지 않고, 정한 순간 그림이 사라진다(platformView 가 손수 정한 마크를
+     위에 둔다). 칸을 아예 세우지 않아 「고쳤는데 아무 일도 안 일어나는」 자리를 없앤다. */
+  const hasMark = !p.icon;
   // 이미 손봐 둔 플랫폼이면 마크도 그대로 둔다. 처음 이름 짓는 중이라면 이름을 따라간다.
   let markEdited = p.overridden;
   const paint = () => {
     const initEl = sheet.querySelector("#dom-init");
     draft.name = sheet.querySelector("#dom-name").value;
     // 이름만 지어놓고 마크가 "?"로 남는 일이 없게 첫 글자를 따라 붙인다
-    if (!markEdited) initEl.value = [...draft.name.trim()][0] ?? p.baseInitial;
-    draft.initial = initEl.value.trim() || p.baseInitial;
+    if (initEl) {
+      if (!markEdited) initEl.value = [...draft.name.trim()][0] ?? p.baseInitial;
+      draft.initial = initEl.value.trim() || p.baseInitial;
+    }
     const mark = sheet.querySelector(".dom-preview .pmark");
     const c = draft.color ?? p.baseColor;
-    mark.textContent = draft.initial;
+    if (!p.icon) mark.textContent = draft.initial;
     mark.style.background = c;
     mark.style.color = draft.fg ?? readableOn(c);
     for (const b of sheet.querySelectorAll("[data-fg] button"))
@@ -4936,12 +4951,19 @@ function openPlatformEdit(platformId) {
       ? `${esc(p.host)}의 작품을 한 묶음으로 보여줍니다.`
       : `기본값은 ${esc(p.baseName)} · ${esc(p.baseInitial)} 입니다.` })}
     <div class="dom-preview">
-      <span class="pmark" style="background:${draft.color};color:${draft.fg ?? readableOn(draft.color)}">${esc(draft.initial)}</span>
+      ${/* 미리보기는 **목록에 설 모양 그대로**여야 한다 — 여기서만 글자가 서면 저장한 뒤에야
+           실제 모양을 보게 된다. 표가 있으면 그림, 없으면 글자(markHtml 과 같은 규칙). */""}
+      <span class="pmark${p.icon ? " has-icon" : ""}" style="background:${draft.color};color:${draft.fg ?? readableOn(draft.color)}">${
+        p.icon ? `<img src="${esc(p.icon)}" alt="" loading="lazy"
+          onerror="this.remove();this.parentElement.classList.remove('has-icon')">` : ""}${esc(draft.initial)}</span>
       <b>${esc(draft.name || p.baseName)}</b>${p.isDomain ? `<em>${esc(p.host)}</em>` : ""}</div>
     <div class="field"><label for="dom-name">이름</label>
       <input id="dom-name" value="${esc(draft.name)}" placeholder="${esc(p.baseName)}" maxlength="20"></div>
-    <div class="field"><label for="dom-init">마크 <span style="text-transform:none;letter-spacing:0">— 목록에 붙는 한두 글자</span></label>
-      <input id="dom-init" value="${esc(draft.initial)}" maxlength="2" style="width:80px"></div>
+    ${hasMark
+      ? `<div class="field"><label for="dom-init">마크 <span style="text-transform:none;letter-spacing:0">— 목록에 붙는 한두 글자</span></label>
+        <input id="dom-init" value="${esc(draft.initial)}" maxlength="2" style="width:80px"></div>`
+      : `<div class="rest" style="text-align:left;padding:0 2px 10px">
+          이 사이트가 밝힌 표를 마크로 씁니다.</div>`}
     ${colorPickerHtml(draft.color === p.baseColor ? null : draft.color, p.baseColor, "색", "기본색")}
     <div class="field"><label>마크 글자색</label>
       <div class="pickers" data-fg>
@@ -4971,14 +4993,34 @@ function openPlatformEdit(platformId) {
     paint();
   });
   sheet.querySelector("#dom-name").addEventListener("input", paint);
-  sheet.querySelector("#dom-init").addEventListener("input", () => { markEdited = true; paint(); });
+  sheet.querySelector("#dom-init")?.addEventListener("input", () => { markEdited = true; paint(); });
   // 도메인 색은 비울 수 없다 — "기본색" 은 플랫폼 기본값으로 되돌린다
   wireColorPicker(sheet, draft, p.baseColor, { nullable: false, onChange: paint });
   wireHead({ save: () => saveDomain(), cancel: () => { closeSheet(); render(); } });
+  /* **아무것도 안 바꾸고 저장하면 아무 일도 없어야 한다.**
+
+     한때 저장이 늘 덮어쓰기를 적었다. 창을 열어 보기만 하고 저장을 눌러도 「손수 정한
+     구간」이 되어, 사이트가 이름을 고쳐도 안 따라가고 사이트 표도 사라졌다 —
+     platformView 가 손수 정한 값을 위에 두기 때문이다.
+
+     바탕과 견줘 **다른 것이 하나도 없으면 덮어쓰기를 지운다.** 「기본값으로」를 따로
+     누르지 않아도 제자리로 돌아온다. */
   const saveDomain = guard(async () => {
-    await api("PUT", `/api/overrides/${encodeURIComponent(platformId)}`,
-      { name: draft.name.trim() || p.baseName, initial: draft.initial,
-        color: draft.color ?? p.baseColor, fg: draft.fg });
+    const name = draft.name.trim();
+    const color = draft.color ?? p.baseColor;
+    const same = !name && color === p.baseColor && !draft.fg
+      && (!hasMark || draft.initial === p.baseInitial);
+    const url = `/api/overrides/${encodeURIComponent(platformId)}`;
+    if (same) {
+      if (p.overridden) await api("DELETE", url);
+    } else {
+      /* 표가 있으면 마크는 **아예 안 실어 보낸다** — 값이 실리는 순간 그것이 그림을 이겨
+         표가 사라진다. 이름·색만 손수 정한 구간으로 남는다. */
+      await api("PUT", url, {
+        name: name || p.baseName, color, fg: draft.fg,
+        ...(hasMark ? { initial: draft.initial } : {}),
+      });
+    }
     await reload(); render(); closeSheet();
   });
   sheet.querySelector("[data-twin]").addEventListener("click", guard(async e => {

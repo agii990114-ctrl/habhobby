@@ -4832,7 +4832,9 @@ function openAdd(prefill, fromShare) {
     if (!resolved.ok) { preview.innerHTML = `<div class="note">${esc(resolved.reason)}</div>`; return; }
     const auto = resolved.origin === "og";
     const title = draft.title ?? resolved.title;
+    const had = resolved.mine;              // 이미 담아 둔 그 작품 (없으면 null)
     preview.innerHTML = `
+      ${had ? `<div class="note sep">이미 담아 둔 작품입니다 — 아래 값으로 새로 적습니다</div>` : ""}
       ${resolved.note ? `<div class="note sep">${esc(resolved.note)}</div>` : ""}
       <div class="sep">
       <dl class="kv"><dt>플랫폼</dt><dd>${esc(resolved.platform.name)} · ${MEDIA[resolved.mediaType] ?? "링크"}</dd></dl>
@@ -4844,7 +4846,7 @@ function openAdd(prefill, fromShare) {
       ${schedHtml(draft.schedule, "어느 플랫폼도 공개하지 않아 직접 고릅니다. 한 번만 정하면 됩니다",
         { value: draft.color, fallback: resolved.platform.color })}
       ${pickerHtml(draft.folders)}
-      ${actionRow("do-add", "목록에 등록")}`;
+      ${actionRow("do-add", had ? "설정 새로 적기" : "목록에 등록")}`;
     preview.querySelector("#in-title").addEventListener("input", e => { draft.title = e.target.value; });
     wireSched(preview, draft.schedule, redraw => { if (redraw) paint(); });
     wireColorPicker(preview, draft, resolved.platform.color);
@@ -4856,14 +4858,16 @@ function openAdd(prefill, fromShare) {
       const title = titleEl.value.trim();
       if (!title) { titleEl.focus(); return; }
       const filed = !fromShare || draft.folders.length > 0;
-      await api("POST", "/api/works", {
+      const r = await api("POST", "/api/works", {
         url: input.value, title, schedule: draft.schedule,
         folders: draft.folders, color: draft.color, filed,
       });
       await reload(); tab = "home"; openFolderId = null; render(); closeSheet();
       fillSiteNames();          // 새 도메인이면 이름을 곧바로 받아 온다
-      toast(filed ? `«${title}» 목록에 담았습니다`
-                  : `«${title}» 담았습니다 · 새 콘텐츠에서 정리할 수 있어요`);
+      // 만든 것과 고친 것은 다른 일이다 — 「담았습니다」가 둘 다를 뜻하면 뭘 했는지 모른다
+      toast(!r.made ? `«${title}» 설정을 새로 적었습니다`
+            : filed ? `«${title}» 목록에 담았습니다`
+                    : `«${title}» 담았습니다 · 새 콘텐츠에서 정리할 수 있어요`);
     });
   };
 
@@ -4874,8 +4878,26 @@ function openAdd(prefill, fromShare) {
     preview.innerHTML = `<div class="note">확인 중…</div>`;
     api("POST", "/api/resolve", { url: value })
       // 새 주소를 확인했으면 들고 있던 제목은 버린다 — 다른 작품의 제목이다
-      .then(r => { if (mine !== seq) return; resolved = r; draft.title = null;
-        Object.assign(draft.schedule, r.schedule); paint(); })
+      .then(r => {
+        if (mine !== seq) return;
+        resolved = r; draft.title = null;
+        Object.assign(draft.schedule, r.schedule);
+        /* **이미 담아 둔 작품이면 지금 값을 띄운다.**
+
+           띄우지 않으면 사이트가 준 제목과 빈 일정이 서고, 「담기」가 그걸 그대로 적는다 —
+           고쳐 둔 제목이 말없이 사라진다. 화면에 뜬 값이 곧 저장될 값이어야 한다.
+
+           **못 담은 것에는 손대지 않는다.** 폴더를 골라 둔 뒤 주소를 한 글자 고치면 다시
+           찾아보는데, 그때 골라 둔 것까지 비우면 사람이 한 일이 사라진다. */
+        if (r.mine) {
+          draft.title = r.mine.title;
+          Object.assign(draft.schedule, r.mine.schedule);
+          draft.color = r.mine.color;
+          draft.folders.length = 0;
+          draft.folders.push(...r.mine.folders);
+        }
+        paint();
+      })
       .catch(err => { if (mine !== seq) return; resolved = { ok: false, reason: err.message }; paint(); });
   };
 

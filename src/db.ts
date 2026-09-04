@@ -926,6 +926,21 @@ export function getWork(userId: string, id: string): Work | null {
   return toWork(r, fs.map(f => f.folder_id));
 }
 
+/** 이미 내 목록에 **살아 있는** 같은 작품 — 없으면 null.
+
+    upsertWork 가 「이미 담았나」를 가리는 것과 **같은 길**로 찾는다: url 을
+    구간+시리즈로 집고, 그 줄을 내가 갖고 있는지 본다. 등록 화면이 이것을 미리 물어
+    지금 값을 띄우므로, 짐작이 서로 어긋나면 화면과 저장이 갈린다 — 그래서 한 길이어야 한다.
+
+    살아 있는 것만 본다. 휴지통이나 감상 완료에 있는 것은 「없는」 것이다 —
+    담기가 그것을 되살리지 않고 새로 만드는 것과 같은 규칙이다. */
+export function findActiveWork(userId: string, platformId: string, seriesId: string): Work | null {
+  const r = db.prepare(`SELECT w.id FROM work w JOIN url u ON u.id = w.url_id
+    WHERE w.user_id = ? AND u.platform_id = ? AND u.series_id = ? AND w.state = 'active'`)
+    .get(userId, platformId, seriesId) as { id: string } | undefined;
+  return r ? getWork(userId, r.id) : null;
+}
+
 /** 표지 주소가 **시한부**인가 — 서명과 만료가 박혀 있는 것들.
 
     인스타그램(`_nc_*`·`oe`·`oh`), CloudFront(`Expires`·`Signature`·`Key-Pair-Id`),

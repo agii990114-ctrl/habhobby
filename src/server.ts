@@ -15,7 +15,8 @@ import {
   getFolder, createFolder, canCopy, canMirror, canEdit, seenByMe, markSeen,
   folderInvites, acceptFolder, declineFolder, leaveFolder,
   noticeBreak, folderNotices, readNotices, sweepNotices, inviteToFolder, unlinkFromFolder,
-  cleanName, setDisplayName, starFolder, findOrMakeUrl, knownUrl, staleCovers, refreshCover, markChecked,
+  cleanName, setDisplayName, starFolder, findOrMakeUrl, findActiveWork, knownUrl,
+  staleCovers, refreshCover, markChecked,
   type Work, type User, type ShareMode, type TakeMode,
 } from "./db.ts";
 import {
@@ -373,7 +374,7 @@ function upsertWork(userId: string, input: {
   episode: string | null;
   schedule: { mode: string; days: number[]; next: number | null; source: string };
   folders: string[]; filed: boolean; color?: string | null;
-}): Work {
+}): { work: Work; made: boolean } {
   const now = Date.now();
   /* **살아 있는 것만 본다.** 휴지통에 같은 작품이 있어도 새로 만든다 — 내려둔 것과
      새로 담는 것은 별개다. 예전에는 여기서 찾아내 state='active' 로 되살렸는데,
@@ -388,35 +389,69 @@ function upsertWork(userId: string, input: {
   });
 
   const existing = db.prepare(
-    "SELECT id FROM work WHERE user_id = ? AND url_id = ? AND state = 'active'")
-    .get(userId, urlId) as { id: string } | undefined;
+    `SELECT id, sched_mode, sched_days, sched_next, sched_from
+       FROM work WHERE user_id = ? AND url_id = ? AND state = 'active'`)
+    .get(userId, urlId) as {
+      id: string; sched_mode: string; sched_days: string;
+      sched_next: number | null; sched_from: number | null;
+    } | undefined;
 
   if (existing) {
-    /* 이미 담아 둔 것은 **제목과 표지를 건드리지 않는다.** 그건 내가 고쳐 뒀을 수 있는
-       값이고, 공용 줄에 원본이 남아 있어 여기서 다시 적을 이유가 없다. 예전에는
-       title 을 무조건 덮어써서 고쳐 둔 제목이 날아갔다. 열어 본 때만 새로 적는다. */
-    db.prepare("UPDATE work SET last_at = ? WHERE id = ?").run(now, existing.id);
-    if (input.folders.length) {
-      const cur = getWork(userId, existing.id)!.folders;
-      setWorkFolders(userId, existing.id, [...new Set([...cur, ...input.folders])]);
-    }
-    return getWork(userId, existing.id)!;
+    /* **이미 담아 둔 것이면 적어 온 설정을 그대로 새로 적는다.**
+
+       한때 여기서 열어 본 때와 폴더만 건드렸다. 제목을 지키려던 것이었다 — 사이트가 준
+       제목으로 무조건 덮어써서 고쳐 둔 제목이 날아간 적이 있었다. 그런데 그 방패가
+       **일정·색까지 함께 막고 있었다**: 같은 주소를 다시 담으며 일정을 고치고 색을 골라
+       「담기」를 눌러도 아무 일도 일어나지 않았다. 화면은 「담았습니다」라 하고 값은 그대로였다.
+
+       고칠 곳은 여기가 아니라 **화면**이었다. 등록 시트가 이미 담아 둔 작품이면 지금
+       값을 띄우므로(resolve 의 mine), 이제 화면에 뜬 값이 곧 저장될 값이다 — 덮어쓰기는
+       사고가 아니라 사람이 보고 누른 결과다.
+
+       제목만은 두 층이다. 공용 줄과 **같으면 덮어쓰기를 비운다** — 값만 같고 덮어쓰기가
+       남아 있으면 나중에 공용 제목이 나아져도 이 사람만 옛것을 본다(PATCH 와 같은 규칙). */
+    const base = db.prepare("SELECT title FROM url WHERE id = ?")
+      .get(urlId) as { title: string };
+    const days = JSON.stringify(input.schedule.days);
+    /* 일정이 **실제로 바뀐 때만** 시작점을 새로 찍는다. 안 바꾸고 폴더만 손보려던 사람의
+       "이 일정이 언제부터였나" 를 지운다면 캘린더의 지난 자국이 함께 지워진다. */
+    const moved = existing.sched_mode !== input.schedule.mode
+      || existing.sched_days !== days
+      || (existing.sched_next ?? null) !== (input.schedule.next ?? null);
+    db.prepare(`UPDATE work SET last_at = ?, title = ?, color = ?, filed = MAX(filed, ?),
+        sched_mode = ?, sched_days = ?, sched_next = ?, sched_source = ?, sched_from = ?
+      WHERE id = ?`)
+      .run(now, base.title === input.title ? null : input.title, input.color ?? null,
+        input.filed || input.folders.length ? 1 : 0,
+        input.schedule.mode, days, input.schedule.next, input.schedule.source,
+        moved ? now : existing.sched_from ?? now, existing.id);
+    /* 폴더는 **보이는 대로** 맞춘다. 한때 합집합이었는데, 시트가 지금 폴더를 띄우게 된
+       뒤로는 체크를 풀어도 그대로 남는 자리가 된다 — 보고 누른 것과 다른 결과다. */
+    setWorkFolders(userId, existing.id, input.folders);
+    return { work: getWork(userId, existing.id)!, made: false };
   }
 
   /* 내 줄에는 **덮어쓸 값을 비워 둔다**(title·cover 는 NULL). 담는 순간에는 고친 것이
      없으니 공용 줄 것을 그대로 보게 된다. platform_id 만은 제 값이 필요하다 — 그건
-     덮어쓰기가 아니라 내 분류라서 「도메인 떼어내기」가 여기를 고친다. */
+     덮어쓰기가 아니라 내 분류라서 「도메인 떼어내기」가 여기를 고친다.
+
+     **적어 온 제목이 공용 줄과 다르면 그때는 비워 두지 않는다.** 남이 먼저 담아 둔 주소면
+     공용 줄에 이미 제목이 있다. 그 위에 내가 고쳐 적은 것을 버리면, 「첫 제목」이라 적고
+     담았는데 목록에는 남의 제목이 서 있다. 「고친 것이 없으니 비워 둔다」가 맞으려면
+     고친 것이 있을 때는 적어야 한다 — 같으면 여전히 비운다(그래야 공용 줄이 나아질 때 따라간다). */
   const id = newId("w");
+  const base = db.prepare("SELECT title FROM url WHERE id = ?").get(urlId) as { title: string };
   db.prepare(`INSERT INTO work
-      (id, user_id, url_id, platform_id, state, filed, visits, last_at, added_at,
+      (id, user_id, url_id, platform_id, title, state, filed, visits, last_at, added_at,
        sched_mode, sched_days, sched_next, sched_source, sched_from, color)
-    VALUES (?,?,?,?, 'active', ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    VALUES (?,?,?,?,?, 'active', ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(id, userId, urlId, input.platformId,
+      base.title === input.title ? null : input.title,
       input.filed || input.folders.length ? 1 : 0, now, now,
       input.schedule.mode, JSON.stringify(input.schedule.days),
       input.schedule.next, input.schedule.source, now, input.color ?? null);
   if (input.folders.length) setWorkFolders(userId, id, input.folders);
-  return getWork(userId, id)!;
+  return { work: getWork(userId, id)!, made: true };
 }
 
 /* ── 담아가기 ─────────────────────────────────────────────
@@ -650,7 +685,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
   if (p === "/api/resolve" && m === "POST") {
     const { url: target } = await readJson(req);
     const r = await resolveUrl(String(target ?? ""), knownUrl);
-    json(res, r.ok ? 200 : 400, r.ok ? { ...r, originLabel: originLabel(r) } : r);
+    /* **이미 담아 둔 작품이면 그 줄을 함께 준다.** 등록 화면이 지금 값을 띄우려면 필요하고,
+       열쇠(구간+시리즈)는 담을 때 쓰는 것과 같아야 하므로 여기서 답한다 — 화면이 짐작하면
+       구간 합치기(applyMerge)를 지나온 뒤의 id 를 모른다. */
+    const mine = r.ok
+      ? findActiveWork(user.id, applyMerge(user.id, r.platform.id), r.seriesId) : null;
+    json(res, r.ok ? 200 : 400, r.ok ? { ...r, originLabel: originLabel(r), mine } : r);
     return true;
   }
 
@@ -662,7 +702,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     if (!String(b.url ?? "").trim()) {
       const title = String(b.title ?? "").trim();
       if (!title) { json(res, 400, { ok: false, reason: "제목이 필요합니다." }); return true; }
-      const work = upsertWork(user.id, {
+      const { work } = upsertWork(user.id, {
         platformId: "note", seriesId: newId("n"), title, mediaType: "link",
         listUrl: "", appUrl: null, coverUrl: null, coverAspect: null, episode: null,
         schedule: normSchedule(b.schedule),
@@ -701,7 +741,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     const platformId = applyMerge(user.id, r.platform.id);
     const hex = (v: unknown) =>
       typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : null;
-    const work = upsertWork(user.id, {
+    const { work, made } = upsertWork(user.id, {
       platformId, seriesId: r.seriesId, title, mediaType: r.mediaType,
       listUrl: r.listUrl, appUrl: r.appUrl, coverUrl: r.coverUrl,
       coverAspect: r.coverAspect, episode: r.episode,
@@ -712,7 +752,8 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     /* 구간 이름은 여기서 정하지 않는다. 이 페이지가 밝힌 og:site_name 을 믿었더니
        교보문고 전자책 페이지가 "IMDb" 라고 답하는 일이 있었다 — 남의 메타 태그를 그대로
        베껴 둔 것이다. 사이트 이름은 대문에 물어보는 게 맞고, 그건 site-names 가 한다. */
-    json(res, 201, { ok: true, work });
+    // 만든 것과 고친 것은 다른 일이다 — 화면이 다른 말을 해야 한다
+    json(res, made ? 201 : 200, { ok: true, work, made });
     return true;
   }
 

@@ -33,7 +33,7 @@ let folderInvites = [];
 /* 끊겼다는 소식. 새로 고칠 때 함께 실려 온다 — 웹소켓을 붙들고 있을 만큼 급한 소식이
    아니고, 늘 이어 두면 그것대로 값이 든다. */
 let folderNotices = [];
-let tab = "cal", filter = "all", openFolderId = null;   // 들어오면 캘린더부터 보인다
+let tab = "all", filter = "all", openFolderId = null;   // 들어오면 전체부터 보인다
 /* 폴더 탭은 내 폴더 아니면 친구의 공개 폴더를 보여 준다.
    null 이면 내 것. 친구 것을 볼 때는 그 친구가 준 화면을 통째로 들고 있는다
    ({ id, name, folders, works, platforms }) — 내 자료와 섞이면 안 된다.
@@ -2313,9 +2313,13 @@ function readHash() {
     openFolderId = !arg ? null
       : arg === "_all" || arg === "_none" || folders.some(f => f.id === arg) ? arg : null;
   } else {
-    // 화면 이름은 전체·캘린더·페이지·폴더이지만 주소의 열쇠는 그대로 둔다 —
-    // 이미 저장해 둔 주소가 깨지지 않게. 아무것도 없으면 캘린더로 연다.
-    tab = t === "home" ? "home" : t === "all" ? "all" : "cal";
+    /* 화면 이름은 전체·캘린더·페이지·폴더이지만 주소의 열쇠는 그대로 둔다 —
+       이미 저장해 둔 주소가 깨지지 않게. 옛 주소(#cal · #cal/week · #lib)는 위 갈래가
+       이미 잡았으므로 여기 올 일이 없다.
+
+       **아무것도 없으면 전체로 연다** — 탭줄에서 맨 앞에 선 것과 처음 열리는 것이
+       같아야 「왜 두 번째가 켜져 있지」를 묻지 않는다. */
+    tab = t === "home" ? "home" : "all";
   }
 }
 

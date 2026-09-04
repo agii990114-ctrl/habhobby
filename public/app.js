@@ -581,31 +581,18 @@ function schedStart(w) {
   return d.getTime();
 }
 
-/** 이 작품이 이 날에 놓이는가. 캘린더의 모든 칸이 이 하나를 거친다. */
-/** 캘린더에 놓이는 마지막 날.
+/** 이 작품이 이 날에 놓이는가. 캘린더의 모든 칸이 이 하나를 거친다.
 
-    감상 완료는 "언제부터 언제까지 보던 작품" 이라 그 기간을 기록으로 남긴다.
-    휴지통은 관심이 없어진 것이라 남길 이유가 없다 — 아예 놓지 않는다. */
-function schedEnd(w) {
-  if (w.state === "active") return Infinity;
-  if (w.state === "dropped") return -Infinity;
-  const t = w.stateAt ?? w.lastAt;
-  const d = new Date(t); d.setHours(23, 59, 59, 999);   // 그날까지는 보고 있었다
-  return d.getTime();
-}
-
+    **무엇이 놓일 수 있는지는 여기서 묻지 않는다.** 그건 부르는 쪽이 이미 골라 두었다
+    (updatesOn 의 listedWorks). 한때 여기에 「내려 둔 뒤로는 놓지 않는다」는 끊는 날이
+    따로 있었는데, 목록과 두 곳에서 같은 것을 정하니 한쪽만 고쳐졌다 — 캘린더를 꺼도
+    내린 그날은 남는 자리가 그래서 생겼다. 이 함수는 이제 **일정만** 본다. */
 function occursOn(w, date) {
   const s = w.schedule;
   // 반복 일정은 정하기 전 과거로 소급되지 않는다. 수요일 연재를 오늘 등록했다면
   // 지난 수요일들에 놓을 근거가 없다 — 그때는 목록에 있지도 않았다.
   if (["weekly", "biweekly", "monthly", "monthly-dow"].includes(s.mode) && date.getTime() < schedStart(w))
     return false;
-  /* 감상 완료·휴지통으로 내린 뒤로는 놓지 않는다. 그 전까지는 기록으로 남는다.
-
-     **캘린더를 켜 두었으면 감상 완료는 계속 놓는다.** 「이 탭에도 세운다」는 말이
-     지난 자국만 남기는 것이면 켠 보람이 없다 — 앞으로의 연재 날에도 서야 한다.
-     휴지통은 여기서 갈린다: 그건 켜는 자리가 없으므로 늘 끊긴다. */
-  if (date.getTime() > schedEnd(w) && !(w.state === "watched" && showsDone("cal"))) return false;
 
   if (s.mode === "weekly") return s.days.includes(date.getDay());
   if (s.mode === "biweekly") {
@@ -1047,12 +1034,20 @@ function rowHtml(w, sub, mini) {
   </button>`;
 }
 
-/* 격자에는 내려둔 작품도 놓는다 — "언제부터 언제까지 보던 작품"이 기록으로 남는다.
-   격자 아래 단락들은 앞으로 볼 것을 위한 자리라 활성 작품만 다룬다. */
+/** 이 날의 칸에 놓이는 작품들.
+
+    **칸도 아래 단락과 같은 목록을 본다**(listedWorks). 한때 칸만 works 를 통째로 보면서
+    내려 둔 작품을 「언제부터 언제까지 보던 작품」의 기록으로 놓았는데, 그러면 감상 완료를
+    캘린더에서 꺼 두어도 내린 그날 칸에는 그대로 남았다 — 껐는데 보이는 자리가 생긴다.
+    기록은 감상 완료 보관함이 이미 들고 있고, 켜면 앞으로의 날에도 선다.
+
+    남이 함께 쓰는 폴더에 넣어 둔 작품(folderOnly)도 이제 빠진다. 그 사람이 정한 일정이
+    내 캘린더를 채우면 내가 보기로 한 것과 뒤섞인다 — 원래 정해 둔 규칙인데 이 칸만
+    비켜 가고 있었다. */
 function updatesOn(date) {
   /* **최근 실행 순.** 한때 많이 본 순이었는데, 그러면 새로 담은 작품이 늘 맨 뒤로 가서
      정작 챙겨야 할 것이 안 보였다. 담을 때 lastAt 을 지금으로 두므로 새것이 맨 앞에 선다. */
-  return byRecent(works.filter(w => occursOn(w, date)));
+  return byRecent(listedWorks("cal").filter(w => occursOn(w, date)));
 }
 
 /* 달력 한 칸에 매주·격주·매월·날짜 지정이 뒤섞여 있으면 무엇이 오늘만의 일인지 안 보인다.

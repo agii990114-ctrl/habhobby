@@ -2286,8 +2286,12 @@ function render() {
     workPickAt("home", home);
     /* 페이지 탭은 창이 아니라 화면이라 머리줄이 없다 — 「선택」은 제목줄 오른쪽 끝에
        선다. 창에서 머리줄 오른쪽에 서는 것과 같은 자리다. */
+    /* 「선택」 왼쪽에 **구간 색인**을 함께 세운다. 둘 다 이 화면을 다루는 길이라 한 통에
+       모아 오른쪽 끝에 붙인다 — 「선택」은 끝자리를 지킨다(창의 머리줄과 같은 자리다). */
     html += `<div class="screen-title with-act">최근 본 순 · 플랫폼별
-      ${home.length && !workSel ? `<button class="mini-btn" data-wsel>선택</button>` : ""}</div>`;
+      ${home.length && !workSel ? `<span class="acts">
+        <button class="mini-btn" data-plat-index>${icon("grid")} 도메인</button>
+        <button class="mini-btn" data-wsel>선택</button></span>` : ""}</div>`;
     html += `<div data-wbar>${workBarHtml(home.length)}</div>`;
     html += railsHtml(home);
   } else if (viewing) {
@@ -3094,10 +3098,13 @@ function openWorkSettings(id, opts) {
       </div></div>
     ${schedHtml(draft.schedule, null, { value: draft.color, fallback: platformOf(w.platformId).color })}
     ${pickerHtml(draft.folders)}
+    ${/* 휴지통은 **되돌리기 쉬운 일이 아니다** — 빨강으로 갈라 세운다. 옆의 「감상 완료」와
+         같은 갈래로 보이면 안 된다: 하나는 다 봤다는 표시고, 하나는 목록에서 치우는 일이다.
+         작품 창에서는 이미 그렇게 서 있었는데 이 창만 검게 남아 있었다. */""}
     <div class="field"><label>목록에서 내리기</label>
       <div class="link-row">
         <button class="btn" data-act="watched">${icon("check")} 시리즈 감상 완료</button>
-        <button class="btn" data-act="dropped">${icon("trash")} 휴지통</button>
+        <button class="btn bad" data-act="dropped">${icon("trash")} 휴지통</button>
       </div>
     </div>
     <div class="link-row wide-only" style="margin-top:4px">
@@ -4313,12 +4320,14 @@ function restoreFind(text) {
 /* 한 구간의 작품을 세로로 전부 펼친다. 홈의 가로 슬라이드는 쌓이면 끝을 못 본다. */
 let platQuery = "";
 
-function openPlatformList(pid) {
+/** 한 구간의 작품을 다 펼친다.
+    @param back 돌아갈 곳을 여는 함수. 색인에서 들어왔으면 색인으로 돌아간다. */
+function openPlatformList(pid, back) {
   platQuery = "";
-  drawPlatformList(pid);
+  drawPlatformList(pid, back);
 }
 
-function drawPlatformList(pid) {
+function drawPlatformList(pid, back) {
   const p = platformOf(pid);
   const all = byRecent(activeWorks().filter(w => w.platformId === pid));
 
@@ -4340,11 +4349,19 @@ function drawPlatformList(pid) {
       + workGridHtml(hits, "");
   };
 
+  /* **다시 그리기 전에 내가 넣어 둔 되돌아갈 자리를 뺀다.**
+
+     이 화면은 고를 때마다 통째로 다시 그린다. openSheet 는 over 를 받을 때마다 하나씩
+     쌓으므로, 빼지 않으면 세 번 고르고 나서 돌아가려면 ‹ 를 세 번 눌러야 한다.
+     쌓인 것이 모두 같은 곳이라 눈에는 아무 일도 안 일어나는 것처럼 보인다. */
+  const again = () => { sheetBack.pop(); drawPlatformList(pid, back); };
+
   workPickAt("plat:" + pid, shownNow());           // 다른 구간으로 넘어가면 고른 것은 버린다
   openSheet(`
     ${all.length > 7 ? searchHtml("작품명으로 검색", platQuery) : ""}
     <div data-plat-body>${body()}</div>`,
-    { full: true, title: `${esc(p.name)}`, sub: `${all.length}편` });
+    { full: true, title: `${esc(p.name)}`, sub: `${all.length}편`,
+      back, over: back });
 
   const qEl = sheet.querySelector(".arch-q");
   if (qEl) qEl.addEventListener("input", () => {
@@ -4352,13 +4369,71 @@ function drawPlatformList(pid) {
     sheet.querySelector("[data-plat-body]").innerHTML = body();
   });
 
-  pickAct(shownNow().length, () => drawPlatformList(pid));
-  wireWorkPick(sheet.querySelector(".sheet-body"), () => drawPlatformList(pid));
+  pickAct(shownNow().length, again);
+  wireWorkPick(sheet.querySelector(".sheet-body"), again);
 
   sheet.querySelector(".sheet-body").addEventListener("click", e => {
     if (workSel) return;                 // 고르는 중에는 열어 볼 일이 없다
     const r = e.target.closest(".work[data-id], .row[data-id]");
-    if (r) openWork(r.dataset.id, () => drawPlatformList(pid));   // 구간 목록 위에 겹친다
+    if (r) openWork(r.dataset.id, again);        // 구간 목록 위에 겹친다
+  });
+}
+
+/** 내 목록에 서 있는 **구간들의 색인**.
+
+    페이지 탭은 이미 구간별로 나뉘어 있지만, 구간이 늘면 그 화면이 길어져 「네이버 블로그가
+    어디 있더라」를 훑어 내려가며 찾게 된다. 색인은 한 장에 다 세워 놓고 한 번에 그리로
+    보낸다 — 새 화면을 짓는 것이 아니라 이미 있는 길에 문을 하나 더 내는 것이다.
+
+    **세우는 것은 페이지 탭과 같은 집합이다.** 색인이 화면과 다른 것을 말하면 색인이 아니다.
+    그래서 railsHtml 과 같은 차례로 센다 — 최근 본 것이 든 구간이 앞에 선다. */
+function openPlatformIndex() {
+  let query = "";
+
+  /* 구간마다 몇 편인가. 한 번 훑어 세면서 처음 나온 차례를 그대로 쓴다. */
+  const groups = () => {
+    const seen = new Map();
+    for (const w of byRecent(activeWorks()))
+      seen.set(w.platformId, (seen.get(w.platformId) ?? 0) + 1);
+    return [...seen].map(([id, n]) => ({ p: platformOf(id), n }));
+  };
+
+  /* 이름으로도 주소로도 찾는다 — 「교보문고」로도 「kyobo」로도 걸려야 한다.
+     구간 합치기 화면이 후보를 고르는 잣대와 같다. */
+  const hitsOf = (all, q) => {
+    const n = q.trim().toLowerCase();
+    return n ? all.filter(({ p }) =>
+      p.name.toLowerCase().includes(n) || (p.host ?? "").includes(n)) : all;
+  };
+
+  const rowsHtml = list => list.length ? list.map(({ p, n }) => {
+      const sub = p.host && p.host !== p.name ? p.host : (MEDIA[p.mediaType] ?? "");
+      return `<button class="folder dom-row" data-plat-go="${esc(p.id)}">
+        ${markHtml(p)}
+        <span class="txt">
+          <span class="tline"><b${p.isDomain && !p.overridden ? ' class="dom"' : ""
+            }>${esc(p.name)}</b><span class="cnt">${n}편</span></span>
+          ${sub ? `<span class="tline"><span>${esc(sub)}</span></span>` : ""}
+        </span>
+        <span class="chev">${icon("right")}</span></button>`;
+  }).join("") : `<div class="empty">찾는 구간이 없습니다.</div>`;
+
+  const all = groups();
+  openSheet(`
+    ${all.length > 7 ? searchHtml("이름·주소로 찾기", query) : ""}
+    <div class="folders dom-list" data-dom-list>${rowsHtml(all)}</div>`,
+    { full: true, title: "도메인", sub: `${all.length}곳` });
+
+  const qEl = sheet.querySelector(".arch-q");
+  if (qEl) qEl.addEventListener("input", () => {
+    query = qEl.value;                            // 목록만 갈아 끼워 커서를 지킨다
+    sheet.querySelector("[data-dom-list]").innerHTML = rowsHtml(hitsOf(all, query));
+  });
+
+  sheet.querySelector(".sheet-body").addEventListener("click", e => {
+    const go = e.target.closest("[data-plat-go]");
+    // 돌아올 자리로 이 색인을 넘긴다 — 찾던 글자는 새로 시작한다
+    if (go) openPlatformList(go.dataset.platGo, openPlatformIndex);
   });
 }
 
@@ -5924,6 +5999,7 @@ screenEl.addEventListener("click", e => {
   if (e.target.closest("[data-soon-all]")) return openSoon();
   const da = e.target.closest("[data-day-all]");
   if (da) return openDayList(Number(da.dataset.dayAll));
+  if (e.target.closest("[data-plat-index]")) return openPlatformIndex();
   const all = e.target.closest("[data-plat-all]");
   if (all) return openPlatformList(all.dataset.platAll);
   const plat = e.target.closest("[data-plat]");

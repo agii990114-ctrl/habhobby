@@ -300,6 +300,30 @@
   /* 보이는 크기는 그대로 두고 누르는 영역만 넓힌다 — 음수 여백으로 머리글 높이를 지킨다 */
   .plat-act .edit-dom { font-size: 13px; padding: 12px; margin: -12px 0; }
 
+  /* 제목줄 오른쪽에 단추가 둘 — 한 통에 모아 붙인다 */
+  .screen-title.with-act .acts { display: flex; align-items: center; gap: 6px; }
+  .screen-title.with-act .mini-btn .ic {
+    width: 13px; height: 13px; margin-right: 3px; vertical-align: -2px;
+  }
+
+  /* 구간 색인의 한 줄 — 폴더 줄과 같은 껍데기에 마크를 끼운다.
+     .folder 의 .mini 자리에 .pmark 가 서므로 크기를 여기서 준다. */
+  .dom-row .pmark {
+    width: 34px; height: 34px; flex: none; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 700; box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+  }
+  /* 이름은 늘어나고 편수는 오른쪽 끝에 붙는다 */
+  .dom-row .txt .tline b {
+    min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .dom-row .txt .cnt { margin-left: auto; flex: none; }
+  /* 아직 이름을 안 붙인 도메인은 주소 그대로 — 단락 머리글과 같은 모양이다 */
+  .dom-row b.dom {
+    font-family: "IBM Plex Mono", monospace; font-size: 12.5px;
+    font-weight: 500; color: var(--ink-2);
+  }
+
   /* 도메인 색 고르기 */
   /* 견본 옆의 "직접 넣기" 버튼 */
   .emo-more {

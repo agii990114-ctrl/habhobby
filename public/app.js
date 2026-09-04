@@ -1701,9 +1701,7 @@ function renderWeek() {
         : `<div class="rest">—</div>`}</div>
     </div>`;
   }
-  /* 어느 요일이 오늘이든 맨 위까지 올라올 수 있게 뒤에 빈 자리를 둔다. 얼마나 둘지는
-     화면 크기에 달렸으므로 fitWeek 이 재서 정한다 — 여기서는 자리만 잡아 둔다. */
-  html += `</div><div class="week-pad"></div></div>`;
+  html += `</div></div>`;
   return html + calTail();
 }
 
@@ -1738,10 +1736,18 @@ function fitWeek() {
   box.style.maxHeight = `${Math.max(240, Math.round(room * 0.68))}px`;
 
   const today = box.querySelector("[data-today]");
-  const pad = box.querySelector(".week-pad");
-  if (!today || !pad) return;
-  // 요일은 늘 월→일 차례라 오늘이 앞쪽이면 아래에 남은 것이 모자라 끝까지 못 올라간다
-  box.scrollTop = padToReach(box, posIn(box, today), pad);
+  if (!today) return;
+  /* **되는 데까지만 굴린다.**
+
+     한때 뒤에 빈 자리(.week-pad)를 붙여, 오늘이 어느 요일이든 기어이 맨 위까지
+     올라오게 했다. 요일은 늘 월→일 차례라 오늘이 앞쪽이면 아래에 남은 것이 모자라
+     그냥은 끝까지 안 올라가기 때문이다. 그런데 담긴 것이 적은 주에는 그 빈 자리가
+     목록보다 길어져, **없는 목록을 지어내 끌어올리는** 꼴이 됐다.
+
+     끝까지 못 올라가는 것은 고장이 아니다 — 더 굴릴 것이 없다는 뜻이고, 그때는
+     남은 요일이 다 보인다. 넘치는 값을 넣으면 브라우저가 알아서 갈 수 있는 데까지만
+     간다. 맞춰 주려던 것을 위해 없는 것을 만들지 않는다. */
+  box.scrollTop = posIn(box, today);
 }
 
 /* 월간 — 한 달을 한눈에. 칸에는 작품을 다 못 넣으니 플랫폼 색 점으로 요약하고,

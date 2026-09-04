@@ -26,7 +26,7 @@ let works = [], folders = [], settings = { openMode: "app", doneIn: ["home", "li
    쓰는 곳은 폴더 탭의 "친구 폴더 보기" 와 사이드 메뉴뿐이라, 캘린더만 보고 나가는
    사람에게는 200명분 17KB가 그냥 버려진다. 사이드 메뉴에 적을 숫자만 미리 받는다. */
 let friends = null, friendCount = 0;
-/** 내가 이용 완료한 작품들의 주소 번호 — reload() 가 채운다. */
+/** 내가 보관한 작품들의 주소 번호 — reload() 가 채운다. */
 let myDone = new Set();
 /** 받은 폴더 초대. 첫 화면에 함께 실려 온다 — 대개 비어 있어 무게가 없다. */
 let folderInvites = [];
@@ -290,13 +290,13 @@ const doneBadge = w => {
   return st ? `<span class="wbadge ${st.key}">${icon(st.icon)}${esc(st.label)}</span>` : "";
 };
 
-/** 이용 완료를 세울 수 있는 탭들 — 열쇠는 서버가 아는 것과 같다.
+/** 보관을 세울 수 있는 탭들 — 열쇠는 서버가 아는 것과 같다.
     이름은 화면 아래 탭 단추와 같은 말을 쓴다. 설정에서 「페이지」라 해 놓고
     화면에서 다른 이름이면 어디를 켠 것인지 알 수 없다. */
-const DONE_TABS = [["cal", "캘린더"], ["home", "페이지"], ["lib", "폴더"]];
+const DONE_TABS = [["all", "전체"], ["cal", "캘린더"], ["home", "페이지"], ["lib", "폴더"]];
 
 const STATES = {
-  watched: { label: "이용 완료", icon: "check", desc: "끝까지 본 시리즈" },
+  watched: { label: "보관", icon: "check", desc: "끝까지 본 시리즈" },
   dropped: { label: "휴지통", icon: "trash", desc: "더 보지 않는 시리즈" },
 };
 
@@ -305,7 +305,7 @@ const MAX_STAR = 5;
    켠 것과 안 켠 것의 대비도 글꼴에 맡겨야 했다. 여기서는 안을 채우고 비우는 차이다. */
 const starText = n => icon("star", "on").repeat(n) + icon("star").repeat(MAX_STAR - n);
 
-/** 받침에 따라 "으로 / 로"를 고른다 — "휴지통으로", "이용 완료로" */
+/** 받침에 따라 "으로 / 로"를 고른다 — "휴지통으로", "보관으로" */
 function ro(word) {
   const code = word.charCodeAt(word.length - 1) - 0xAC00;
   if (code < 0 || code > 11171) return "로";      // 한글이 아니면 기본형
@@ -501,12 +501,12 @@ const platformOf = id => platforms[id] ?? { ...FALLBACK_PLATFORM, id };
    마음에 들면 「내 목록에 담기」로 한 번 눌러 내 것으로 만든다. */
 const activeWorks = () => works.filter(w => w.state === "active" && !w.folderOnly);
 
-/** 이용 완료한 작품을 이 탭에도 세우나 — 전체 설정에서 탭마다 켠다. */
+/** 보관한 작품을 이 탭에도 세우나 — 전체 설정에서 탭마다 켠다. */
 const showsDone = where => (settings.doneIn ?? []).includes(where);
 
 /** **그 탭이 세우는 작품들.**
 
-    살아 있는 것은 늘 서고, 이용 완료한 것은 그 탭을 켜 두었을 때만 함께 선다.
+    살아 있는 것은 늘 서고, 보관한 것은 그 탭을 켜 두었을 때만 함께 선다.
     휴지통은 어디에도 서지 않는다 — 그건 「끝까지 봤다」가 아니라 「더 안 본다」라서,
     목록에 도로 세울 이유가 없다.
 
@@ -773,7 +773,7 @@ function gridHtml(list, emptyMsg) {
 
 /* ── 작품 격자에서 여럿 고르기 ────────────────────────────
    폴더 안과 구간별 세부 목록이 **같은 카드를 같은 손짓으로** 다루는 자리라, 고르는 물건도
-   하나만 둔다. 고른 것은 한꺼번에 이용 완료나 휴지통으로 보낸다 — 지우는 것이 아니라
+   하나만 둔다. 고른 것은 한꺼번에 보관이나 휴지통으로 보낸다 — 지우는 것이 아니라
    보관함으로 옮기는 일이라 되돌릴 길이 남는다.
 
    `key` 는 지금 어느 목록을 고르고 있는지다. 다른 목록으로 넘어가면 고른 것을 버린다 —
@@ -830,9 +830,9 @@ const workBarHtml = any => {
      404 를 돌려줬다. 누르는 사람에게는 아무 일도 안 일어나는 것처럼 보였다.
 
      「미러링만」으로 열어 둔 폴더는 담아갈 수 없다 — canCopy 가 그것을 가른다. */
-  /* **셈을 갈라 적지 않는다.** 「담아가기 3 · 이용 완료 2」처럼 적어 두면 고르는 사람이
+  /* **셈을 갈라 적지 않는다.** 「담아가기 3 · 보관 2」처럼 적어 두면 고르는 사람이
      제가 무엇을 골랐는지 머릿속으로 갈라 세야 한다. 통째로 골라 누르면 각 버튼이 제
-     몫만 집어 간다 — 담아가기는 남의 것만, 이용 완료·휴지통은 내 것만. */
+     몫만 집어 간다 — 담아가기는 남의 것만, 보관·휴지통은 내 것만. */
   const picked = [...workSel].map(id => works.find(w => w.id === id)).filter(Boolean);
   const canTake = picked.filter(mayTakeWork);
   const mine = picked.filter(w => !w.mirror);
@@ -849,7 +849,7 @@ const workBarHtml = any => {
       ${mine.length ? `<button class="mini-btn" data-wfolder
         >${icon("inbox")} 폴더에 추가</button>
       <button class="mini-btn" data-wbulk="watched"
-        >${icon("check")} 이용 완료</button>
+        >${icon("check")} 보관</button>
       <button class="mini-btn danger" data-wbulk="dropped"
         >${icon("trash")} 휴지통</button>` : ""}
       <button class="mini-btn" data-wsel-off>완료</button>
@@ -986,7 +986,7 @@ function wireWorkPick(box, redraw) {
     if (!picked.length) return;
     const label = STATES[to].label;
 
-    /* **이용 완료는 별점을 묻는다** — 한 편을 옮길 때와 같다. 나중에 별점별로 모아 보는
+    /* **보관은 별점을 묻는다** — 한 편을 옮길 때와 같다. 나중에 별점별로 모아 보는
        것이 그 값의 쓰임이라, 여럿을 한꺼번에 끝낼 때야말로 매겨 둘 만하다. */
     if (to === "watched") {
       // 취소는 보던 목록으로 — 고른 것도 그대로 남는다 (askSure 의 back 과 같은 규칙)
@@ -1055,9 +1055,9 @@ function rowHtml(w, sub, mini) {
 /** 이 날의 칸에 놓이는 작품들.
 
     **칸도 아래 단락과 같은 목록을 본다**(listedWorks). 한때 칸만 works 를 통째로 보면서
-    내려 둔 작품을 「언제부터 언제까지 보던 작품」의 기록으로 놓았는데, 그러면 이용 완료를
+    내려 둔 작품을 「언제부터 언제까지 보던 작품」의 기록으로 놓았는데, 그러면 보관을
     캘린더에서 꺼 두어도 내린 그날 칸에는 그대로 남았다 — 껐는데 보이는 자리가 생긴다.
-    기록은 이용 완료 보관함이 이미 들고 있고, 켜면 앞으로의 날에도 선다.
+    기록은 보관 보관함이 이미 들고 있고, 켜면 앞으로의 날에도 선다.
 
     남이 함께 쓰는 폴더에 넣어 둔 작품(folderOnly)도 이제 빠진다. 그 사람이 정한 일정이
     내 캘린더를 채우면 내가 보기로 한 것과 뒤섞인다 — 원래 정해 둔 규칙인데 이 칸만
@@ -2313,23 +2313,24 @@ function readHash() {
     openFolderId = !arg ? null
       : arg === "_all" || arg === "_none" || folders.some(f => f.id === arg) ? arg : null;
   } else {
-    // 화면 이름은 캘린더·페이지·폴더이지만 주소의 열쇠는 그대로 둔다 —
+    // 화면 이름은 전체·캘린더·페이지·폴더이지만 주소의 열쇠는 그대로 둔다 —
     // 이미 저장해 둔 주소가 깨지지 않게. 아무것도 없으면 캘린더로 연다.
-    tab = t === "home" ? "home" : "cal";
+    tab = t === "home" ? "home" : t === "all" ? "all" : "cal";
   }
 }
 
 function writeHash() {
   const h = tab === "lib" ? (openFolderId ? `lib/${openFolderId}` : "lib")
     : tab === "home" ? "home"
-      : `cal/${calView}`;
+      : tab === "all" ? "all"
+        : `cal/${calView}`;
   if (location.hash.replace(/^#/, "") !== h)
     history.replaceState(null, "", `${location.pathname}#${h}`);
 }
 
 function render() {
   writeHash();
-  for (const [id, t] of [["tab-cal", "cal"], ["tab-home", "home"], ["tab-lib", "lib"]])
+  for (const [id, t] of [["tab-all", "all"], ["tab-cal", "cal"], ["tab-home", "home"], ["tab-lib", "lib"]])
     document.getElementById(id).setAttribute("aria-selected", tab === t);
 
   /* **고를 수 없는 탭에서만 범위를 비운다.** workCard 는 workSel 하나만 보고 모양을
@@ -2339,10 +2340,23 @@ function render() {
      비우는 것을 페이지 탭에까지 걸면 안 된다 — workPickAt(null) 은 범위 이름(workSelKey)
      까지 지우므로, 곧이어 workPickAt("home") 을 부르면 늘 「범위가 바뀌었다」로 읽혀
      고른 것이 그 자리에서 버려진다. 실제로 「선택」을 눌러도 아무 일이 안 일어났다. */
-  if (tab !== "home") workPickAt(null);
+  if (tab !== "home" && tab !== "all") workPickAt(null);
 
   let html = "";
-  if (tab === "cal") {
+  if (tab === "all") {
+    /* **한 판에 다 세운다.** 페이지 탭은 같은 목록을 구간별로 갈라 놓은 것이고, 여기는
+       가르지 않은 것이다 — 「어디 것이든 최근에 본 차례로」가 필요할 때가 있다.
+       폴더 탭의 🗂 전체와 세우는 것이 같지만, 그건 폴더를 지나야 닿는 자리다.
+
+       고르는 범위 이름을 페이지 탭과 **다르게** 둔다. 같은 이름을 쓰면 탭을 옮겨도
+       고른 것이 따라와, 안 보이는 화면의 카드까지 함께 옮기게 된다. */
+    const list = byRecent(listedWorks("all"));
+    workPickAt("all", list);
+    html += `<div class="screen-title with-act">최근 본 순 · ${list.length}편
+      ${list.length && !workSel ? `<button class="mini-btn" data-wsel>선택</button>` : ""}</div>`;
+    html += `<div data-wbar>${workBarHtml(list.length)}</div>`;
+    html += workGridHtml(list, "아직 담아 둔 작품이 없습니다.<br>왼쪽 아래 ＋ 버튼으로 추가해보세요.");
+  } else if (tab === "cal") {
     html = renderCalendar();
   } else if (tab === "home") {
     /* **단락을 넘나들며 고른다.** 플랫폼별로 나뉘어 있어도 고르는 범위는 화면 전체다 —
@@ -3052,9 +3066,9 @@ function openWork(id, over) {
          가장 큰 자리를 차지하면서, 정작 이 창에 와서 가장 자주 하는 일이 아니었다.
          자주 하는 일은 「다 봤다」와 「치운다」다 — 그 둘을 이 자리에 세운다.
 
-         이미 내려 둔 작품이면 되돌리는 길만 둔다. 이용 완료를 다시 누를 일도,
+         이미 내려 둔 작품이면 되돌리는 길만 둔다. 보관을 다시 누를 일도,
          휴지통에 있는 것을 또 버릴 일도 없다. */""}
-    ${/* **내려 둔 작품에는 「복구」와 「치우기」뿐이다.** 이용 완료에서 한 단계 더 내리는
+    ${/* **내려 둔 작품에는 「복구」와 「치우기」뿐이다.** 보관에서 한 단계 더 내리는
          것은 휴지통이고, 휴지통에서 더 내릴 곳은 없으므로 거기서는 영구 삭제다.
 
          복구는 **자리가 비어 있을 때만** 눌린다 — 목록에 같은 작품이 이미 서 있으면
@@ -3071,7 +3085,7 @@ function openWork(id, over) {
          ${keptSame(w) ? `<div class="rest" style="text-align:left;padding:6px 2px 0">
              ${whereKept(w)}.</div>` : ""}`
       : `<div class="link-row" style="margin-top:9px">
-           <button class="btn" data-act="watched">${icon("check")} 이용 완료</button>
+           <button class="btn" data-act="watched">${icon("check")} 보관</button>
            <button class="btn bad" data-act="dropped">${icon("trash")} 휴지통</button></div>`}
   `, { over });
   wireGo(w);
@@ -3100,7 +3114,7 @@ function openWork(id, over) {
     toast(to === "active" ? "목록으로 되돌렸습니다" : `${STATES[to].label}${ro(STATES[to].label)} 옮겼습니다`);
   });
   const act = sel => sheet.querySelector(`[data-act="${sel}"]`);
-  // 이용 완료는 별점을 물어본다 — 나중에 별점별로 모아 보기 위한 것이다
+  // 보관은 별점을 물어본다 — 나중에 별점별로 모아 보기 위한 것이다
   if (act("watched")) act("watched").onclick = () => openRating(w, "watched", { back: again });
   /* 휴지통은 별점을 묻지 않는다 — 버리는 것에 점수를 매길 일은 없다. 대신 정말 내릴
      것인지는 묻는다. 이미 매긴 점수는 지우지 않으므로 되돌리면 그대로 살아난다. */
@@ -3179,12 +3193,12 @@ function openWorkSettings(id, opts) {
       </div></div>
     ${schedHtml(draft.schedule, null, { value: draft.color, fallback: platformOf(w.platformId).color })}
     ${pickerHtml(draft.folders)}
-    ${/* 휴지통은 **되돌리기 쉬운 일이 아니다** — 빨강으로 갈라 세운다. 옆의 「이용 완료」와
+    ${/* 휴지통은 **되돌리기 쉬운 일이 아니다** — 빨강으로 갈라 세운다. 옆의 「보관」과
          같은 갈래로 보이면 안 된다: 하나는 다 봤다는 표시고, 하나는 목록에서 치우는 일이다.
          작품 창에서는 이미 그렇게 서 있었는데 이 창만 검게 남아 있었다. */""}
     <div class="field"><label>목록에서 내리기</label>
       <div class="link-row">
-        <button class="btn" data-act="watched">${icon("check")} 시리즈 이용 완료</button>
+        <button class="btn" data-act="watched">${icon("check")} 시리즈 보관</button>
         <button class="btn bad" data-act="dropped">${icon("trash")} 휴지통</button>
       </div>
     </div>
@@ -3265,7 +3279,7 @@ function openWorkSettings(id, opts) {
   // 되돌아가기(‹)는 담는 중이면 취소, 고치는 중이면 저장이다 — 하던 일을 잃지 않게
   sheet.querySelector("[data-back-work]").onclick = mode === "add" ? cancel : commit;
 
-  // 이용 완료는 별점을 물어본다 — 나중에 별점별로 모아 보기 위한 것이다.
+  // 보관은 별점을 물어본다 — 나중에 별점별로 모아 보기 위한 것이다.
   sheet.querySelector('[data-act="watched"]').onclick = () => openRating(w, "watched");
   /* 휴지통은 별점을 묻지 않는다 — 버리는 것에 점수를 매길 일은 없다. 대신 정말 내릴
      것인지는 묻는다. 이미 매긴 점수는 지우지 않으므로 되돌리면 그대로 살아난다. */
@@ -4543,7 +4557,7 @@ function archGroups(list) {
 
 function archRow(w) {
   const p = platformOf(w.platformId);
-  /* 이용 완료에서 지우는 건 너무 센 조치다 — 한 단계 물려 휴지통으로 보낸다.
+  /* 보관에서 지우는 건 너무 센 조치다 — 한 단계 물려 휴지통으로 보낸다.
      영구 삭제는 휴지통에서만 할 수 있게 두어, 되돌릴 기회가 항상 한 번은 남는다.
      되묻는 일은 askSure 가 창으로 맡는다 — 한때 이 줄 안에서 글씨를 바꿔 물었는데,
      같은 자리를 두 번 누르는 손짓이라 잘못 누른 사람은 두 번 다 잘못 눌렀다. */
@@ -4576,13 +4590,13 @@ function archRow(w) {
 
     같음을 가리는 것은 urlId 다 — 제목은 저마다 고쳐 쓸 수 있고 platformId 는 내 분류다.
     이러면 복구할 자리가 없다: **한 사람에게 같은 작품은 한 줄**이다(idx_work_kept).
-    이용 완료도 자리를 차지한다 — 휴지통에서 복구했더니 목록에 두 장 서는 일이 없게.
+    보관도 자리를 차지한다 — 휴지통에서 복구했더니 목록에 두 장 서는 일이 없게.
 
-    제 줄은 빼고 본다. 이용 완료 줄에게는 저 자신이 「이미 들고 있는 것」이라, 안 빼면
-    이용 완료는 무엇 하나 복구할 수 없다. */
+    제 줄은 빼고 본다. 보관 줄에게는 저 자신이 「이미 들고 있는 것」이라, 안 빼면
+    보관은 무엇 하나 복구할 수 없다. */
 const keptSame = w => works.find(a =>
   a.id !== w.id && a.state !== "dropped" && a.urlId === w.urlId)?.state ?? null;
-const whereKept = w => keptSame(w) === "watched" ? "이미 이용 완료에 있는 작품입니다"
+const whereKept = w => keptSame(w) === "watched" ? "이미 보관에 있는 작품입니다"
   : "이미 목록에 있는 작품입니다";
 
 /** 지금 화면에 보이는 작품들 — 전체 선택이 "보이는 것"만 집도록 */
@@ -4621,21 +4635,21 @@ function archBulk() {
   </div>`;
 }
 
-/* 이용 완료를 어떻게 세울 것인가. **최신이 기본**이다 — 「끝까지 본 시리즈」를 열 때
+/* 보관을 어떻게 세울 것인가. **최신이 기본**이다 — 「끝까지 본 시리즈」를 열 때
    가장 먼저 궁금한 것은 「요즘 뭘 끝냈더라」이지 「5점짜리가 뭐였더라」가 아니다.
    별점은 되짚어 볼 때 쓰는 갈래라 한 번 더 눌러 들어간다.
 
    휴지통에는 이 물음이 없다 — 버린 것에 점수를 매길 일이 없어 세울 갈래가 하나뿐이다. */
-/* 「전체」가 기본이고 **별점을 왼쪽에 둔다.** 갈래 이름이 「최신」이었을 때는 옆의
-   「별점」과 나란히 서서 「최신순 ↔ 별점순」이라는 두 정렬로 읽혔는데, 실제로 하는 일은
-   「다 펼쳐 보기 ↔ 별점별로 묶어 보기」다. 「전체」라 부르면 그 뜻이 그대로 읽힌다.
-   왼쪽이 좁히는 쪽, 오른쪽이 다 보는 쪽 — 폴더 탭의 갈래 거르개와 같은 방향이다. */
-const ARCH_SORTS = [["star", "별점"], ["recent", "전체"]];
+/* 「전체」가 기본이고 **왼쪽에 선다.** 기본으로 켜져 있는 것이 왼쪽 끝에 있어야
+   「지금 어디에 있나」가 눌린 자리로 바로 읽힌다 — 켠 것이 오른쪽에 있으면 왼쪽에 있는
+   것을 두고 왜 저쪽이 켜져 있나를 한 번 생각하게 된다. 화면 아래 탭줄도, 캘린더의
+   주간↔월간도 같다: 넓게 보는 쪽이 먼저고 좁히는 쪽이 다음이다. */
+const ARCH_SORTS = [["recent", "전체"], ["star", "별점"]];
 const archSorted = () => arch.state === "watched";
 /** 별점 묶음으로 세우는 중인가 — 찾는 중에는 묶음을 무시한다(어느 별점인지 모르니 찾는 것이다) */
 const archGrouped = () => archSorted() && arch.sort === "star" && !arch.q.trim();
 
-/** 이용 완료한 **최근 순**. state_at 이 없던 옛 줄은 담은 때로 대신한다. */
+/** 보관한 **최근 순**. state_at 이 없던 옛 줄은 담은 때로 대신한다. */
 const byDone = list => [...list].sort((a, b) =>
   (b.stateAt ?? b.addedAt) - (a.stateAt ?? a.addedAt));
 
@@ -4835,7 +4849,7 @@ function drawArchive() {
             danger: false,
             title: `${blocked.length}편은 복구되지 않습니다`,
             body: `${esc(blocked.slice(0, 3).map(w => w.title).join(", "))}${
-              blocked.length > 3 ? ` 외 ${blocked.length - 3}편` : ""} 은(는) 이미 목록이나 이용 완료에 있습니다.${
+              blocked.length > 3 ? ` 외 ${blocked.length - 3}편` : ""} 은(는) 이미 목록이나 보관에 있습니다.${
               ids.length ? ` 나머지 ${ids.length}편만 복구합니다.` : ""}`,
             ok: ids.length ? "복구" : "확인", back: drawArchive,
           });
@@ -4999,13 +5013,13 @@ function openAdd(prefill, fromShare) {
     const auto = resolved.origin === "og";
     const title = draft.title ?? resolved.title;
     const had = resolved.mine;              // 이미 들고 있는 그 작품 (없으면 null)
-    /* **이용 완료에 있으면 그렇게 말한다.** 「이미 담아 둔 작품」이라고만 하면 목록에서
+    /* **보관에 있으면 그렇게 말한다.** 「이미 담아 둔 작품」이라고만 하면 목록에서
        찾다가 없어서 다시 담게 된다. 담기는 그 줄의 정보만 새로 적고 상태는 두므로,
        목록으로 되돌리는 길(복구)이 따로 있다는 것까지 한 줄에 담는다. */
     const done = had?.state === "watched";
     preview.innerHTML = `
       ${had ? `<div class="note sep">${done
-        ? "이용 완료에 있는 작품입니다 — 아래 값으로 새로 적습니다. 목록으로 되돌리려면 이용 완료에서 「복구」를 누르세요"
+        ? "보관에 있는 작품입니다 — 아래 값으로 새로 적습니다. 목록으로 되돌리려면 보관에서 「복구」를 누르세요"
         : "이미 담아 둔 작품입니다 — 아래 값으로 새로 적습니다"}</div>` : ""}
       ${resolved.note ? `<div class="note sep">${esc(resolved.note)}</div>` : ""}
       <div class="sep">
@@ -5799,7 +5813,7 @@ const OPEN_MODES = [
   ["web", "웹으로 열기", "언제나 브라우저에서 엽니다."],
 ];
 
-/** 이용 완료를 세울 탭 고르개.
+/** 보관을 세울 탭 고르개.
 
     여럿을 켜는 자리라 폴더 공개 설정의 「퍼가기 갈래」와 같은 모양을 쓴다 —
     하나만 고르는 고르개(optsHtml)와 눈으로 갈려야 한다.
@@ -5808,15 +5822,15 @@ const OPEN_MODES = [
     「아무것도 안 켰다」와 「셋 다 껐다」가 눈에 같아서, 상태를 글로 한 번 더 말한다. */
 function doneTabsHtml() {
   const on = new Set(settings.doneIn ?? []);
-  return `<div class="opts across take-flags" style="--opt-cols:3">
+  return `<div class="opts across take-flags" style="--opt-cols:4">
       ${DONE_TABS.map(([v, t]) => `<button type="button" class="opt${on.has(v) ? " on" : ""}"
         data-dtab="${v}" aria-pressed="${on.has(v)}">
         <span class="mark tick"></span><span class="ot"><b>${t}</b></span></button>`).join("")}
     </div>
     <div class="opt-why">${on.size
       ? DONE_TABS.filter(([v]) => on.has(v)).map(([, t]) => t).join(" · ")
-        + "에서 이용 완료한 작품도 함께 보입니다 — 표지에 「이용 완료」가 붙습니다."
-      : "이용 완료한 작품은 목록에 서지 않습니다. 왼쪽 메뉴의 「이용 완료」에서 봅니다."}</div>`;
+        + "에서 보관한 작품도 함께 보입니다 — 표지에 「보관」이 붙습니다."
+      : "보관한 작품은 목록에 서지 않습니다. 왼쪽 메뉴의 「보관」에서 봅니다."}</div>`;
 }
 
 function openAppSettings() {
@@ -5860,10 +5874,10 @@ function openAppSettings() {
 </div>` : ""}
     <div class="field sep"><label>작품을 여는 방식</label>
       ${optsHtml(OPEN_MODES, settings.openMode, "openmode", 2)}</div>
-    ${/* **이용 완료를 어디에 세울지.** 다 본 작품이 목록에서 통째로 사라지는 것이
+    ${/* **보관을 어디에 세울지.** 다 본 작품이 목록에서 통째로 사라지는 것이
          늘 맞지는 않다 — 다시 볼 것도 있고, 완결까지 본 목록 자체가 보고 싶을 때도 있다.
          탭마다 따로 켠다: 캘린더는 채우고 싶지만 페이지는 깔끔하기를 바랄 수 있다. */""}
-    <div class="field sep"><label>이용 완료 보이기</label>
+    <div class="field sep"><label>보관 보이기</label>
       <div data-done-tabs>${doneTabsHtml()}</div></div>
     ${me ? `<div class="field sep sep-end">
       <div class="link-row">
@@ -6097,6 +6111,7 @@ document.getElementById("menu-search").onclick = () => { closeDrawer(); openFind
 /* 탭을 옮기는 것도 **하던 일을 그만두는 것**이다 — 폴더를 골라 둔 채 캘린더에 다녀오면,
    돌아왔을 때 무엇을 왜 골랐는지 기억나지 않는다. */
 const goTab = t => { tab = t; folderSel = null; render(); };
+document.getElementById("tab-all").onclick = () => goTab("all");
 document.getElementById("tab-cal").onclick = () => goTab("cal");
 document.getElementById("tab-home").onclick = () => goTab("home");
 document.getElementById("tab-lib").onclick = () => { closeSheet(); goTab("lib"); };

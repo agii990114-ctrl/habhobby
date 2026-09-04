@@ -65,11 +65,11 @@ async function readJson(req: IncomingMessage): Promise<any> {
 }
 
 /* ── 설정과 플랫폼 표시 오버라이드 ─────────────────────────── */
-/** 이용 완료한 작품을 **어느 탭에 함께 세우나.** 탭 열쇠들의 부분집합이다.
+/** 보관한 작품을 **어느 탭에 함께 세우나.** 탭 열쇠들의 부분집합이다.
 
     켜고 끄는 것이 셋이라 갈래(enum)로 만들 수도 있었지만, 사람이 고르는 것은
     「어디에」 하나다 — 한 칸에 담아 두면 탭이 늘어도 이 자리는 그대로다. */
-const DONE_TABS = ["cal", "home", "lib"];
+const DONE_TABS = ["all", "cal", "home", "lib"];
 type Settings = { openMode: "app" | "web"; themeColor: string | null; doneIn: string[] };
 type Override = { name?: string; initial?: string; color?: string; fg?: string };
 /* 마크 글자색은 배경에 맞춰 저절로 정해지지만, 경계에 걸친 색에서는 사람 눈에
@@ -88,7 +88,7 @@ const normFg = (v: unknown): string | undefined => {
     손수 껐던 사람은 그대로다. 저장된 값이 이 기본값을 덮으므로, 빈 배열을 적어 둔
     사람에게 빈 배열이 남는다 — 기본값을 고쳤다고 남의 결정이 되살아나지 않는다. */
 const getSettings = (u: string): Settings =>
-  ({ openMode: "app", themeColor: null, doneIn: ["home", "lib"],
+  ({ openMode: "app", themeColor: null, doneIn: ["all", "home", "lib"],
      ...kvGet<Partial<Settings>>(u, "settings", {}) });
 const getOverrides = (u: string): Record<string, Override> => kvGet<Record<string, Override>>(u, "overrides", {});
 /* 사이트가 스스로 밝힌 이름(og:site_name). 빈 문자열은 "받아봤지만 없더라"는 표시다 —
@@ -257,17 +257,17 @@ function withMirrors(me: string): { folders: any[]; works: any[] } {
   const seen = seenByMe(me);
   /* 이미 내가 담아 둔 작품인지 가리는 열쇠 — 같은 곳의 같은 시리즈면 같은 작품이다. */
   const keyOf = (w: any) => `${w.platformId}\u0000${w.seriesId}`;
-  /* **살아 있는 것만 담는다.** 휴지통이나 이용 완료에 내려둔 작품이 여기 끼어 있으면,
+  /* **살아 있는 것만 담는다.** 휴지통이나 보관에 내려둔 작품이 여기 끼어 있으면,
      그것이 친구 줄을 밀어내 놓고 저는 화면에서 걸러진다(폴더는 active 만 세운다) —
      친구 폴더에는 멀쩡히 있는데 내 쪽에서만 조용히 사라지는 구멍이 난다.
 
      못 본 척하는 것이 옳다: 내가 내 목록에서 내려둔 것은 **내 목록의 결정**이지,
      친구 폴더를 어떻게 볼지의 결정이 아니다. 되돌리면 다시 여기 들어와 제자리를 찾는다. */
-  /* **휴지통만 뺀다.** 한때 살아 있는 것만 보았는데, 그러면 내가 이용 완료한 작품이
+  /* **휴지통만 뺀다.** 한때 살아 있는 것만 보았는데, 그러면 내가 보관한 작품이
      친구 폴더에 있을 때 친구 줄이 한 장 더 서서 같은 작품이 두 장 보였다.
      들고 있는 것은 들고 있는 것이다 — 내 줄이 그 자리에 선다(배지가 붙는다).
 
-     이용 완료를 폴더에 안 세우기로 했다면 그 자리는 비어 보인다. 그건 구멍이 아니라
+     보관을 폴더에 안 세우기로 했다면 그 자리는 비어 보인다. 그건 구멍이 아니라
      **내가 켜고 끈 것**이다 — 전체 설정이 그렇게 말하고 있다. */
   const mineByKey = new Map<string, any>(
     works.filter(w => w.state !== "dropped").map(w => [keyOf(w), w]));
@@ -400,9 +400,9 @@ function upsertWork(userId: string, input: {
      담는 것은 별개다. 되살리면 그때 매겨 둔 별점과 폴더가 딸려 와 「새로 담았다」와
      다른 것이 생긴다.
 
-     **이용 완료는 다르다.** 그건 들고 있는 것이라, 새 줄을 만들면 같은 작품이 화면에
-     두 장 선다. 그 줄에 정보를 새로 적고 **상태는 건드리지 않는다** — 이용 완료면
-     이용 완료인 채로 배지를 달고 선다. 목록으로 되돌리는 일은 「복구」가 맡는다:
+     **보관은 다르다.** 그건 들고 있는 것이라, 새 줄을 만들면 같은 작품이 화면에
+     두 장 선다. 그 줄에 정보를 새로 적고 **상태는 건드리지 않는다** — 보관이면
+     보관인 채로 배지를 달고 선다. 목록으로 되돌리는 일은 「복구」가 맡는다:
      주소를 한 번 더 담았다는 것이 「다시 볼 참이다」라는 뜻은 아니다. */
   /* **공용 줄을 먼저 세운다.** 이미 있으면 그대로 쓴다 — 남이 담아 둔 줄을 내가 담는다고
      고쳐 쓰면 그 사람 화면의 제목과 표지가 말없이 바뀐다. */
@@ -530,7 +530,7 @@ async function takeWork(userId: string, src: Work, folderIds: string[]):
   Promise<{ already: boolean; id: string }> {
   /* 휴지통만 「없는」 것으로 본다 — upsertWork 와 같은 잣대다. 거기 내려둔 것이 있다고
      담아가기가 막히면, 화면에는 「이미 담겨 있습니다」라는데 어디에도 안 보인다.
-     이용 완료에 있는 것은 들고 있는 것이라 폴더에만 넣어 준다. */
+     보관에 있는 것은 들고 있는 것이라 폴더에만 넣어 준다. */
   const urlId = findOrMakeUrl({
     platformId: src.platformId, seriesId: src.seriesId, listUrl: src.listUrl,
     appUrl: src.appUrl, mediaType: src.mediaType, title: src.title,
@@ -975,7 +975,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       }
       /* 언제 내렸는지 남긴다 — 캘린더에 "보던 기간" 을 그리는 데 쓴다.
 
-         **이용 완료는 한 작품에 한 줄이다.** 같은 것을 두 번 보고 두 번 끝내면 목록에
+         **보관은 한 작품에 한 줄이다.** 같은 것을 두 번 보고 두 번 끝내면 목록에
          똑같은 줄이 둘 선다 — 「끝까지 본 시리즈」는 몇 번 봤는지가 아니라 무엇을 봤는지의
          목록이라, 거기서 같은 작품이 둘인 것은 알려 주는 바가 없다. 옛 줄을 거두고 새 줄이
          그 자리를 잇는다: 방금 끝낸 쪽이 제목·별점·폴더까지 지금 것을 들고 있다.
@@ -995,7 +995,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
         // 어디에 있는지까지 말한다 — 「이미 있다」만으로는 어디를 찾아봐야 할지 모른다
         if (taken) {
           json(res, 409, { ok: false, reason: taken.state === "watched"
-            ? "이미 이용 완료에 있는 작품입니다." : "이미 목록에 있는 작품입니다." });
+            ? "이미 보관에 있는 작품입니다." : "이미 목록에 있는 작품입니다." });
           return true;
         }
       }

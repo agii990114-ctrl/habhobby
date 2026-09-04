@@ -80,8 +80,16 @@ const normFg = (v: unknown): string | undefined => {
   return FG_CHOICES.includes(u) ? u : undefined;
 };
 
+/** 기본값은 **페이지와 폴더**다. 다 본 작품이 목록에서 통째로 사라지는 것보다,
+    배지를 달고 제자리에 서 있는 편이 처음 보는 사람에게 덜 놀랍다 — 「어디 갔지」를
+    묻게 하지 않는다. 캘린더만 빼 둔다: 거기는 앞으로 볼 것을 챙기는 자리라,
+    끝난 작품이 매주 다시 서면 오늘 할 일이 묻힌다.
+
+    손수 껐던 사람은 그대로다. 저장된 값이 이 기본값을 덮으므로, 빈 배열을 적어 둔
+    사람에게 빈 배열이 남는다 — 기본값을 고쳤다고 남의 결정이 되살아나지 않는다. */
 const getSettings = (u: string): Settings =>
-  ({ openMode: "app", themeColor: null, doneIn: [], ...kvGet<Partial<Settings>>(u, "settings", {}) });
+  ({ openMode: "app", themeColor: null, doneIn: ["home", "lib"],
+     ...kvGet<Partial<Settings>>(u, "settings", {}) });
 const getOverrides = (u: string): Record<string, Override> => kvGet<Record<string, Override>>(u, "overrides", {});
 /* 사이트가 스스로 밝힌 이름(og:site_name). 빈 문자열은 "받아봤지만 없더라"는 표시다 —
    키가 있으면 다시 묻지 않으므로 실패한 사이트를 접속할 때마다 두드리지 않는다. */

@@ -19,7 +19,9 @@ async function api(method, path, body) {
 }
 
 /* ── 상태 ────────────────────────────────────────────────── */
-let works = [], folders = [], settings = { openMode: "app", doneIn: [] }, platforms = {}, me = null;
+// 서버에서 받기 전의 첫 값 — 서버의 기본값과 같아야 첫 그림이 흔들리지 않는다
+let works = [], folders = [], settings = { openMode: "app", doneIn: ["home", "lib"] },
+  platforms = {}, me = null;
 /* 친구 목록은 첫 화면에 실려 오지 않는다 — null 이면 아직 안 불러온 것이다.
    쓰는 곳은 폴더 탭의 "친구 폴더 보기" 와 사이드 메뉴뿐이라, 캘린더만 보고 나가는
    사람에게는 200명분 17KB가 그냥 버려진다. 사이드 메뉴에 적을 숫자만 미리 받는다. */

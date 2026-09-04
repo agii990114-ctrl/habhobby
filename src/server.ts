@@ -110,6 +110,14 @@ type PlatCtx = {
   hosts: Map<string, string[]>;
 };
 
+/** 이 구간이 어느 사이트인가 — **대표 호스트**.
+
+    도메인 구간은 id 에서 잘라내면 되지만 내장 플랫폼은 그렇지 않다(naver-blog →
+    blog.naver.com). 둘 다 hosts[0] 이 그 사이트다 — domainPlatform 도 hosts: [host] 로
+    짓는다. 이 하나로 가르면 「도메인이냐 내장이냐」를 묻는 자리가 없어진다.
+    「직접 입력」(note)만 호스트가 없다 — 물어볼 사이트가 없는 구간이다. */
+const hostOf = (id: string): string | null => platformById(id).hosts[0] ?? null;
+
 function platformCtx(userId: string): PlatCtx {
   /* 구간은 내 분류(work), 주소는 공용(url) — 나뉘어 있으므로 이어 붙여 읽는다. */
   const rows = db.prepare(`SELECT w.platform_id, u.list_url
@@ -127,14 +135,19 @@ function platformCtx(userId: string): PlatCtx {
   const hosts = new Map<string, string[]>();
   for (const [k, v] of sets) hosts.set(k, [...v].sort());
   /* 사이트가 밝힌 이름·표는 **공용 site 표**에서 — 한때 사람마다 kv 에 따로 적었다.
-     이 사람이 담은 도메인 구간의 호스트만 한 번에 읽는다. */
-  const domains = [...sets.keys()].filter(k => k.startsWith(DOMAIN_PREFIX));
-  const sites = sitesFor(domains.map(k => k.slice(DOMAIN_PREFIX.length)));
+     이 사람이 담은 구간의 대표 호스트를 한 번에 읽는다.
+
+     **내장 플랫폼도 함께 읽는다.** 표(favicon)는 도메인 구간만의 이야기가 아니다 —
+     네이버 블로그도 제 표를 밝혀 두었고, 글자 하나보다 그것이 빨리 읽힌다.
+     이름은 다르다: 내장 플랫폼의 이름은 우리가 고른 것이라 사이트에 묻지 않는다. */
+  const byHost = new Map<string, string>();          // 호스트 → 구간 id
+  for (const k of sets.keys()) { const h = hostOf(k); if (h) byHost.set(h, k); }
+  const sites = sitesFor([...byHost.keys()]);
   const auto: Record<string, string> = {}, icons: Record<string, string> = {};
-  for (const k of domains) {
-    const s = sites.get(k.slice(DOMAIN_PREFIX.length));
+  for (const [h, k] of byHost) {
+    const s = sites.get(h);
     if (!s) continue;
-    auto[k] = s.name;
+    if (k.startsWith(DOMAIN_PREFIX)) auto[k] = s.name;
     if (s.icon) icons[k] = s.icon;
   }
   return { ov: getOverrides(userId), auto, icons, hosts };
@@ -155,8 +168,15 @@ function platformView(userId: string, id: string, ctx: PlatCtx = platformCtx(use
     name: o?.name ?? auto ?? base.name,
     initial: o?.initial ?? (auto ? firstChar(auto) : base.initial),
     /* 사이트 표 — 「사이트가 밝힌 것」 층이다. 글자 마크를 손수 정했으면 그것이 이긴다:
-       내가 고른 마크 위에 사이트 그림을 덮으면 고른 뜻이 없다. */
-    icon: isDomain && !o?.initial ? ctx.icons[id] ?? null : null,
+       내가 고른 마크 위에 사이트 그림을 덮으면 고른 뜻이 없다.
+
+       **내장 플랫폼도 마찬가지다.** 한때 도메인 구간에만 붙였는데, 그건 「우리가 고른
+       마크가 파비콘보다 낫다」는 가정이었다 — 실제로는 진짜 표가 나은 쪽이 더 많았다.
+
+       손수 정한 마크(o.initial)가 있으면 그것이 이기지만, 표가 있는 구간에서는 화면이
+       마크 칸을 세우지 않으므로(openPlatformEdit) 새로 정할 길은 없다. 표를 밝힌
+       사이트는 그 표로 서는 것이 규칙이다. */
+    icon: !o?.initial ? ctx.icons[id] ?? null : null,
     color,
     // 직접 고른 것이 없으면 배경에서 계산한다
     fg: o?.fg ?? readableOn(color),
@@ -183,17 +203,16 @@ const platformViews = (userId: string, ids: Iterable<string>) => {
 };
 
 /** 아직 사이트 이름을 물어보지 않은 도메인들 */
+/** 아직 사이트에 물어보지 않은 구간 — 도메인이든 내장 플랫폼이든.
+
+    이름은 도메인 구간만 쓰지만 **표는 둘 다 쓴다.** 물어보는 일이 같으므로 한 자리에서
+    센다. 「직접 입력」처럼 호스트가 없는 구간은 물어볼 곳이 없어 빠진다. */
 function pendingSiteNames(userId: string): { id: string; host: string }[] {
-  const out: { id: string; host: string }[] = [];
-  const hosts = [...new Set(listWorks(userId).map(w => w.platformId)
-    .filter(p => p.startsWith(DOMAIN_PREFIX)).map(p => p.slice(DOMAIN_PREFIX.length)))];
-  const known = sitesFor(hosts);
-  for (const w of listWorks(userId)) {
-    if (!w.platformId.startsWith(DOMAIN_PREFIX) || known.has(w.platformId.slice(DOMAIN_PREFIX.length))) continue;
-    if (out.some(x => x.id === w.platformId)) continue;
-    out.push({ id: w.platformId, host: w.platformId.slice(DOMAIN_PREFIX.length) });
-  }
-  return out;
+  const ids = [...new Set(listWorks(userId).map(w => w.platformId))];
+  const pairs = ids.map(id => ({ id, host: hostOf(id) }))
+    .filter((x): x is { id: string; host: string } => !!x.host);
+  const known = sitesFor(pairs.map(x => x.host));
+  return pairs.filter(x => !known.has(x.host));
 }
 
 /** 클라이언트가 보낸 일정을 저장 가능한 모양으로 맞춘다.
@@ -705,7 +724,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       [t.id, await fetchSiteName(t.host).catch(() => ({ read: false, name: null }))] as const));
     // 못 읽었어도 줄은 남긴다. 안 그러면 같은 사이트를 끝없이 다시 묻는다 —
     // 다시 시도할 길은 편집 화면의 "가져오기"로 열어 두었다.
-    for (const [id, r] of got) setSite(id.slice(DOMAIN_PREFIX.length), r.name, r.icon);
+    for (const [id, r] of got) { const h = hostOf(id); if (h) setSite(h, r.name, r.icon); }
     json(res, 200, {
       ok: true,
       filled: got.filter(([, r]) => r.name).length,
@@ -817,6 +836,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       .catch(() => ({ read: false, name: null, icon: null }));
     if (!r.read) { json(res, 200, { ok: false, reason: "사이트를 읽지 못했습니다." }); return true; }
     setSite(pid.slice(DOMAIN_PREFIX.length), r.name, r.icon);
+
     json(res, 200, r.name
       ? { ok: true, name: r.name, platform: platformView(user.id, pid) }
       : { ok: false, reason: "이 사이트는 이름을 밝히지 않습니다." });

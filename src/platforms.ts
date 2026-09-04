@@ -191,12 +191,24 @@ export const PLATFORMS: Platform[] = [
   {
     id: "naver-blog", name: "네이버 블로그", color: "#03C75A", fg: "#fff", initial: "B",
     mediaType: "text", hosts: ["blog.naver.com"],
-    parse(u) {
+    parse(u, host) {
       let blogId = u.searchParams.get("blogId");
       let logNo = u.searchParams.get("logNo");
       if (!blogId) {
+        /* **경로 첫 조각이 늘 사람 아이디인 것은 아니다.**
+
+           section.blog.naver.com 은 블로그가 아니라 **블로그를 모아 보는 곳**이고,
+           그 경로에 오는 BlogHome.naver · PostList.naver 는 네이버가 붙인 페이지 이름이다.
+           그것을 아이디로 읽으면 blog.naver.com/BlogHome.naver 라는 없는 주소가 만들어져
+           404 가 났다 — 「자동 읽기가 안 된다」의 정체다.
+
+           여기서 null 을 내면 소속은 네이버 블로그로 남고 주소는 손대지 않는다
+           (parseShared 의 matched: false). 그다음은 여느 페이지처럼 읽어 본다. */
+        if (host === "section.blog.naver.com") return null;
         const m = u.pathname.match(/^\/([^/]+)(?:\/(\d+))?/);
         if (!m) return null;
+        // .naver 로 끝나는 조각은 페이지 이름이다 (PostView.naver 처럼) — 아이디가 아니다
+        if (/\.naver$/i.test(m[1])) return null;
         blogId = m[1]; logNo = logNo ?? m[2] ?? null;
       }
       return {

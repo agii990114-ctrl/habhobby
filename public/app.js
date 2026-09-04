@@ -3039,6 +3039,10 @@ function openWork(id, over) {
              안 넣은 것은 줄 자체를 두지 않는다: 「없음」 은 알려 주는 바가 없다. */""}
         ${(() => { const n = folderNames(w); return n ? `<dt>폴더</dt><dd>${esc(n)}</dd>` : ""; })()}
         <dt>마지막 실행</dt><dd>${ago(w.lastAt)}</dd>
+        ${/* **맨 밑이다.** 위의 값들은 한 줄로 끝나는 사실이고 이것만 여러 줄이라,
+             가운데 두면 그 아래 것들이 멀리 밀려 한눈에 안 들어온다. 없으면 줄 자체를
+             두지 않는다 — 「없음」은 알려 주는 바가 없다(폴더 줄과 같은 규칙). */""}
+        ${w.description ? `<dt>설명</dt><dd class="desc">${esc(w.description)}</dd>` : ""}
       </dl>
     </div>
     ${linked ? goHtml(w, p, true)
@@ -3129,9 +3133,11 @@ function openWorkSettings(id, opts) {
   const goBack = o.back ?? (() => openWork(id));
   // 취소로 되돌릴 원본. 재렌더 때 새로 뜨지 않도록 그대로 물려준다.
   const snap = o.snap ?? { title: w.title, schedule: structuredClone(w.schedule),
-    folders: [...w.folders], color: w.color ?? null, coverUrl: w.coverUrl ?? "" };
+    folders: [...w.folders], color: w.color ?? null, coverUrl: w.coverUrl ?? "",
+    description: w.description ?? "" };
   const draft = o.draft ?? { title: w.title, schedule: structuredClone(w.schedule),
-    folders: [...w.folders], color: w.color ?? null, coverUrl: w.coverUrl ?? "" };
+    folders: [...w.folders], color: w.color ?? null, coverUrl: w.coverUrl ?? "",
+    description: w.description ?? "" };
   const again = () => openWorkSettings(id, { ...o, mode, back: o.back, snap, draft });
 
   openSheet(`
@@ -3146,6 +3152,15 @@ function openWorkSettings(id, opts) {
         <span style="text-transform:none;letter-spacing:0">— 사이트가 준 제목이 길거나 어색하면 고쳐 쓰세요</span>
       </label>
       <input id="w-title" value="${esc(draft.title)}" placeholder="작품 제목" maxlength="120">
+    </div>
+    ${/* 사이트가 준 소개글 위에 내가 고쳐 쓰는 자리. 비우면 **비운 채로** 남는다 —
+         사이트 것이 도로 살아나면 지운 뜻이 없다(서버의 PATCH 규칙과 같은 이야기). */""}
+    <div class="field">
+      <label for="w-desc">설명
+        <span style="text-transform:none;letter-spacing:0">— 사이트가 준 소개글입니다. 고치거나 비울 수 있어요</span>
+      </label>
+      <textarea id="w-desc" rows="4" maxlength="400"
+        placeholder="이 작품이 어떤 것인지">${esc(draft.description)}</textarea>
     </div>
     ${w.listUrl ? "" : `<div class="field">
       <label for="w-url">주소 <span style="text-transform:none;letter-spacing:0">— 나중에 페이지가 생기면</span></label>
@@ -3180,6 +3195,8 @@ function openWorkSettings(id, opts) {
 
   const titleEl = sheet.querySelector("#w-title");
   titleEl.addEventListener("input", () => { draft.title = titleEl.value; });
+  const descEl = sheet.querySelector("#w-desc");
+  descEl.addEventListener("input", () => { draft.description = descEl.value; });
   wireSched(sheet, draft.schedule, redraw => { if (redraw) again(); });
   wireColorPicker(sheet, draft, platformOf(w.platformId).color);
   wirePicker(sheet, draft.folders, () => {}, () => again());
@@ -3235,7 +3252,8 @@ function openWorkSettings(id, opts) {
     }
 
     await api("PATCH", `/api/works/${id}`, {
-      title, schedule: draft.schedule, folders: draft.folders, color: draft.color,
+      title, description: draft.description, schedule: draft.schedule,
+      folders: draft.folders, color: draft.color,
       coverUrl: draft.coverUrl, filed: mode === "add" ? true : undefined,
     });
     await reload(); render(); goBack();
@@ -4996,7 +5014,12 @@ function openAdd(prefill, fromShare) {
         <label for="in-title">제목
           <span style="text-transform:none;letter-spacing:0">— <span style="color:var(--${auto ? "good" : "warn"})">${auto ? "자동" : "직접 입력"}</span> · ${esc(resolved.originLabel)}</span>
         </label>
-        <input id="in-title" value="${esc(title)}" placeholder="작품 제목을 입력하세요"></div></div>
+        <input id="in-title" value="${esc(title)}" placeholder="작품 제목을 입력하세요"></div>
+      ${/* **읽기만 한다.** 여기서 고칠 칸을 두면 담기 전에 손보게 되는데, 이 값은
+           공용 줄(url)에 들어가는 것이라 나 하나 고친 것이 남의 화면까지 바꾼다.
+           고치는 자리는 작품 설정이고, 거기서 고친 것은 내 덮어쓰기로만 남는다. */""}
+      ${resolved.description ? `<div class="ov-desc">${esc(resolved.description)}</div>` : ""}
+      </div>
       ${schedHtml(draft.schedule, "어느 플랫폼도 공개하지 않아 직접 고릅니다. 한 번만 정하면 됩니다",
         { value: draft.color, fallback: resolved.platform.color })}
       ${pickerHtml(draft.folders)}

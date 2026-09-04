@@ -389,7 +389,7 @@ function stateSnapshot(user: User) {
 
 /* ── 작품 쓰기 ────────────────────────────────────────────── */
 function upsertWork(userId: string, input: {
-  platformId: string; seriesId: string; title: string; mediaType: string;
+  platformId: string; seriesId: string; title: string; description: string | null; mediaType: string;
   listUrl: string; appUrl: string | null; coverUrl: string | null; coverAspect: number | null;
   episode: string | null;
   schedule: { mode: string; days: number[]; next: number | null; source: string };
@@ -409,6 +409,7 @@ function upsertWork(userId: string, input: {
   const urlId = findOrMakeUrl({
     platformId: input.platformId, seriesId: input.seriesId, listUrl: input.listUrl,
     appUrl: input.appUrl, mediaType: input.mediaType, title: input.title,
+    description: input.description,
     coverUrl: input.coverUrl, coverAspect: input.coverAspect, episode: input.episode,
   });
 
@@ -434,6 +435,9 @@ function upsertWork(userId: string, input: {
 
        제목만은 두 층이다. 공용 줄과 **같으면 덮어쓰기를 비운다** — 값만 같고 덮어쓰기가
        남아 있으면 나중에 공용 제목이 나아져도 이 사람만 옛것을 본다(PATCH 와 같은 규칙). */
+    /* **소개글은 여기서 건드리지 않는다.** 등록 화면은 그것을 보여 주기만 하고 고치는
+       칸을 두지 않는다 — 화면에 없는 값을 저장이 바꾸면, 다시 담았다는 이유로 고쳐 둔
+       소개글이 말없이 사라진다. 고치는 자리는 작품 설정이다. */
     const base = db.prepare("SELECT title FROM url WHERE id = ?")
       .get(urlId) as { title: string };
     const days = JSON.stringify(input.schedule.days);
@@ -530,6 +534,7 @@ async function takeWork(userId: string, src: Work, folderIds: string[]):
   const urlId = findOrMakeUrl({
     platformId: src.platformId, seriesId: src.seriesId, listUrl: src.listUrl,
     appUrl: src.appUrl, mediaType: src.mediaType, title: src.title,
+    description: src.description ?? null,
     coverUrl: src.coverUrl, coverAspect: src.coverAspect, episode: src.episode,
   });
   const had = db.prepare(
@@ -554,18 +559,20 @@ async function takeWork(userId: string, src: Work, folderIds: string[]):
      공용 줄과 같은 값이면 덮어쓸 것이 없다 — 비워 두면 공용 것을 그대로 보게 되고,
      나중에 공용 줄이 나아지면 그것도 따라온다. 다른 값일 때만 내 쪽에 적는다.
      표지는 친구 것을 내 파일로 떠 왔으므로(copyCover) 늘 내 값이다. */
-  const u = db.prepare("SELECT title, cover_url, cover_aspect, episode FROM url WHERE id = ?")
-    .get(urlId) as { title: string; cover_url: string | null;
+  const u = db.prepare(`SELECT title, description, cover_url, cover_aspect, episode
+      FROM url WHERE id = ?`)
+    .get(urlId) as { title: string; description: string | null; cover_url: string | null;
                      cover_aspect: number | null; episode: string | null };
   const mine = <T>(v: T, base: T): T | null => (v === base ? null : v);
 
   db.prepare(`INSERT INTO work
-      (id, user_id, url_id, platform_id, title, cover_url, cover_aspect, episode,
+      (id, user_id, url_id, platform_id, title, description, cover_url, cover_aspect, episode,
        state, filed, visits, last_at, added_at,
        sched_mode, sched_days, sched_next, sched_source, sched_from, color)
-    VALUES (?,?,?,?,?,?,?,?, 'active', 1, 0, ?, ?, ?, ?, ?, ?, ?, NULL)`)
+    VALUES (?,?,?,?,?,?,?,?,?, 'active', 1, 0, ?, ?, ?, ?, ?, ?, ?, NULL)`)
     .run(id, userId, urlId, src.platformId,
       mine(src.title, u.title),
+      mine(src.description ?? null, u.description),
       cover === u.cover_url ? null : cover,
       mine(src.coverAspect, u.cover_aspect),
       mine(src.episode, u.episode),
@@ -728,7 +735,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       const title = String(b.title ?? "").trim();
       if (!title) { json(res, 400, { ok: false, reason: "제목이 필요합니다." }); return true; }
       const { work } = upsertWork(user.id, {
-        platformId: "note", seriesId: newId("n"), title, mediaType: "link",
+        platformId: "note", seriesId: newId("n"), title, description: null, mediaType: "link",
         listUrl: "", appUrl: null, coverUrl: null, coverAspect: null, episode: null,
         schedule: normSchedule(b.schedule),
         folders: Array.isArray(b.folders) ? b.folders : [],
@@ -767,7 +774,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     const hex = (v: unknown) =>
       typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : null;
     const { work, made } = upsertWork(user.id, {
-      platformId, seriesId: r.seriesId, title, mediaType: r.mediaType,
+      platformId, seriesId: r.seriesId, title, description: r.description, mediaType: r.mediaType,
       listUrl: r.listUrl, appUrl: r.appUrl, coverUrl: r.coverUrl,
       coverAspect: r.coverAspect, episode: r.episode,
       schedule: b.schedule ? normSchedule(b.schedule) : r.schedule,
@@ -953,6 +960,18 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
           .get(id) as { title: string } | undefined;
         db.prepare("UPDATE work SET title=? WHERE id=?")
           .run(base && base.title === want ? null : want, id);
+      }
+      /* **소개글도 두 층이다.** 제목과 같은 규칙: 공용 줄과 같으면 덮어쓰기를 비운다.
+
+         빈 문자열은 「공용 것을 쓴다」가 아니라 **「비워 둔다」**로 읽는다 — 사이트가
+         적어 둔 것이 마음에 안 들어 지웠는데 그것이 도로 살아나면 지운 뜻이 없다.
+         공용 줄이 비어 있을 때만 둘이 같아져 덮어쓰기가 비워진다. */
+      if (typeof b.description === "string") {
+        const want = b.description.trim().slice(0, 400);
+        const base = db.prepare("SELECT u.description FROM work w JOIN url u ON u.id = w.url_id WHERE w.id = ?")
+          .get(id) as { description: string | null } | undefined;
+        db.prepare("UPDATE work SET description=? WHERE id=?")
+          .run((base?.description ?? "") === want ? null : want, id);
       }
       /* 언제 내렸는지 남긴다 — 캘린더에 "보던 기간" 을 그리는 데 쓴다.
 

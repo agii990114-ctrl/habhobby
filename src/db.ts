@@ -112,6 +112,7 @@ CREATE TABLE IF NOT EXISTS work (
   /* 아래 셋은 **덮어쓰기**다. NULL 이면 url 것을 쓴다 — 「기본값으로 되돌리기」는
      이 칸을 비우는 일이라 원래 값이 저절로 돌아온다. */
   title        TEXT,
+  description  TEXT,
   cover_url    TEXT,
   cover_aspect REAL,
   episode      TEXT,
@@ -184,7 +185,9 @@ CREATE TABLE IF NOT EXISTS url (
   list_url     TEXT NOT NULL,
   app_url      TEXT,
   media_type   TEXT NOT NULL DEFAULT 'link',
-  title        TEXT NOT NULL,                      -- OG 가 준 원본
+  title        TEXT NOT NULL,
+  /** 사이트가 밝힌 소개글. 없으면 NULL — 빈 문자열과 가르지 않는다. */
+  description  TEXT,                      -- OG 가 준 원본
   cover_url    TEXT,
   cover_aspect REAL,
   episode      TEXT,                               -- 사이트가 알려준 최신 회차 (아직 안 쓴다)
@@ -328,6 +331,9 @@ try {
 } catch { /* 이미 있음 */ }
 // 비워두면 added_at으로 대신한다 — 기존 작품은 등록 시점이 곧 일정 시작이다
 try { db.exec("ALTER TABLE work ADD COLUMN sched_from INTEGER"); } catch { }
+/* 소개글 — 공용 줄과 내 덮어쓰기, 제목·표지와 같은 두 층이다. */
+try { db.exec("ALTER TABLE url ADD COLUMN description TEXT"); } catch { /* 이미 있음 */ }
+try { db.exec("ALTER TABLE work ADD COLUMN description TEXT"); } catch { /* 이미 있음 */ }
 try { db.exec("ALTER TABLE work ADD COLUMN rating INTEGER"); } catch { }
 try { db.exec("ALTER TABLE work ADD COLUMN state_at INTEGER"); } catch { }
 try { db.exec("ALTER TABLE work ADD COLUMN color TEXT"); } catch { }
@@ -886,6 +892,8 @@ export type Work = {
       제목은 저마다 고쳐 쓸 수 있고 platformId 는 내 분류라, 같음을 가리는 것은 이것뿐이다. */
   urlId: string;
   platformId: string; seriesId: string; title: string; mediaType: string;
+  /** 사이트가 밝힌 소개글 위에 내가 고쳐 쓴 것 — 읽을 때는 이미 합쳐져 온다. */
+  description: string | null;
   listUrl: string; appUrl: string | null; coverUrl: string | null; coverAspect: number | null;
   episode: string | null;
   state: "active" | "watched" | "dropped"; filed: boolean; visits: number;
@@ -907,6 +915,7 @@ const WORK_COLS = `
   w.last_at, w.added_at, w.sched_mode, w.sched_days, w.sched_next,
   w.sched_source, w.sched_from, w.rating, w.state_at, w.color,
   COALESCE(w.title, u.title)               AS title,
+  COALESCE(w.description, u.description)   AS description,
   COALESCE(w.cover_url, u.cover_url)       AS cover_url,
   COALESCE(w.cover_aspect, u.cover_aspect) AS cover_aspect,
   COALESCE(w.episode, u.episode)           AS episode,
@@ -917,6 +926,7 @@ const WORK_FROM = "FROM work w JOIN url u ON u.id = w.url_id";
 function toWork(r: any, folders: string[]): Work {
   return {
     id: r.id, urlId: r.url_id, platformId: r.platform_id, seriesId: r.series_id, title: r.title,
+    description: r.description ?? null,
     mediaType: r.media_type, listUrl: r.list_url, appUrl: r.app_url,
     coverUrl: r.cover_url, coverAspect: r.cover_aspect, episode: r.episode,
     state: r.state, filed: !!r.filed, visits: r.visits, rating: r.rating ?? null,
@@ -1011,12 +1021,14 @@ export const markChecked = (urlId: string): void => {
     주소에서 「어느 사이트의 몇 번 작품인가」를 뽑는 데는 네트워크가 들지 않으므로,
     그것만으로 여기를 찾아볼 수 있다. 있으면 남의 페이지를 다시 읽을 이유가 없다. */
 export function knownUrl(platformId: string, seriesId: string) {
-  const r = db.prepare(`SELECT list_url, app_url, media_type, title, cover_url, cover_aspect, episode
+  const r = db.prepare(`SELECT list_url, app_url, media_type, title, description,
+      cover_url, cover_aspect, episode
     FROM url WHERE platform_id = ? AND series_id = ?`).get(platformId, seriesId) as any;
   if (!r) return null;
   return {
     listUrl: r.list_url as string, appUrl: r.app_url as string | null,
     mediaType: r.media_type as string, title: r.title as string,
+    description: (r.description ?? null) as string | null,
     coverUrl: r.cover_url as string | null, coverAspect: r.cover_aspect as number | null,
     episode: r.episode as string | null,
   };
@@ -1027,21 +1039,54 @@ export function knownUrl(platformId: string, seriesId: string) {
     이미 있으면 그대로 쓴다 — 남이 담아 둔 줄을 내가 담는다고 고쳐 쓰면, 그 사람 화면의
     제목과 표지가 말없이 바뀐다. 사이트가 준 값이 달라졌더라도 그건 공용 줄의 문제이지
     지금 담는 사람이 정할 일이 아니다. */
+/** 이 소개글이 **이 작품의 것인가.**
+
+    넷플릭스는 어느 작품 주소를 넣어도 같은 말을 내놓는다 — 「스마트 TV, 태블릿…
+    마음껏 즐기세요」. 값은 오는데 쓸 수 없는 값이다. 제목에서 pageIsGeneric 이 하는
+    일을 소개글에서도 해야 하는데, 한 페이지만 보아서는 그것이 대문 문구인지 알 수 없다.
+
+    **같은 구간의 다른 작품과 글자 하나 안 다르면** 그건 작품의 것이 아니다. 목록을
+    하드코딩하지 않고도 가려낼 수 있는 유일한 신호다 — 두 번째 작품을 담는 순간 드러난다.
+
+    드러나면 **먼저 담긴 쪽도 지운다.** 그 값도 애초에 그 작품의 것이 아니었고,
+    한쪽만 지우면 「왜 이건 있고 저건 없지」가 된다. */
+function ownDescription(platformId: string, seriesId: string, desc: string | null): string | null {
+  if (!desc) return null;
+  const twin = db.prepare(`SELECT id FROM url
+    WHERE platform_id = ? AND series_id <> ? AND description = ?`)
+    .all(platformId, seriesId, desc) as { id: string }[];
+  if (!twin.length) return desc;
+  db.prepare(`UPDATE url SET description = NULL WHERE id IN (${twin.map(() => "?").join(",")})`)
+    .run(...twin.map(t => t.id));
+  return null;
+}
+
 export function findOrMakeUrl(p: {
   platformId: string; seriesId: string; listUrl: string; appUrl: string | null;
-  mediaType: string; title: string; coverUrl: string | null; coverAspect: number | null;
+  mediaType: string; title: string; description: string | null;
+  coverUrl: string | null; coverAspect: number | null;
   episode: string | null;
 }): string {
-  const had = db.prepare("SELECT id FROM url WHERE platform_id = ? AND series_id = ?")
-    .get(p.platformId, p.seriesId) as { id: string } | undefined;
-  if (had) return had.id;
+  const had = db.prepare("SELECT id, description FROM url WHERE platform_id = ? AND series_id = ?")
+    .get(p.platformId, p.seriesId) as { id: string; description: string | null } | undefined;
+  /* 이미 있는 줄은 그대로 쓴다. 다만 **소개글이 비어 있으면 채운다** — 소개글을 읽기
+     전에 담긴 줄들이 있고, 그것들이 영영 비어 있을 이유가 없다. 이미 든 값은 덮지
+     않는다: 그건 누군가 고쳐 둔 것일 수 있다. */
+  if (had) {
+    if (!had.description && p.description) {
+      const own = ownDescription(p.platformId, p.seriesId, p.description);
+      if (own) db.prepare("UPDATE url SET description = ? WHERE id = ?").run(own, had.id);
+    }
+    return had.id;
+  }
   const id = newId("u");
   db.prepare(`INSERT INTO url
       (id, platform_id, series_id, list_url, app_url, media_type,
-       title, cover_url, cover_aspect, episode, fetched_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+       title, description, cover_url, cover_aspect, episode, fetched_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(id, p.platformId, p.seriesId, p.listUrl, p.appUrl, p.mediaType,
-      p.title, p.coverUrl, p.coverAspect, p.episode, Date.now());
+      p.title, ownDescription(p.platformId, p.seriesId, p.description),
+      p.coverUrl, p.coverAspect, p.episode, Date.now());
   return id;
 }
 

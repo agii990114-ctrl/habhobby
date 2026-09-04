@@ -1147,9 +1147,12 @@
   .sheet {
     background: var(--surface); border-radius: 18px 18px 0 0; width: 100%;
     display: flex; flex-direction: column;
-    /* 아무리 긴 시트라도 상단바 자리는 남긴다 — 뒤에 무엇이 있었는지 보이고,
-       그 자리를 눌러 닫을 수도 있다 */
-    max-height: calc(100% - var(--bar-h, 62px));
+    /* 아무리 긴 시트라도 위에 자리는 남긴다 — 뒤에 무엇이 있었는지 보이고, 그 자리를
+       눌러 닫을 수도 있다. 한때 상단바 높이(62px)를 통째로 비워 두었는데, 작품 창에
+       별점이나 소개글이 붙으면 그만큼이 아쉬워 한 줄이 화면 밖으로 밀렸다.
+       닫는 길은 이것 말고도 넷이다(손잡이·끌어내리기·Esc·닫기 버튼) — 눌러 닫을 자리는
+       한 줄이면 족하다. */
+    max-height: calc(100% - 34px);
     overflow: hidden;                     /* 둥근 모서리 밖으로 내용이 삐져나오지 않게 */
     animation: rise .22s ease-out;
   }
@@ -1265,7 +1268,11 @@
     width: 100%; background: var(--surface-2); border: 1px solid var(--line-2);
     border-radius: 9px; padding: 9px 11px; font-size: 13.5px;
   }
-  .field textarea { font-family: "IBM Plex Mono", monospace; font-size: 12px; resize: vertical; min-height: 66px; line-height: 1.55; }
+  /* 고정폭은 **주소 칸의 것**이다 — 붙여넣은 주소가 맞는지 눈으로 짚어야 하니까.
+     글을 적는 칸(설명)까지 고정폭이면 읽기가 나빠진다. 갈래를 나눠 단다. */
+  /* textarea 는 브라우저가 저 혼자 고정폭을 쓴다 — 물려받게 돌려놓는다. */
+  .field textarea { font-family: inherit; resize: vertical; min-height: 66px; line-height: 1.6; }
+  .field textarea#in-url { font-family: "IBM Plex Mono", monospace; font-size: 12px; line-height: 1.55; }
 
   /* 보관함 항목 */
   /* 여러 개 고르기 */
@@ -1467,6 +1474,16 @@
   .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12.5px; margin: 0 0 14px; }
   .kv dt { color: var(--ink-3); white-space: nowrap; }
   .kv dd { margin: 0; word-break: break-all; }
+  /* 소개글은 **문장**이다. 위의 값들은 주소가 섞여 있어 아무 데서나 끊어야 하지만
+     (word-break: break-all), 글은 그렇게 끊으면 읽기가 나빠진다 — 낱말 단위로 넘긴다. */
+  .kv dd.desc { word-break: keep-all; overflow-wrap: anywhere; line-height: 1.62; color: var(--ink-2); }
+  /* 등록 화면에서 미리 보여 주는 소개글 — 읽기만 하는 값이라 칸처럼 보이지 않게 둔다 */
+  .ov-desc {
+    margin-top: 9px; padding: 9px 11px; border-radius: 9px;
+    background: var(--surface-2); border: 1px solid var(--line);
+    font-size: 12px; line-height: 1.62; color: var(--ink-2);
+    word-break: keep-all; overflow-wrap: anywhere;
+  }
   .url { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-2); }
 
   .link-row { display: flex; gap: 8px; margin-bottom: 8px; }

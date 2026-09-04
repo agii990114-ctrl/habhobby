@@ -18,6 +18,8 @@ export type Resolved =
       platform: { id: string; name: string; color: string; fg: string; initial: string };
       seriesId: string;
       title: string;
+      /** 사이트가 밝힌 소개글. 없거나 **대문 문구**로 보이면 null. */
+      description: string | null;
       coverUrl: string | null;
       coverAspect: number | null;
       listUrl: string;
@@ -50,8 +52,24 @@ async function unshorten(raw: string): Promise<string> {
   } catch { return raw; }
 }
 
+/** HTML 엔티티를 푼다.
+
+    **숫자 엔티티는 하나씩 적을 수 없다.** 한때 `&#39;` 와 `&#x27;` 만 적어 두었는데,
+    같은 글자를 `&#039;` 로 쓰는 곳이 있어 그대로 새어 나왔다 — 네이버 웹툰 소개글에
+    「겸살귀&#039;」가 그렇게 찍혔다. 0 을 몇 개 붙이든, 열 자리든 열여섯 자리든 규칙은
+    하나다. 규칙으로 풀면 다음에 무엇이 오든 걸린다.
+
+    `&amp;` 는 **맨 마지막**이다. 먼저 풀면 `&amp;#39;`(글자 그대로의 & 39;)까지
+    한 번 더 풀려 없던 따옴표가 생긴다. */
 const decodeEntities = (s: string): string => s
-  .replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&#39;/g, "'")
+  .replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (whole, n: string) => {
+    const hex = n[0] === "x" || n[0] === "X";
+    const code = parseInt(hex ? n.slice(1) : n, hex ? 16 : 10);
+    // 범위를 벗어난 값에 fromCodePoint 는 던진다 — 못 풀 것은 그대로 둔다
+    return Number.isInteger(code) && code > 0 && code <= 0x10FFFF
+      ? String.fromCodePoint(code) : whole;
+  })
+  .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
   .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ")
   .replace(/&amp;/g, "&");
 
@@ -75,7 +93,8 @@ export function stripSiteSuffix(title: string, ...names: (string | null | undefi
   return title;
 }
 
-type Og = { read: boolean; title: string | null; image: string | null; siteName: string | null;
+type Og = { read: boolean; title: string | null; description: string | null;
+             image: string | null; siteName: string | null;
              url: string | null; imgW: number | null; imgH: number | null;
              /** 그쪽이 돌려준 번호. 못 닿았으면 0. */
              status: number;
@@ -85,8 +104,8 @@ type Og = { read: boolean; title: string | null; image: string | null; siteName:
              icon: string | null };
 
 async function fetchOg(url: string): Promise<Og> {
-  const empty: Og = { read: false, title: null, image: null, siteName: null, url: null,
-                      imgW: null, imgH: null, status: 0, landed: null, icon: null };
+  const empty: Og = { read: false, title: null, description: null, image: null, siteName: null,
+                      url: null, imgW: null, imgH: null, status: 0, landed: null, icon: null };
   try {
     const res = await fetch(url, {
       headers: { "User-Agent": UA, "Accept-Language": "ko-KR,ko;q=0.9" },
@@ -117,6 +136,19 @@ async function fetchOg(url: string): Promise<Og> {
       const m = html.match(/<title[^>]*>([^<]*)<\/title>/i);
       title = m ? decodeEntities(m[1]).replace(/\s+/g, " ").trim() || null : null;
     }
+    /* **소개글.** 세 자리를 차례로 본다 — og 가 없어도 옛 meta description 을 둔 곳이 많다.
+
+       길이를 자른다. 어떤 사이트는 본문 첫 문단을 통째로 넣어 두는데, 그걸 그대로
+       담으면 표에도 화면에도 남의 글 한 쪽이 들어앉는다. 여기서 필요한 것은 「무엇인지」
+       알아볼 만큼이다. 자를 때는 낱말 사이에서 자른다 — 글자 가운데서 끊으면 어색하다. */
+    const cut = (v: string | null): string | null => {
+      if (!v) return null;
+      if (v.length <= DESC_MAX) return v;
+      const head = v.slice(0, DESC_MAX);
+      const sp = head.lastIndexOf(" ");
+      return (sp > DESC_MAX * 0.6 ? head.slice(0, sp) : head).trimEnd() + "…";
+    };
+    const description = cut(pick("og:description") ?? pick("twitter:description") ?? pick("description"));
     const num = (v: string | null): number | null => {
       const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null;
     };
@@ -146,6 +178,7 @@ async function fetchOg(url: string): Promise<Og> {
          새로 두드릴 것이 없다. */
       landed: res.url && res.url !== url ? res.url : null,
       title,
+      description,
       image: pick("og:image") ?? pick("twitter:image"),
       siteName: pick("og:site_name"),
       // 이 태그들이 **이 페이지 것인지** 가리는 데 쓴다 (아래 pageIsGeneric 참고)
@@ -257,6 +290,9 @@ function pageIsGeneric(og: Og, askedUrl: string, plat: Platform, title: string):
    붙들고 있지 않기 위해서다. 실패는 기억하지 않는다(잠깐 죽은 것일 수 있다).
 
    *** 뜻이 있는 부수 효과: 남의 서버를 두드리는 횟수가 줄어 차단당할 일도 준다. */
+/** 소개글 상한. 이만큼이면 「무엇인지」는 알아본다 — 그 이상은 남의 글을 옮겨 담는 일이다. */
+const DESC_MAX = 400;
+
 const MEMO_MS = 10 * 60 * 1000;
 const memo = new Map<string, { at: number; got: Resolved }>();
 
@@ -264,7 +300,8 @@ const memo = new Map<string, { at: number; got: Resolved }>();
     resolve 는 db 를 모르므로 함수로 받는다. */
 export type Known = {
   listUrl: string; appUrl: string | null; mediaType: string;
-  title: string; coverUrl: string | null; coverAspect: number | null; episode: string | null;
+  title: string; description: string | null;
+  coverUrl: string | null; coverAspect: number | null; episode: string | null;
 };
 export type KnownLookup = (platformId: string, seriesId: string) => Known | null;
 
@@ -311,6 +348,7 @@ async function resolveOnce(raw: string, known?: KnownLookup): Promise<Resolved> 
       platform: { id: plat.id, name: plat.name, color: plat.color, fg: plat.fg, initial: plat.initial },
       seriesId: p.seriesId,
       title: had.title,
+      description: had.description,
       coverUrl: had.coverUrl,
       coverAspect: had.coverAspect,
       listUrl: p.listUrl,
@@ -362,6 +400,9 @@ async function resolveOnce(raw: string, known?: KnownLookup): Promise<Resolved> 
     platform: { id: plat.id, name: plat.name, color: plat.color, fg: plat.fg, initial: plat.initial },
     seriesId: p.seriesId,
     title: generic ? "" : cleaned,
+    /* **제 이야기를 하지 않는 페이지의 소개글도 버린다.** 제목이 대문 것이면 그 옆의
+       소개글도 대문 것이다 — 작품마다 같은 말이 붙느니 없는 편이 낫다(표지와 같은 잣대). */
+    description: generic ? null : og.description,
     /* 제 이야기를 하지 않는 페이지의 그림은 공용 로고다 — 작품마다 같은 그림이 붙느니
        없는 편이 낫다. 표지가 없으면 제목 첫 글자로 만든 그림이 대신 들어간다. */
     coverUrl: generic ? null : cover,

@@ -19,7 +19,7 @@ async function api(method, path, body) {
 }
 
 /* ── 상태 ────────────────────────────────────────────────── */
-let works = [], folders = [], settings = { openMode: "app" }, platforms = {}, me = null;
+let works = [], folders = [], settings = { openMode: "app", doneIn: [] }, platforms = {}, me = null;
 /* 친구 목록은 첫 화면에 실려 오지 않는다 — null 이면 아직 안 불러온 것이다.
    쓰는 곳은 폴더 탭의 "친구 폴더 보기" 와 사이드 메뉴뿐이라, 캘린더만 보고 나가는
    사람에게는 200명분 17KB가 그냥 버려진다. 사이드 메뉴에 적을 숫자만 미리 받는다. */
@@ -264,6 +264,20 @@ const icon = (name, cls = "") => ICONS[name]
       focusable="false">${ICONS[name]}</svg>`
   : "";
 
+/** 내려 둔 작품임을 **표지 위에** 밝힌다.
+
+    목록에 살아 있는 것과 섞여 서므로, 한눈에 갈리지 않으면 「다 본 건데 왜 여기 있지」가
+    된다. 켜 두었을 때만 붙는 것이 아니다 — 캘린더의 지난 칸처럼 설정과 무관하게 서는
+    자리에도 붙는다. 서 있으면 붙는다, 가 규칙이다. */
+const doneBadge = w => !STATES[w.state] ? ""
+  : `<span class="wbadge ${w.state}">${icon(STATES[w.state].icon)}${
+      esc(STATES[w.state].label)}</span>`;
+
+/** 감상 완료를 세울 수 있는 탭들 — 열쇠는 서버가 아는 것과 같다.
+    이름은 화면 아래 탭 단추와 같은 말을 쓴다. 설정에서 「페이지」라 해 놓고
+    화면에서 다른 이름이면 어디를 켠 것인지 알 수 없다. */
+const DONE_TABS = [["cal", "캘린더"], ["home", "페이지"], ["lib", "폴더"]];
+
 const STATES = {
   watched: { label: "감상 완료", icon: "check", desc: "끝까지 본 시리즈" },
   dropped: { label: "휴지통", icon: "trash", desc: "더 보지 않는 시리즈" },
@@ -469,8 +483,23 @@ const platformOf = id => platforms[id] ?? { ...FALLBACK_PLATFORM, id };
    그 사람이 정한 일정이 내 캘린더를 채우면 내가 보기로 한 것과 뒤섞인다 —
    마음에 들면 「내 목록에 담기」로 한 번 눌러 내 것으로 만든다. */
 const activeWorks = () => works.filter(w => w.state === "active" && !w.folderOnly);
+
+/** 감상 완료한 작품을 이 탭에도 세우나 — 전체 설정에서 탭마다 켠다. */
+const showsDone = where => (settings.doneIn ?? []).includes(where);
+
+/** **그 탭이 세우는 작품들.**
+
+    살아 있는 것은 늘 서고, 감상 완료한 것은 그 탭을 켜 두었을 때만 함께 선다.
+    휴지통은 어디에도 서지 않는다 — 그건 「끝까지 봤다」가 아니라 「더 안 본다」라서,
+    목록에 도로 세울 이유가 없다.
+
+    탭마다 부르는 곳이 다르므로 어느 탭인지를 받는다. activeWorks 를 통째로 넓히면
+    복구 막기(alreadyLive)나 새 콘텐츠까지 함께 넓어져, 켠 적 없는 자리가 바뀐다. */
+const listedWorks = where => works.filter(w => !w.folderOnly &&
+  (w.state === "active" || (w.state === "watched" && showsDone(where))));
 /** 폴더 안을 볼 때만 쓰는 목록 — 남이 넣어 둔 것까지 포함한다 */
-const filedWorks = () => works.filter(w => w.state === "active");
+const filedWorks = () => works.filter(w =>
+  w.state === "active" || (w.state === "watched" && showsDone("lib")));
 const worksInState = s => byRecent(works.filter(w => w.state === s));
 const unfiled = () => byRecent(activeWorks().filter(w => !w.filed && !w.folders.length));
 
@@ -571,8 +600,12 @@ function occursOn(w, date) {
   // 지난 수요일들에 놓을 근거가 없다 — 그때는 목록에 있지도 않았다.
   if (["weekly", "biweekly", "monthly", "monthly-dow"].includes(s.mode) && date.getTime() < schedStart(w))
     return false;
-  // 감상 완료·휴지통으로 내린 뒤로는 놓지 않는다. 그 전까지는 기록으로 남는다.
-  if (date.getTime() > schedEnd(w)) return false;
+  /* 감상 완료·휴지통으로 내린 뒤로는 놓지 않는다. 그 전까지는 기록으로 남는다.
+
+     **캘린더를 켜 두었으면 감상 완료는 계속 놓는다.** 「이 탭에도 세운다」는 말이
+     지난 자국만 남기는 것이면 켠 보람이 없다 — 앞으로의 연재 날에도 서야 한다.
+     휴지통은 여기서 갈린다: 그건 켜는 자리가 없으므로 늘 끊긴다. */
+  if (date.getTime() > schedEnd(w) && !(w.state === "watched" && showsDone("cal"))) return false;
 
   if (s.mode === "weekly") return s.days.includes(date.getDay());
   if (s.mode === "biweekly") {
@@ -720,6 +753,7 @@ function workCard(w, when) {
       ${/* 아직 한 번도 안 열어 본 것. 담자마자 목록 맨 앞에 서므로 눈에 띄는 표가
            하나 있어야 "새로 온 것" 과 "늘 거기 있던 것" 이 갈린다. */""}
       ${w.visits ? "" : `<span class="new-dot" aria-label="아직 안 본 작품"></span>`}
+      ${doneBadge(w)}
     </div>
     ${/* 찍는 시각은 **차례를 정한 그 값**이다(touchedAt). lastAt 만 찍던 때는 복구한
          작품이 맨 위에 서면서 「3일 전」이라 적혀, 그 아래 「방금」보다 위에 있는 것이
@@ -762,6 +796,7 @@ const pickCardHtml = (w, attr, picked) => `<button class="work pick-work${picked
     ${attr}="${esc(w.id)}" aria-pressed="${picked.has(w.id)}">
     <div class="cover" style="${coverStyle(w)}">${coverChar(w)}
       ${w.episode ? `<span class="ep">${esc(w.episode)}</span>` : ""}
+      ${doneBadge(w)}
       <span class="tick">${icon("check")}</span>
     </div>
     <h4>${esc(w.title)}</h4><time>${ago(touchedAt(w))}</time>
@@ -1069,7 +1104,7 @@ function calTail() {
   let html = "";
   // 모든 단락이 오늘과 데이터만 본다. 달을 넘기거나 날짜를 눌러도 내용이 그대로여야 한다.
   const t0 = midnight().getTime();
-  const dated = m => activeWorks().filter(w =>
+  const dated = m => listedWorks("cal").filter(w =>
     w.schedule.mode === "dated" && w.schedule.next && m(w.schedule.next));
 
   /* 공개 예정은 **달력 바로 아래에** 제 단락으로 선다 — 날짜가 있는 것들이라 달력의
@@ -1092,7 +1127,7 @@ function calTail() {
 
 /** 달력의 어느 날에도 놓이지 않는 작품 — 상시·완결과 아직 안 정한 것들 */
 const undated = w => ["always", "done"].includes(w.schedule.mode) || unscheduled(w);
-const idleWorks = () => byRecent(activeWorks().filter(undated));
+const idleWorks = () => byRecent(listedWorks("cal").filter(undated));
 /** 왜 날짜가 없는지 한마디로 */
 const undatedReason = w => ["always", "done"].includes(w.schedule.mode)
   ? SCHED_LABEL[w.schedule.mode] : idleReason(w);
@@ -1115,7 +1150,7 @@ const calSwitch = () => `<div class="cal-top">
 let idleSec = null;
 
 /** 날짜는 정해졌지만 아직 안 온 것 — 가까운 날 먼저 */
-const upcoming = () => activeWorks()
+const upcoming = () => listedWorks("cal")
   .filter(w => w.schedule.mode === "dated" && w.schedule.next && w.schedule.next >= midnight().getTime())
   .sort((a, b) => a.schedule.next - b.schedule.next);
 
@@ -1782,7 +1817,8 @@ function renderMonth() {
 function folderIndex() {
   const idx = new Map();
   for (const w of works) {
-    if (w.state !== "active") continue;
+    // 남이 넣어 둔 것(folderOnly)까지 센다 — 폴더 안은 그것도 보이는 자리다
+    if (w.state !== "active" && !(w.state === "watched" && showsDone("lib"))) continue;
     for (const id of w.folders) {
       let a = idx.get(id);
       if (!a) idx.set(id, a = []);
@@ -1794,8 +1830,8 @@ function folderIndex() {
 
 function worksIn(fid) {
   // 전체·미분류는 **내가 보기로 한 것**만 — 남이 넣어 둔 것까지 세면 숫자가 낯설어진다
-  if (fid === "_all") return activeWorks();
-  if (fid === "_none") return activeWorks().filter(w => !w.folders.length);
+  if (fid === "_all") return listedWorks("lib");
+  if (fid === "_none") return listedWorks("lib").filter(w => !w.folders.length);
   return filedWorks().filter(w => w.folders.includes(fid));
 }
 
@@ -2179,8 +2215,8 @@ async function openInviteMore(f, done, back) {
 /** 폴더 한 줄. idx 를 주면 그것으로 세고, 안 주면 제가 훑는다 —
     목록처럼 여러 줄을 한꺼번에 그리는 곳만 색인을 만들어 넘긴다. */
 function folderRow(fid, emoji, name, f, idx) {
-  const all = idx ? (fid === "_all" ? activeWorks()
-    : fid === "_none" ? activeWorks().filter(w => !w.folders.length)
+  const all = idx ? (fid === "_all" ? listedWorks("lib")
+    : fid === "_none" ? listedWorks("lib").filter(w => !w.folders.length)
       : idx.get(fid) ?? [])
     : worksIn(fid);
   const list = byRecent(all).slice(0, 4);
@@ -2282,7 +2318,7 @@ function render() {
     /* **단락을 넘나들며 고른다.** 플랫폼별로 나뉘어 있어도 고르는 범위는 화면 전체다 —
        「넷플릭스에서 둘, 웹툰에서 셋」을 한 번에 옮기는 것이 실제로 하고 싶은 일이고,
        단락마다 따로 고르게 하면 같은 일을 두 번 해야 한다. */
-    const home = byRecent(activeWorks());
+    const home = byRecent(listedWorks("home"));
     workPickAt("home", home);
     /* 페이지 탭은 창이 아니라 화면이라 머리줄이 없다 — 「선택」은 제목줄 오른쪽 끝에
        선다. 창에서 머리줄 오른쪽에 서는 것과 같은 자리다. */
@@ -2330,7 +2366,7 @@ function render() {
        화면에 그것들이 서 있으면 "일반 폴더" 를 골랐는데 전부가 나오는 셈이라 어긋난다. */
     if (!folderSel && fkind === "all") {
       html += folderRow("_all", icon("grid"), "전체", undefined, idx);
-      if (activeWorks().some(w => !w.folders.length))
+      if (listedWorks("lib").some(w => !w.folders.length))
         html += folderRow("_none", icon("inbox"), "미분류", undefined, idx);
     }
     const list = kindShown();
@@ -4329,7 +4365,7 @@ function openPlatformList(pid, back) {
 
 function drawPlatformList(pid, back) {
   const p = platformOf(pid);
-  const all = byRecent(activeWorks().filter(w => w.platformId === pid));
+  const all = byRecent(listedWorks("home").filter(w => w.platformId === pid));
 
   /* 찾기로 좁힌 뒤의 목록. 몸을 짓는 함수 안에만 두면 「전체 선택」이 그것을 못 본다 —
      밖으로 빼서 workPickAt 에도 같은 것을 넘긴다. */
@@ -4393,7 +4429,7 @@ function openPlatformIndex() {
   /* 구간마다 몇 편인가. 한 번 훑어 세면서 처음 나온 차례를 그대로 쓴다. */
   const groups = () => {
     const seen = new Map();
-    for (const w of byRecent(activeWorks()))
+    for (const w of byRecent(listedWorks("home")))
       seen.set(w.platformId, (seen.get(w.platformId) ?? 0) + 1);
     return [...seen].map(([id, n]) => ({ p: platformOf(id), n }));
   };
@@ -5697,6 +5733,26 @@ const OPEN_MODES = [
   ["web", "웹으로 열기", "언제나 브라우저에서 엽니다."],
 ];
 
+/** 감상 완료를 세울 탭 고르개.
+
+    여럿을 켜는 자리라 폴더 공개 설정의 「퍼가기 갈래」와 같은 모양을 쓴다 —
+    하나만 고르는 고르개(optsHtml)와 눈으로 갈려야 한다.
+
+    아래 한 줄이 **지금 무엇이 켜져 있는지를 말로** 적는다. 단추 셋의 눌린 모양만으로는
+    「아무것도 안 켰다」와 「셋 다 껐다」가 눈에 같아서, 상태를 글로 한 번 더 말한다. */
+function doneTabsHtml() {
+  const on = new Set(settings.doneIn ?? []);
+  return `<div class="opts across take-flags" style="--opt-cols:3">
+      ${DONE_TABS.map(([v, t]) => `<button type="button" class="opt${on.has(v) ? " on" : ""}"
+        data-dtab="${v}" aria-pressed="${on.has(v)}">
+        <span class="mark tick"></span><span class="ot"><b>${t}</b></span></button>`).join("")}
+    </div>
+    <div class="opt-why">${on.size
+      ? DONE_TABS.filter(([v]) => on.has(v)).map(([, t]) => t).join(" · ")
+        + "에서 감상 완료한 작품도 함께 보입니다 — 표지에 「감상 완료」가 붙습니다."
+      : "감상 완료한 작품은 목록에 서지 않습니다. 왼쪽 메뉴의 「감상 완료」에서 봅니다."}</div>`;
+}
+
 function openAppSettings() {
   openSheet(`
     ${headHtml("설정", { back: false, actions: false })}
@@ -5738,6 +5794,11 @@ function openAppSettings() {
 </div>` : ""}
     <div class="field sep"><label>작품을 여는 방식</label>
       ${optsHtml(OPEN_MODES, settings.openMode, "openmode", 2)}</div>
+    ${/* **감상 완료를 어디에 세울지.** 다 본 작품이 목록에서 통째로 사라지는 것이
+         늘 맞지는 않다 — 다시 볼 것도 있고, 완결까지 본 목록 자체가 보고 싶을 때도 있다.
+         탭마다 따로 켠다: 캘린더는 채우고 싶지만 페이지는 깔끔하기를 바랄 수 있다. */""}
+    <div class="field sep"><label>감상 완료 보이기</label>
+      <div data-done-tabs>${doneTabsHtml()}</div></div>
     ${me ? `<div class="field sep sep-end">
       <div class="link-row">
         ${me.provider === "local" || guestMode()
@@ -5750,6 +5811,21 @@ function openAppSettings() {
       <div class="rest" style="text-align:left;padding:7px 2px 0">
         탈퇴하면 담아둔 작품·폴더·설정이 모두 지워지고 되돌릴 수 없습니다.</div>
     </div>` : ""}`);
+  /* **이 칸만 갈아 끼운다.** 여는 방식(openmode)처럼 시트를 통째로 다시 열면 설정 화면이
+     길어서 보던 자리를 잃는다 — 이 칸은 화면 아래쪽에 있어 매번 위로 튀어 오른다. */
+  const doneBox = sheet.querySelector("[data-done-tabs]");
+  if (doneBox) doneBox.addEventListener("click", guard(async e => {
+    const b = e.target.closest("[data-dtab]");
+    if (!b) return;
+    const v = b.dataset.dtab;
+    const now = new Set(settings.doneIn ?? []);
+    now.has(v) ? now.delete(v) : now.add(v);
+    await api("PUT", "/api/settings", { doneIn: [...now] });
+    await reload();                    // 서버가 걸러 낸 뒤의 값을 그대로 쓴다
+    doneBox.innerHTML = doneTabsHtml();
+    render();                          // 뒤에 있는 화면도 곧바로 따라간다
+  }));
+
   /* 스펙트럼을 끄는 동안 색이 계속 바뀐다 — 화면은 그때마다 따라가되
      저장은 손이 멎은 뒤 한 번만 한다. 시트는 다시 그리지 않는다 (고르개가 사라진다). */
   const themeDraft = { color: settings.themeColor };

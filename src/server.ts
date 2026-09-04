@@ -65,7 +65,12 @@ async function readJson(req: IncomingMessage): Promise<any> {
 }
 
 /* ── 설정과 플랫폼 표시 오버라이드 ─────────────────────────── */
-type Settings = { openMode: "app" | "web"; themeColor: string | null };
+/** 감상 완료한 작품을 **어느 탭에 함께 세우나.** 탭 열쇠들의 부분집합이다.
+
+    켜고 끄는 것이 셋이라 갈래(enum)로 만들 수도 있었지만, 사람이 고르는 것은
+    「어디에」 하나다 — 한 칸에 담아 두면 탭이 늘어도 이 자리는 그대로다. */
+const DONE_TABS = ["cal", "home", "lib"];
+type Settings = { openMode: "app" | "web"; themeColor: string | null; doneIn: string[] };
 type Override = { name?: string; initial?: string; color?: string; fg?: string };
 /* 마크 글자색은 배경에 맞춰 저절로 정해지지만, 경계에 걸친 색에서는 사람 눈에
    반대쪽이 나을 때가 있다 — 그래서 흰색·검정 둘 중에 직접 고를 수도 있다. */
@@ -76,7 +81,7 @@ const normFg = (v: unknown): string | undefined => {
 };
 
 const getSettings = (u: string): Settings =>
-  ({ openMode: "app", themeColor: null, ...kvGet<Partial<Settings>>(u, "settings", {}) });
+  ({ openMode: "app", themeColor: null, doneIn: [], ...kvGet<Partial<Settings>>(u, "settings", {}) });
 const getOverrides = (u: string): Record<string, Override> => kvGet<Record<string, Override>>(u, "overrides", {});
 /* 사이트가 스스로 밝힌 이름(og:site_name). 빈 문자열은 "받아봤지만 없더라"는 표시다 —
    키가 있으면 다시 묻지 않으므로 실패한 사이트를 접속할 때마다 두드리지 않는다. */
@@ -1449,6 +1454,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     const b = await readJson(req);
     const next: Settings = { ...getSettings(user.id) };
     if (b.openMode === "app" || b.openMode === "web") next.openMode = b.openMode;
+    /* **아는 탭만 남긴다.** 걸러내는 김에 차례도 겹치는 것도 정리된다 —
+       들어온 배열을 그대로 믿으면 없는 탭 이름이 설정에 눌러앉는다. */
+    if (Array.isArray(b.doneIn)) next.doneIn = DONE_TABS.filter(t => b.doneIn.includes(t));
     // 테마 색 — #rrggbb 만 받는다. null 이면 기본으로 되돌린다.
     if (b.themeColor === null) next.themeColor = null;
     else if (typeof b.themeColor === "string" && /^#[0-9a-fA-F]{6}$/.test(b.themeColor))

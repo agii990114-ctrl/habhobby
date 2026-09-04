@@ -261,6 +261,17 @@
   .work time { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
   /* 아직 안 열어 본 작품. 표지 오른쪽 위에 붙어 목록을 훑을 때 바로 걸린다.
      테두리를 흰 바탕색으로 둘러 어두운 표지 위에서도 점이 뭉개지지 않게 한다. */
+  /* 내려 둔 작품의 표지 배지 — 살아 있는 것과 한자리에 서므로 한눈에 갈려야 한다.
+     오른쪽 위는 「아직 안 본 것」 점이 쓰고, 아래는 회차 띠가 쓴다. 왼쪽 위가 남는다. */
+  .cover .wbadge {
+    position: absolute; top: 5px; left: 5px; display: inline-flex; align-items: center; gap: 3px;
+    max-width: calc(100% - 10px); padding: 2px 6px 2px 4px; border-radius: 99px;
+    background: rgba(0, 0, 0, .66); color: #fff; text-shadow: none;
+    font-size: 9.5px; font-weight: 700; line-height: 1.5; white-space: nowrap;
+  }
+  .cover .wbadge .ic { width: 10px; height: 10px; flex: none; }
+  .cover .wbadge.dropped { background: rgba(201, 42, 42, .82); }
+
   .new-dot {
     position: absolute; top: 5px; right: 5px; width: 9px; height: 9px;
     border-radius: 99px; background: var(--bad); box-shadow: 0 0 0 2px var(--surface);

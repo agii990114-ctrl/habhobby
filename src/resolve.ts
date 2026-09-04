@@ -80,11 +80,13 @@ type Og = { read: boolean; title: string | null; image: string | null; siteName:
              /** 그쪽이 돌려준 번호. 못 닿았으면 0. */
              status: number;
              /** 물어본 곳과 **다른 곳**에 닿았으면 그 최종 주소 (없는 작품은 대문으로 튕긴다) */
-             landed: string | null };
+             landed: string | null;
+             /** 사이트 표 — 브라우저가 북마크에 붙이는 그 그림. 절대 주소. 없으면 null. */
+             icon: string | null };
 
 async function fetchOg(url: string): Promise<Og> {
   const empty: Og = { read: false, title: null, image: null, siteName: null, url: null,
-                      imgW: null, imgH: null, status: 0, landed: null };
+                      imgW: null, imgH: null, status: 0, landed: null, icon: null };
   try {
     const res = await fetch(url, {
       headers: { "User-Agent": UA, "Accept-Language": "ko-KR,ko;q=0.9" },
@@ -118,6 +120,24 @@ async function fetchOg(url: string): Promise<Og> {
     const num = (v: string | null): number | null => {
       const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null;
     };
+    /* **사이트 표(favicon).** 브라우저가 북마크에 붙이는 것과 같은 규칙으로 고른다 —
+       apple-touch-icon 이 있으면 그것(크고 네모), 없으면 rel=icon 중 sizes 가 가장 큰 것,
+       그것도 없으면 /favicon.ico 를 짚어 둔다(대개 있다). 상대 주소는 닿은 곳 기준으로
+       절대 주소로 푼다 — 저장한 뒤 누가 어디서 읽어도 같은 그림이어야 한다.
+       og:image 는 쓰지 않는다: 그건 페이지의 대표 그림이지 사이트의 표가 아니다. */
+    const base = res.url || url;
+    const abs = (h: string): string | null => { try { return new URL(h, base).href; } catch { return null; } };
+    const attr = (tag: string, k: string): string | null => {
+      const m = tag.match(new RegExp(k + "=[\"'](.*?)[\"']", "i"));
+      return m ? m[1].trim() : null;
+    };
+    const rels = [...html.matchAll(/<link[^>]+>/gi)].map(m => m[0]).map(t => ({
+      rel: (attr(t, "rel") ?? "").toLowerCase(), href: attr(t, "href"),
+      size: Math.max(0, ...(attr(t, "sizes") ?? "").split(/[x\s]/i).map(Number).filter(Number.isFinite)),
+    })).filter(l => l.href);
+    const touch = rels.find(l => l.rel.includes("apple-touch-icon"));
+    const plain = rels.filter(l => /(^|\s)icon(\s|$)/.test(l.rel)).sort((a, b) => b.size - a.size)[0];
+    const icon = abs((touch ?? plain)?.href ?? "/favicon.ico");
     return {
       read: true,
       status: res.status,
@@ -133,6 +153,7 @@ async function fetchOg(url: string): Promise<Og> {
       // 사이트가 알려주면 비율을 알 수 있다 — 가로 배너를 세로 칸에 억지로 채우지 않기 위해
       imgW: num(pick("og:image:width")),
       imgH: num(pick("og:image:height")),
+      icon,
     };
   } catch (e) {
     /* **못 닿은 까닭을 가린다.** 「그런 도메인이 없다」(ENOTFOUND)와 「느리거나 막혔다」는
@@ -185,10 +206,12 @@ export function siteNameFromTitle(title: string, host: string): string | null {
 
     "읽었는데 이름이 없다"와 "못 읽었다"를 구분한다 — 앞의 것은 다시 물어도 소용없지만
     뒤의 것은 막혔거나 잠깐 죽은 것이라 나중에 되기도 한다. */
-export async function fetchSiteName(host: string): Promise<{ read: boolean; name: string | null }> {
+export async function fetchSiteName(host: string):
+  Promise<{ read: boolean; name: string | null; icon: string | null }> {
   const og = await fetchOg(`https://${host}/`);
-  if (!og.read) return { read: false, name: null };
-  return { read: true, name: cleanSiteName(og.siteName) ?? siteNameFromTitle(og.title ?? "", host) };
+  if (!og.read) return { read: false, name: null, icon: null };
+  return { read: true, icon: og.icon,
+    name: cleanSiteName(og.siteName) ?? siteNameFromTitle(og.title ?? "", host) };
 }
 
 /** 받아온 태그가 **이 페이지 것이 아닌지** 가린다.

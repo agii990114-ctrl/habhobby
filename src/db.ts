@@ -234,6 +234,17 @@ CREATE TABLE IF NOT EXISTS work_folder (
   PRIMARY KEY (work_id, folder_id)
 );
 
+-- 사이트가 스스로 밝힌 것 — 이름과 표(favicon). **사이트의 사실이지 내 사실이 아니다.**
+-- 한때 사람마다 kv(siteNames)에 따로 적었는데, 같은 사이트를 담은 사람 수만큼 같은 값이
+-- 쌓이고 대문도 그만큼 되물었다. url 표를 공용으로 둔 것과 같은 까닭으로 한 줄로 모은다.
+-- name 이 ''이면 「읽었는데 이름이 없다」 — 다시 물어도 소용없다는 표시다.
+CREATE TABLE IF NOT EXISTS site (
+  host       TEXT PRIMARY KEY,
+  name       TEXT NOT NULL DEFAULT '',
+  icon       TEXT,
+  fetched_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS kv (
   user_id TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
   k       TEXT NOT NULL,
@@ -376,7 +387,7 @@ const schemaV = (): number =>
 /* **마지막 이관 번호와 맞춰 둔다.** 뒤에 once() 를 더하면 이 숫자도 함께 올린다 —
    안 올려도 빈 표에 돌아 탈은 없지만, 새 파일이 「끝난 것」인데 끝나지 않은 번호를
    달고 있으면 다음 사람이 그 어긋남부터 풀어야 한다. */
-const LATEST_V = 10;
+const LATEST_V = 11;
 if (schemaV() === 0) {
   const empty = !db.prepare("SELECT 1 FROM user LIMIT 1").get();
   if (empty) db.exec("PRAGMA user_version = " + LATEST_V);
@@ -565,6 +576,25 @@ once(10, () => {
             OR (COALESCE(o.state_at, 0) = COALESCE(work.state_at, 0) AND o.rowid > work.rowid) ))`)
     .run().changes;
   if (n) console.log(`  겹친 감상 완료를 한 줄로: ${n}줄 거둠`);
+});
+
+/* 사람마다 kv 에 적어 두던 사이트 이름(siteNames)을 공용 site 표로 옮긴다.
+   먼저 적은 사람의 값이 남는다 — 같은 사이트의 이름이라 누구 것이든 같다. 옮긴 뒤
+   kv 줄은 지운다: 남겨 두면 어느 쪽이 진짜인지 다음 사람이 가려야 한다. */
+once(11, () => {
+  const rows = db.prepare("SELECT user_id, v FROM kv WHERE k = 'siteNames'").all() as { user_id: string; v: string }[];
+  const ins = db.prepare("INSERT OR IGNORE INTO site(host, name, icon, fetched_at) VALUES(?,?,NULL,?)");
+  let n = 0;
+  for (const r of rows) {
+    let names: Record<string, string> = {};
+    try { names = JSON.parse(r.v); } catch { continue; }
+    for (const [pid, name] of Object.entries(names)) {
+      if (!pid.startsWith(DOMAIN_PREFIX)) continue;
+      if (ins.run(pid.slice(DOMAIN_PREFIX.length), name ?? "", Date.now()).changes) n++;
+    }
+  }
+  db.prepare("DELETE FROM kv WHERE k = 'siteNames'").run();
+  if (rows.length) console.log(`  사이트 이름을 공용 표로 옮김: ${n}개 (${rows.length}명분)`);
 });
 
 /* 작품 하나를 url(공용)과 work(내 것)로 가른다.
@@ -787,6 +817,26 @@ export function setDisplayName(userId: string, name: string): string | null {
 }
 
 /* ── kv (사용자별 설정·플랫폼 표시) ───────────────────────── */
+/* ── 사이트 표 ── */
+export type Site = { host: string; name: string; icon: string | null; fetchedAt: number };
+export const getSite = (host: string): Site | null => {
+  const r = db.prepare("SELECT host, name, icon, fetched_at FROM site WHERE host = ?").get(host) as any;
+  return r ? { host: r.host, name: r.name, icon: r.icon, fetchedAt: r.fetched_at } : null;
+};
+/** 여러 호스트를 한 번에 — 구간을 그릴 때 사람당 한 번이면 된다 */
+export function sitesFor(hosts: string[]): Map<string, Site> {
+  if (!hosts.length) return new Map();
+  const rows = db.prepare(`SELECT host, name, icon, fetched_at FROM site
+    WHERE host IN (${hosts.map(() => "?").join(",")})`).all(...hosts) as any[];
+  return new Map(rows.map(r => [r.host, { host: r.host, name: r.name, icon: r.icon, fetchedAt: r.fetched_at }]));
+}
+export const setSite = (host: string, name: string | null, icon: string | null): void => {
+  db.prepare(`INSERT INTO site(host, name, icon, fetched_at) VALUES(?,?,?,?)
+    ON CONFLICT(host) DO UPDATE SET name = excluded.name, icon = excluded.icon, fetched_at = excluded.fetched_at`)
+    .run(host, name ?? "", icon, Date.now());
+};
+export const forgetSite = (host: string): void => { db.prepare("DELETE FROM site WHERE host = ?").run(host); };
+
 export function kvGet<T>(userId: string, key: string, fallback: T): T {
   const row = db.prepare("SELECT v FROM kv WHERE user_id = ? AND k = ?").get(userId, key) as
     { v: string } | undefined;

@@ -6,7 +6,7 @@ import { mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { extname, join, normalize, resolve as pathResolve } from "node:path";
 import {
-  db, kvGet, kvSet, listWorks, getWork, setWorkFolders, listFolders, newId,
+  db, kvGet, kvSet, listWorks, getWork, setWorkFolders, listFolders, newId, sitesFor, setSite, forgetSite,
   deleteUser, upsertUser, listFriends, countFriends, starFriend, contributedWorks,
   addFriend, removeFriend, areFriends,
   createGuest, linkGuest, isGuest,
@@ -79,7 +79,6 @@ const getSettings = (u: string): Settings =>
 const getOverrides = (u: string): Record<string, Override> => kvGet<Record<string, Override>>(u, "overrides", {});
 /* 사이트가 스스로 밝힌 이름(og:site_name). 빈 문자열은 "받아봤지만 없더라"는 표시다 —
    키가 있으면 다시 묻지 않으므로 실패한 사이트를 접속할 때마다 두드리지 않는다. */
-const getSiteNames = (u: string): Record<string, string> => kvGet<Record<string, string>>(u, "siteNames", {});
 /* 사용자가 "이 둘은 같은 곳"이라고 정해 준 도메인들. 자동 규칙이 못 맞히는 경우
    (product.kyobobook.co.kr 과 search.kyobobook.co.kr 처럼) 한 번 정하면 계속 따른다. */
 const getMerges = (u: string): Record<string, string> => kvGet<Record<string, string>>(u, "domainMerges", {});
@@ -104,7 +103,10 @@ function applyMerge(u: string, id: string): string {
     열일곱 번 파싱한 셈이라 요청 하나에 질의가 서른 번 넘게 늘었다. 한 번 모아 돌려 쓴다. */
 type PlatCtx = {
   ov: Record<string, Override>;
+  /** 사이트가 밝힌 이름 — 구간 id → 이름. 읽었는데 없으면 '' */
   auto: Record<string, string>;
+  /** 사이트 표 — 구간 id → 절대 주소 */
+  icons: Record<string, string>;
   hosts: Map<string, string[]>;
 };
 
@@ -124,7 +126,18 @@ function platformCtx(userId: string): PlatCtx {
   }
   const hosts = new Map<string, string[]>();
   for (const [k, v] of sets) hosts.set(k, [...v].sort());
-  return { ov: getOverrides(userId), auto: getSiteNames(userId), hosts };
+  /* 사이트가 밝힌 이름·표는 **공용 site 표**에서 — 한때 사람마다 kv 에 따로 적었다.
+     이 사람이 담은 도메인 구간의 호스트만 한 번에 읽는다. */
+  const domains = [...sets.keys()].filter(k => k.startsWith(DOMAIN_PREFIX));
+  const sites = sitesFor(domains.map(k => k.slice(DOMAIN_PREFIX.length)));
+  const auto: Record<string, string> = {}, icons: Record<string, string> = {};
+  for (const k of domains) {
+    const s = sites.get(k.slice(DOMAIN_PREFIX.length));
+    if (!s) continue;
+    auto[k] = s.name;
+    if (s.icon) icons[k] = s.icon;
+  }
+  return { ov: getOverrides(userId), auto, icons, hosts };
 }
 
 const firstChar = (s: string) => [...s][0] ?? "?";
@@ -141,6 +154,9 @@ function platformView(userId: string, id: string, ctx: PlatCtx = platformCtx(use
     id: base.id,
     name: o?.name ?? auto ?? base.name,
     initial: o?.initial ?? (auto ? firstChar(auto) : base.initial),
+    /* 사이트 표 — 「사이트가 밝힌 것」 층이다. 글자 마크를 손수 정했으면 그것이 이긴다:
+       내가 고른 마크 위에 사이트 그림을 덮으면 고른 뜻이 없다. */
+    icon: isDomain && !o?.initial ? ctx.icons[id] ?? null : null,
     color,
     // 직접 고른 것이 없으면 배경에서 계산한다
     fg: o?.fg ?? readableOn(color),
@@ -168,9 +184,12 @@ const platformViews = (userId: string, ids: Iterable<string>) => {
 
 /** 아직 사이트 이름을 물어보지 않은 도메인들 */
 function pendingSiteNames(userId: string): { id: string; host: string }[] {
-  const names = getSiteNames(userId), out: { id: string; host: string }[] = [];
+  const out: { id: string; host: string }[] = [];
+  const hosts = [...new Set(listWorks(userId).map(w => w.platformId)
+    .filter(p => p.startsWith(DOMAIN_PREFIX)).map(p => p.slice(DOMAIN_PREFIX.length)))];
+  const known = sitesFor(hosts);
   for (const w of listWorks(userId)) {
-    if (!w.platformId.startsWith(DOMAIN_PREFIX) || w.platformId in names) continue;
+    if (!w.platformId.startsWith(DOMAIN_PREFIX) || known.has(w.platformId.slice(DOMAIN_PREFIX.length))) continue;
     if (out.some(x => x.id === w.platformId)) continue;
     out.push({ id: w.platformId, host: w.platformId.slice(DOMAIN_PREFIX.length) });
   }
@@ -684,11 +703,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     const batch = todo.slice(0, 6);
     const got = await Promise.all(batch.map(async t =>
       [t.id, await fetchSiteName(t.host).catch(() => ({ read: false, name: null }))] as const));
-    const names = getSiteNames(user.id);
-    // 못 읽었어도 표시는 남긴다. 안 그러면 같은 사이트를 끝없이 다시 묻는다 —
+    // 못 읽었어도 줄은 남긴다. 안 그러면 같은 사이트를 끝없이 다시 묻는다 —
     // 다시 시도할 길은 편집 화면의 "가져오기"로 열어 두었다.
-    for (const [id, r] of got) names[id] = r.name ?? "";
-    kvSet(user.id, "siteNames", names);
+    for (const [id, r] of got) setSite(id.slice(DOMAIN_PREFIX.length), r.name, r.icon);
     json(res, 200, {
       ok: true,
       filled: got.filter(([, r]) => r.name).length,
@@ -784,11 +801,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     /* 떼어낸 구간의 이름은 그 호스트의 대문에서 새로 받아온다. 합쳐질 때 지워졌으므로
        그냥 두면 주소만 남는다. 부모와 같은 이름이 나올 수도 있지만, 일부러 떼어낸 것이니
        그건 사용자가 고칠 일이다 — 이름이 없는 것보다 낫다. */
-    const names = getSiteNames(user.id);
-    const got = await fetchSiteName(host).catch(() => ({ read: false, name: null }));
-    if (got.read) names[target] = got.name ?? "";
-    else delete names[target];        // 못 읽었으면 표시를 남기지 않아 나중에 다시 묻는다
-    kvSet(user.id, "siteNames", names);
+    const got = await fetchSiteName(host).catch(() => ({ read: false, name: null, icon: null }));
+    if (got.read) setSite(host, got.name, got.icon);
+    else forgetSite(host);            // 못 읽었으면 줄을 남기지 않아 나중에 다시 묻는다
 
     json(res, 200, { ok: true, moved, platform: platformView(user.id, target) });
     return true;
@@ -799,11 +814,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     const pid = decodeURIComponent(seg[2]);
     if (!pid.startsWith(DOMAIN_PREFIX)) { json(res, 400, { ok: false, reason: "도메인 묶음이 아닙니다." }); return true; }
     const r = await fetchSiteName(pid.slice(DOMAIN_PREFIX.length))
-      .catch(() => ({ read: false, name: null }));
+      .catch(() => ({ read: false, name: null, icon: null }));
     if (!r.read) { json(res, 200, { ok: false, reason: "사이트를 읽지 못했습니다." }); return true; }
-    const names = getSiteNames(user.id);
-    names[pid] = r.name ?? "";
-    kvSet(user.id, "siteNames", names);
+    setSite(pid.slice(DOMAIN_PREFIX.length), r.name, r.icon);
     json(res, 200, r.name
       ? { ok: true, name: r.name, platform: platformView(user.id, pid) }
       : { ok: false, reason: "이 사이트는 이름을 밝히지 않습니다." });

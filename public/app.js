@@ -231,6 +231,15 @@ const ICONS = {
   inbox:   `<path d="M3 12.5h4.6l1.5 3h5.8l1.5-3H21"/><path d="M5 5.6L3 12.5v5.1a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5.1l-2-6.9a2 2 0 0 0-1.9-1.4H6.9A2 2 0 0 0 5 5.6z"/>`,
 };
 
+/** 구간 마크. **사이트 표가 있으면 그림, 없으면 글자.**
+
+    브라우저가 북마크에 사이트 표를 붙이듯이 — 글자 하나보다 그림이 훨씬 빨리 읽힌다.
+    그림이 죽으면(주소가 바뀌거나 막히면) onerror 로 글자가 다시 선다: 지금까지의
+    글자 마크가 곧 대비책이다. 그림은 링크만 한다 — 표지와 같은 규칙(복제하지 않는다). */
+const markHtml = p => `<span class="pmark${p.icon ? " has-icon" : ""}" style="background:${p.color};color:${p.fg}">${
+  p.icon ? `<img src="${esc(p.icon)}" alt="" loading="lazy"
+    onerror="this.remove();this.parentElement.classList.remove('has-icon')">` : ""}${esc(p.initial)}</span>`;
+
 /** 아이콘 한 조각. 크기와 빛깔은 자리마다 CSS가 정한다. */
 const icon = (name, cls = "") => ICONS[name]
   ? `<svg class="ic${cls ? " " + cls : ""}" viewBox="0 0 24 24" aria-hidden="true"
@@ -960,7 +969,7 @@ function railsHtml(list) {
     const p = platformOf(pid);
     return `<section class="plat">
       <div class="plat-h">
-        <span class="pmark" style="background:${p.color};color:${p.fg}">${esc(p.initial)}</span>
+        ${markHtml(p)}
         <b${p.isDomain && !p.overridden ? ' class="dom"' : ""}>${esc(p.name)}</b>
         <button class="edit-dom" data-plat="${esc(pid)}" title="이름·색·마크 바꾸기">${icon("pencil")}</button>
         <span>${items.length}편</span>
@@ -1348,7 +1357,7 @@ function openFolderAdd(f, back) {
       const all = items.length && items.every(w => picked.has(w.id));
       return `<div class="plat-h" style="margin-bottom:12px">
           <button class="icon-btn" data-back-rails aria-label="구간 목록으로">${icon("left")}</button>
-          <span class="pmark" style="background:${p.color};color:${p.fg}">${esc(p.initial)}</span>
+          ${markHtml(p)}
           <b>${esc(p.name)}</b><span>${items.length}편</span>
           ${items.length ? `<button class="mini-btn" data-gall="${esc(detail)}">${
             all ? "구간 해제" : "구간 선택"}</button>` : ""}
@@ -1362,7 +1371,7 @@ function openFolderAdd(f, back) {
       const all = items.every(w => picked.has(w.id));
       return `<section class="plat">
         <div class="plat-h">
-          <span class="pmark" style="background:${p.color};color:${p.fg}">${esc(p.initial)}</span>
+          ${markHtml(p)}
           <b${p.isDomain && !p.overridden ? ' class="dom"' : ""}>${esc(p.name)}</b>
           <span>${items.length}편</span>
           <span class="plat-act">

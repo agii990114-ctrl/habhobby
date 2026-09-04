@@ -3076,6 +3076,66 @@ repaintBulk() 조각을 통째로 갈아 끼운다  ← 칠도 손짓도 여기�
 **즐겨찾기와 「선택」은 같은 줄의 양 끝**이다. 왼쪽이 보는 방식, 오른쪽이 다루는 방식 —
 서로 다른 갈래라 자리로 갈라 놓는다.
 
+## 표 위에 글자가 비쳤다
+
+네이버 블로그를 담았더니 파비콘 위에 「B」가 겹쳐 보였다. 두 가지가 겹친 고장이었다.
+
+### 인라인 style 은 스타일시트를 이긴다
+
+글자를 마크에 바로 두고 `color: transparent` 로 감추고 있었다. 그런데 마크는 배경색을
+**인라인 `style` 로** 지고 있다 — 구간마다 색이 다르니 그럴 수밖에 없고, 그 한 줄이
+글자색까지 함께 싣는다. 인라인이 이기므로 감추는 규칙은 한 번도 닿지 않았다.
+
+```
+style="background:#03C75A;color:#1B1B1B"   ← 마크가 지고 있는 것
+.pmark.has-icon { color: transparent }     ← 스타일시트. 진다
+계산된 color: rgb(27, 27, 27)              ← 글자가 그대로 보였다
+```
+
+배경은 `!important` 로 이겨 놓고 글자는 못 이긴 어중간한 상태였다. 특이도를 더 올려
+맞서는 대신 **싸움 자체를 없앤다** — 글자를 제 통(`<i>`)에 담고 그 통을 접는다.
+자식의 `display: none` 은 부모의 인라인 `style` 이 건드릴 수 없다.
+
+```
+.pmark > i { font-style: normal }
+.pmark.has-icon > i { display: none }
+```
+
+### CSP 는 인라인 손짓을 막는다
+
+고쳐 놓고 표 주소를 죽여 봤더니 **글자가 도로 서지 않았다.** 대비책을 `<img onerror="…">`
+로 적어 두었는데, 콘솔에 이렇게 남아 있었다.
+
+```
+Executing inline event handler violates the following Content Security Policy
+directive… Note that hashes do not apply to event handlers
+```
+
+인라인 각본에는 sha256 을 적어 두었지만 **손짓에는 해시가 통하지 않는다.** 즉 이
+대비책은 CSP 를 세운 날부터 한 번도 돌지 않았다 — 표가 죽으면 빈 흰 칸이 남았다.
+있다고 믿고 있었기에 더 나빴다.
+
+손짓을 밖으로 뺀다. `error` 는 **버블하지 않으므로** 잡는 단계(capture)로 듣는다.
+
+```js
+document.addEventListener("error", e => {
+  const img = e.target;
+  if (!(img instanceof HTMLImageElement)) return;
+  const mark = img.closest(".pmark");
+  if (!mark) return;
+  img.remove();
+  mark.classList.remove("has-icon");
+}, true);
+```
+
+한 번만 걸어 두면 지금 있는 마크든 나중에 그려질 마크든 다 지난다. 마크를 그리는 자리가
+여럿이고 화면은 계속 다시 그려지므로, 그릴 때마다 잇는 것보다 이쪽이 맞다.
+
+```
+정상        pmark has-icon   글자 안 보임, 그림 32×32
+표가 죽음   pmark            글자 「B」, 그림 사라짐, 제 배경으로 복귀
+```
+
 ## 경로 첫 조각이 늘 사람 아이디인 것은 아니다
 
 네이버 블로그 홈 주소를 넣으면 「없는 페이지」라며 담기지 않았다.

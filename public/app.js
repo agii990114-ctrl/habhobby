@@ -237,8 +237,26 @@ const ICONS = {
     그림이 죽으면(주소가 바뀌거나 막히면) onerror 로 글자가 다시 선다: 지금까지의
     글자 마크가 곧 대비책이다. 그림은 링크만 한다 — 표지와 같은 규칙(복제하지 않는다). */
 const markHtml = p => `<span class="pmark${p.icon ? " has-icon" : ""}" style="background:${p.color};color:${p.fg}">${
-  p.icon ? `<img src="${esc(p.icon)}" alt="" loading="lazy"
-    onerror="this.remove();this.parentElement.classList.remove('has-icon')">` : ""}${esc(p.initial)}</span>`;
+  p.icon ? `<img src="${esc(p.icon)}" alt="" loading="lazy">` : ""
+  }<i>${esc(p.initial)}</i></span>`;
+
+/* **표가 죽으면 글자가 도로 선다.**
+
+   한때 이 일을 `<img onerror="…">` 로 적어 두었는데, CSP 가 인라인 손짓을 막아
+   («Executing inline event handler violates…») **한 번도 돌지 않았다.** 표 주소가 죽으면
+   대비책 없이 빈 흰 칸이 남았다 — 대비책이 있다고 믿고 있었기에 더 나빴다.
+
+   손짓을 밖으로 뺀다. error 는 버블하지 않으므로 **잡는 단계**(capture)로 듣는다.
+   한 번만 걸어 두면 지금 있는 마크든 나중에 그려질 마크든 다 지난다 — 마크를 그리는
+   자리가 여럿이고 화면은 계속 다시 그려지므로, 그릴 때마다 잇는 것보다 이쪽이 맞다. */
+document.addEventListener("error", e => {
+  const img = e.target;
+  if (!(img instanceof HTMLImageElement)) return;
+  const mark = img.closest(".pmark");
+  if (!mark) return;
+  img.remove();
+  mark.classList.remove("has-icon");
+}, true);
 
 /** 아이콘 한 조각. 크기와 빛깔은 자리마다 CSS가 정한다. */
 const icon = (name, cls = "") => ICONS[name]
@@ -4898,7 +4916,9 @@ function openPlatformEdit(platformId) {
     }
     const mark = sheet.querySelector(".dom-preview .pmark");
     const c = draft.color ?? p.baseColor;
-    if (!p.icon) mark.textContent = draft.initial;
+    // 글자는 제 통(i) 안에 있다 — 마크에 직접 쓰면 그 안의 그림까지 지운다
+    const initBox = mark.querySelector("i");
+    if (initBox) initBox.textContent = draft.initial;
     mark.style.background = c;
     mark.style.color = draft.fg ?? readableOn(c);
     for (const b of sheet.querySelectorAll("[data-fg] button"))
@@ -4954,8 +4974,8 @@ function openPlatformEdit(platformId) {
       ${/* 미리보기는 **목록에 설 모양 그대로**여야 한다 — 여기서만 글자가 서면 저장한 뒤에야
            실제 모양을 보게 된다. 표가 있으면 그림, 없으면 글자(markHtml 과 같은 규칙). */""}
       <span class="pmark${p.icon ? " has-icon" : ""}" style="background:${draft.color};color:${draft.fg ?? readableOn(draft.color)}">${
-        p.icon ? `<img src="${esc(p.icon)}" alt="" loading="lazy"
-          onerror="this.remove();this.parentElement.classList.remove('has-icon')">` : ""}${esc(draft.initial)}</span>
+        p.icon ? `<img src="${esc(p.icon)}" alt="" loading="lazy">` : ""
+        }<i>${esc(draft.initial)}</i></span>
       <b>${esc(draft.name || p.baseName)}</b>${p.isDomain ? `<em>${esc(p.host)}</em>` : ""}</div>
     <div class="field"><label for="dom-name">이름</label>
       <input id="dom-name" value="${esc(draft.name)}" placeholder="${esc(p.baseName)}" maxlength="20"></div>

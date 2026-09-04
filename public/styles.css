@@ -189,9 +189,20 @@
 
   /* 구간 마크에 사이트 표가 들어오면 글자는 숨고 그림이 칸을 채운다. 그림이 죽어
      지워지면(onerror) has-icon 이 빠지면서 글자가 도로 선다. */
+  /* 마크 안의 글자는 **제 통(i)** 에 담는다. 표가 있으면 그 통을 통째로 접는다.
+
+     한때 글자를 마크에 바로 두고 `color: transparent` 로 감췄는데, 마크는 배경색을
+     **인라인 style 로** 지고 있다(구간마다 색이 다르다) — 인라인이 스타일시트를 이기므로
+     글자색은 감춰지지 않고 그림 위에 그대로 비쳤다. 배경만 !important 로 이겨 놓고
+     글자는 못 이긴 어중간한 상태였다.
+
+     자식을 display: none 으로 접는 것은 부모의 인라인 style 이 건드릴 수 없다 —
+     특이도 싸움 자체가 없어진다. */
   .pmark { position: relative; overflow: hidden; }
+  .pmark > i { font-style: normal; }
   .pmark img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
-  .pmark.has-icon { background: var(--surface) !important; color: transparent; }
+  .pmark.has-icon { background: var(--surface) !important; }
+  .pmark.has-icon > i { display: none; }
 
   .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
   .chip {

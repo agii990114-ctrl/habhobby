@@ -695,6 +695,19 @@
   .row .rt span { font-size: 11px; color: var(--ink-3); }
   .row .pdot { width: 7px; height: 7px; border-radius: 99px; flex: none; }
   /* 내려둔 작품 — 기록으로만 남은 것이라 지금 볼 것과 구분한다 */
+  /* 남의 목록에서 「이건 내가 다 봤다」를 알리는 배지 — 줄 오른쪽, 점 앞에 선다.
+
+     흐리게 하거나 줄을 긋지 않는다. 그건 **내가 치웠다**는 표시이고, 남의 폴더에서
+     치워진 것은 아무것도 없다. 덧붙이는 한마디가 그 폴더를 반쯤 끝난 것처럼 보이게
+     해서는 안 된다. */
+  .row .rbadge {
+    display: inline-flex; align-items: center; gap: 3px; flex: none;
+    padding: 2px 7px 2px 5px; border-radius: 99px;
+    background: var(--surface-2); border: 1px solid var(--line);
+    font-size: 10.5px; font-weight: 600; color: var(--ink-2); white-space: nowrap;
+  }
+  .row .rbadge .ic { width: 11px; height: 11px; }
+
   .row.done { opacity: .55; }
   .row.done .rt b { text-decoration: line-through; text-decoration-thickness: 1px; }
   .row.done .st { font-style: normal; text-decoration: none; display: inline-block; }

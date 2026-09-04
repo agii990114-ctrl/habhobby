@@ -2004,15 +2004,18 @@ function openFriendFolder(fid) {
           esc(viewing.name)}님이 이 폴더를 가져가는 것은 막아 두었습니다. 보기만 할 수 있어요.</div>` : ""}
     ${items.length
       ? items.map(w => {
-        /* **내가 다 본 것에는 표시가 붙는다.** 남의 목록이라 내 상태가 없으므로 주소로
-           맞춘다(doneMark). 표지가 27px 라 알약은 들어가지 않는다 — 내 목록의 한 줄이
-           쓰는 것과 같은 모양으로, 제목 앞에 표를 세우고 줄을 흐린다. */
+        /* **내가 다 본 것에는 배지가 붙는다.** 남의 목록이라 내 상태가 없으므로 주소로
+           맞춘다(doneMark).
+
+           내 목록의 한 줄은 흐리게 하고 제목에 줄을 긋는다. 여기서는 그러지 않는다 —
+           그건 「내가 치운 줄」이라는 표시인데, 이 폴더에서 치워진 것은 아무것도 없다.
+           남의 목록을 내 사정으로 흐리면 그 폴더가 반쯤 끝난 것처럼 보인다.
+           덧붙이는 정보는 **줄 오른쪽 배지 하나**로 족하다. */
         const st = doneMark(w);
-        return `<button class="row${st ? " done" : ""}" data-fw="${esc(w.id)}"${
-            st ? ` title="${esc(st.label)}"` : ""}>
+        return `<button class="row" data-fw="${esc(w.id)}">
           <span class="thumb" style="${coverStyle(w)}">${coverChar(w)}</span>
-          <span class="rt"><b>${st ? `<i class="st">${icon(st.icon)}</i> ` : ""}${
-            esc(w.title)}</b><span>${esc(plat(w.platformId).name)}</span></span>
+          <span class="rt"><b>${esc(w.title)}</b><span>${esc(plat(w.platformId).name)}</span></span>
+          ${st ? `<span class="rbadge ${st.key}">${icon(st.icon)}${esc(st.label)}</span>` : ""}
           <span class="pdot" style="background:${plat(w.platformId).color}"></span></button>`;
       }).join("")
       : `<div class="empty">이 폴더는 비어 있습니다.</div>`}`, {

@@ -26,6 +26,8 @@ let works = [], folders = [], settings = { openMode: "app", doneIn: ["home", "li
    쓰는 곳은 폴더 탭의 "친구 폴더 보기" 와 사이드 메뉴뿐이라, 캘린더만 보고 나가는
    사람에게는 200명분 17KB가 그냥 버려진다. 사이드 메뉴에 적을 숫자만 미리 받는다. */
 let friends = null, friendCount = 0;
+/** 내가 감상 완료한 작품들의 주소 번호 — reload() 가 채운다. */
+let myDone = new Set();
 /** 받은 폴더 초대. 첫 화면에 함께 실려 온다 — 대개 비어 있어 무게가 없다. */
 let folderInvites = [];
 /* 끊겼다는 소식. 새로 고칠 때 함께 실려 온다 — 웹소켓을 붙들고 있을 만큼 급한 소식이
@@ -52,6 +54,10 @@ let siteNamesPending = 0;
 async function reload(fresh = false) {
   const s = await api("GET", "/api/state" + (fresh ? "?fresh=1" : ""));
   works = s.works; folders = s.folders; settings = s.settings;
+  /* **내가 다 본 주소들.** 배지가 이것을 짚는다 — 남의 작품이라도 주소가 같으면
+     「내가 다 본 것」이라고 말해 줘야 한다. 카드마다 훑으면 목록 길이의 제곱이 되므로
+     받아 올 때 한 번만 짓는다. */
+  myDone = new Set(s.works.filter(w => w.state === "watched").map(w => w.urlId));
   platforms = s.platforms; me = s.me;
   friendCount = s.friendCount ?? 0;
   folderInvites = s.folderInvites ?? [];
@@ -271,9 +277,18 @@ const icon = (name, cls = "") => ICONS[name]
     목록에 살아 있는 것과 섞여 서므로, 한눈에 갈리지 않으면 「다 본 건데 왜 여기 있지」가
     된다. 켜 두었을 때만 붙는 것이 아니다 — 캘린더의 지난 칸처럼 설정과 무관하게 서는
     자리에도 붙는다. 서 있으면 붙는다, 가 규칙이다. */
-const doneBadge = w => !STATES[w.state] ? ""
-  : `<span class="wbadge ${w.state}">${icon(STATES[w.state].icon)}${
-      esc(STATES[w.state].label)}</span>`;
+/** 이 줄에 붙을 표시 — 내 상태든, **내가 다 본 주소든**. 없으면 null.
+
+    남의 폴더를 볼 때 「이거 내가 다 본 건데」를 알려면 주소 쪽이 필요하다 — 그 줄에는
+    내 상태가 없다. 두 자리(표지 배지 · 한 줄 목록)가 같은 답을 쓰도록 여기서 한 번 정한다. */
+const doneMark = w => STATES[w.state]
+  ? { key: w.state, ...STATES[w.state] }
+  : myDone.has(w.urlId) ? { key: "watched", ...STATES.watched } : null;
+
+const doneBadge = w => {
+  const st = doneMark(w);
+  return st ? `<span class="wbadge ${st.key}">${icon(st.icon)}${esc(st.label)}</span>` : "";
+};
 
 /** 감상 완료를 세울 수 있는 탭들 — 열쇠는 서버가 아는 것과 같다.
     이름은 화면 아래 탭 단추와 같은 말을 쓴다. 설정에서 「페이지」라 해 놓고
@@ -496,7 +511,7 @@ const showsDone = where => (settings.doneIn ?? []).includes(where);
     목록에 도로 세울 이유가 없다.
 
     탭마다 부르는 곳이 다르므로 어느 탭인지를 받는다. activeWorks 를 통째로 넓히면
-    복구 막기(alreadyLive)나 새 콘텐츠까지 함께 넓어져, 켠 적 없는 자리가 바뀐다. */
+    복구 막기(keptSame)나 새 콘텐츠까지 함께 넓어져, 켠 적 없는 자리가 바뀐다. */
 const listedWorks = where => works.filter(w => !w.folderOnly &&
   (w.state === "active" || (w.state === "watched" && showsDone(where))));
 /** 폴더 안을 볼 때만 쓰는 목록 — 남이 넣어 둔 것까지 포함한다 */
@@ -1026,7 +1041,8 @@ function railsHtml(list) {
 
 function rowHtml(w, sub, mini) {
   const p = platformOf(w.platformId);
-  const st = w.state === "active" ? null : STATES[w.state];
+  // 남의 작품이라도 내가 다 본 주소면 같은 표시가 붙는다 (doneMark)
+  const st = doneMark(w);
   return `<button class="row${mini ? " mini" : ""}${st ? " done" : ""}" data-id="${w.id}"
     ${st ? `title="${esc(st.label)}"` : ""}>
     <span class="thumb" style="${coverStyle(w)}">${coverChar(w)}</span>
@@ -1981,10 +1997,18 @@ function openFriendFolder(fid) {
       : items.length ? `<div class="rest" style="text-align:left;padding:0 2px 10px">${
           esc(viewing.name)}님이 이 폴더를 가져가는 것은 막아 두었습니다. 보기만 할 수 있어요.</div>` : ""}
     ${items.length
-      ? items.map(w => `<button class="row" data-fw="${esc(w.id)}">
+      ? items.map(w => {
+        /* **내가 다 본 것에는 표시가 붙는다.** 남의 목록이라 내 상태가 없으므로 주소로
+           맞춘다(doneMark). 표지가 27px 라 알약은 들어가지 않는다 — 내 목록의 한 줄이
+           쓰는 것과 같은 모양으로, 제목 앞에 표를 세우고 줄을 흐린다. */
+        const st = doneMark(w);
+        return `<button class="row${st ? " done" : ""}" data-fw="${esc(w.id)}"${
+            st ? ` title="${esc(st.label)}"` : ""}>
           <span class="thumb" style="${coverStyle(w)}">${coverChar(w)}</span>
-          <span class="rt"><b>${esc(w.title)}</b><span>${esc(plat(w.platformId).name)}</span></span>
-          <span class="pdot" style="background:${plat(w.platformId).color}"></span></button>`).join("")
+          <span class="rt"><b>${st ? `<i class="st">${icon(st.icon)}</i> ` : ""}${
+            esc(w.title)}</b><span>${esc(plat(w.platformId).name)}</span></span>
+          <span class="pdot" style="background:${plat(w.platformId).color}"></span></button>`;
+      }).join("")
       : `<div class="empty">이 폴더는 비어 있습니다.</div>`}`, {
     full: true,
     title: `${f.emoji} ${esc(f.name)}`,
@@ -3026,13 +3050,13 @@ function openWork(id, over) {
     ${st
       ? `<div class="link-row" style="margin-top:9px">
            <button class="btn" data-act="active"${
-             alreadyLive(w) ? ' disabled title="이미 목록에 있는 작품입니다"' : ""
+             keptSame(w) ? ` disabled title="${whereKept(w)}"` : ""
            }>${icon("left")} 목록으로 복구</button>
            ${w.state === "watched"
              ? `<button class="btn bad" data-act="dropped">${icon("trash")} 휴지통</button>`
              : `<button class="btn bad" data-act="delete">${icon("trash")} 영구 삭제</button>`}</div>
-         ${alreadyLive(w) ? `<div class="rest" style="text-align:left;padding:6px 2px 0">
-             이 작품은 이미 목록에 있습니다.</div>` : ""}`
+         ${keptSame(w) ? `<div class="rest" style="text-align:left;padding:6px 2px 0">
+             ${whereKept(w)}.</div>` : ""}`
       : `<div class="link-row" style="margin-top:9px">
            <button class="btn" data-act="watched">${icon("check")} 감상 완료</button>
            <button class="btn bad" data-act="dropped">${icon("trash")} 휴지통</button></div>`}
@@ -4512,7 +4536,7 @@ function archRow(w) {
       ${/* 목록에 같은 작품이 이미 있으면 복구할 자리가 없다. 눌러 놓고 나서 「안 됩니다」를
            듣는 것보다, 누를 수 없는 것으로 서 있는 편이 낫다 — 왜인지는 title 에 적는다. */""}
       <button class="mini-btn" data-restore="${w.id}"${
-        alreadyLive(w) ? ' disabled title="이미 목록에 있는 작품입니다"' : ""}>복구</button>
+        keptSame(w) ? ` disabled title="${whereKept(w)}"` : ""}>복구</button>
       ${/* 휴지통도 삭제도 **되돌리기와 다른 갈래의 일**이다 — 빨강으로 갈라 세운다.
              한때 휴지통만 검게 두었는데, 되돌리기 옆에 나란히 서니 둘 다 그냥
              「할 수 있는 일」로 보였다. */""}
@@ -4521,11 +4545,18 @@ function archRow(w) {
   </div>`;
 }
 
-/** 이 작품과 **같은 url** 이 내 살아 있는 목록에 이미 서 있는가.
+/** 이 작품과 **같은 url** 을 내가 이미 들고 있는가 — 있으면 그 상태, 없으면 null.
 
     같음을 가리는 것은 urlId 다 — 제목은 저마다 고쳐 쓸 수 있고 platformId 는 내 분류다.
-    이러면 복구할 자리가 없다: 살아 있는 것끼리는 한 작품에 한 줄이어야 한다(idx_work_live). */
-const alreadyLive = w => activeWorks().some(a => a.urlId === w.urlId);
+    이러면 복구할 자리가 없다: **한 사람에게 같은 작품은 한 줄**이다(idx_work_kept).
+    감상 완료도 자리를 차지한다 — 휴지통에서 복구했더니 목록에 두 장 서는 일이 없게.
+
+    제 줄은 빼고 본다. 감상 완료 줄에게는 저 자신이 「이미 들고 있는 것」이라, 안 빼면
+    감상 완료는 무엇 하나 복구할 수 없다. */
+const keptSame = w => works.find(a =>
+  a.id !== w.id && a.state !== "dropped" && a.urlId === w.urlId)?.state ?? null;
+const whereKept = w => keptSame(w) === "watched" ? "이미 감상 완료에 있는 작품입니다"
+  : "이미 목록에 있는 작품입니다";
 
 /** 지금 화면에 보이는 작품들 — 전체 선택이 "보이는 것"만 집도록 */
 function archVisible() {
@@ -4768,8 +4799,8 @@ function drawArchive() {
          조용히 빼면 몇 편이 안 돌아왔는지 세어 봐야 안다. 몇 편이 빠지는지 말하고 묻는다. */
       if (what === "restore") {
         const all = ids.map(id => works.find(w => w.id === id)).filter(Boolean);
-        const blocked = all.filter(alreadyLive);
-        ids = all.filter(w => !alreadyLive(w)).map(w => w.id);
+        const blocked = all.filter(keptSame);
+        ids = all.filter(w => !keptSame(w)).map(w => w.id);
         if (blocked.length) {
           /* 복구는 **되살리는 일**이라 빨강이 아니다. askSure 는 기본이 빨강(danger)인데
              그건 지우거나 거두는 자리를 위한 것이고, 여기서는 테마색이 맞다. */
@@ -4777,7 +4808,7 @@ function drawArchive() {
             danger: false,
             title: `${blocked.length}편은 복구되지 않습니다`,
             body: `${esc(blocked.slice(0, 3).map(w => w.title).join(", "))}${
-              blocked.length > 3 ? ` 외 ${blocked.length - 3}편` : ""} 은(는) 이미 목록에 있습니다.${
+              blocked.length > 3 ? ` 외 ${blocked.length - 3}편` : ""} 은(는) 이미 목록이나 감상 완료에 있습니다.${
               ids.length ? ` 나머지 ${ids.length}편만 복구합니다.` : ""}`,
             ok: ids.length ? "복구" : "확인", back: drawArchive,
           });
@@ -4940,9 +4971,15 @@ function openAdd(prefill, fromShare) {
     if (!resolved.ok) { preview.innerHTML = `<div class="note">${esc(resolved.reason)}</div>`; return; }
     const auto = resolved.origin === "og";
     const title = draft.title ?? resolved.title;
-    const had = resolved.mine;              // 이미 담아 둔 그 작품 (없으면 null)
+    const had = resolved.mine;              // 이미 들고 있는 그 작품 (없으면 null)
+    /* **감상 완료에 있으면 그렇게 말한다.** 「이미 담아 둔 작품」이라고만 하면 목록에서
+       찾다가 없어서 다시 담게 된다. 담기는 그 줄의 정보만 새로 적고 상태는 두므로,
+       목록으로 되돌리는 길(복구)이 따로 있다는 것까지 한 줄에 담는다. */
+    const done = had?.state === "watched";
     preview.innerHTML = `
-      ${had ? `<div class="note sep">이미 담아 둔 작품입니다 — 아래 값으로 새로 적습니다</div>` : ""}
+      ${had ? `<div class="note sep">${done
+        ? "감상 완료에 있는 작품입니다 — 아래 값으로 새로 적습니다. 목록으로 되돌리려면 감상 완료에서 「복구」를 누르세요"
+        : "이미 담아 둔 작품입니다 — 아래 값으로 새로 적습니다"}</div>` : ""}
       ${resolved.note ? `<div class="note sep">${esc(resolved.note)}</div>` : ""}
       <div class="sep">
       <dl class="kv"><dt>플랫폼</dt><dd>${esc(resolved.platform.name)} · ${MEDIA[resolved.mediaType] ?? "링크"}</dd></dl>

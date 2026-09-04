@@ -131,19 +131,9 @@ CREATE TABLE IF NOT EXISTS work (
 );
 `;
 
-/* 부분 UNIQUE 인덱스 둘. **한 사람이 같은 작품을 두 줄 갖는 것**을 상태별로 가른다.
-
-     살아 있는 것 — 한 줄. 목록에 같은 작품이 둘 서 있을 까닭이 없다.
-     감상 완료   — 한 줄. 「끝까지 본 시리즈」는 몇 번 봤는지가 아니라 무엇을 봤는지다.
-     휴지통      — 여러 줄. 담았다 버린 일은 저마다 다른 판단이고, 공유 폴더에서 온
-                   같은 작품을 따로 버릴 수도 있어야 한다.
-
-   화면과 서버가 지키는 규칙을 여기서 한 번 더 못 박는다 — 짜맞춘 요청이 와도 표가 거절한다. */
+/* 겹치는 것을 막는 UNIQUE 는 여기 두지 않는다 — 옛 파일에 겹친 줄이 남아 있으면
+   표를 세우다 죽는다. 이관이 먼저 합치고, 그다음 keepOneRow() 가 세운다. */
 const SCHEMA_WORK_INDEX = `
-CREATE UNIQUE INDEX IF NOT EXISTS idx_work_live
-  ON work(user_id, url_id) WHERE state = 'active';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_work_done
-  ON work(user_id, url_id) WHERE state = 'watched';
 CREATE INDEX IF NOT EXISTS idx_work_url ON work(url_id);
 `;
 
@@ -387,7 +377,7 @@ const schemaV = (): number =>
 /* **마지막 이관 번호와 맞춰 둔다.** 뒤에 once() 를 더하면 이 숫자도 함께 올린다 —
    안 올려도 빈 표에 돌아 탈은 없지만, 새 파일이 「끝난 것」인데 끝나지 않은 번호를
    달고 있으면 다음 사람이 그 어긋남부터 풀어야 한다. */
-const LATEST_V = 11;
+const LATEST_V = 12;
 if (schemaV() === 0) {
   const empty = !db.prepare("SELECT 1 FROM user LIMIT 1").get();
   if (empty) db.exec("PRAGMA user_version = " + LATEST_V);
@@ -595,6 +585,45 @@ once(11, () => {
   }
   db.prepare("DELETE FROM kv WHERE k = 'siteNames'").run();
   if (rows.length) console.log(`  사이트 이름을 공용 표로 옮김: ${n}개 (${rows.length}명분)`);
+});
+
+/* **한 사람에게 같은 작품은 한 줄이다** — 휴지통만 빼고.
+
+   한때 살아 있는 것과 감상 완료를 따로 세어 저마다 한 줄씩 허락했다. 그래서 감상 완료한
+   작품을 친구 폴더에서 담아 오거나 주소로 다시 담으면 **줄이 하나 더 생겼다.** 목록에
+   안 서던 때는 눈에 안 띄었는데, 감상 완료를 페이지·폴더에 세우기 시작하자 같은 작품이
+   두 장씩 보였다.
+
+   **가장 나중의 결정이 이긴다.** 정한 때(state_at)가 없으면 담은 때(added_at)로 본다 —
+   그래야 「오래전에 다 봤는데 어제 다시 담았다」와 「오래전에 담았는데 어제 다 봤다」가
+   서로 다른 답을 낸다. 지는 줄의 폴더·별점·표지·제목은 이긴 줄이 물려받는다:
+   합치는 일이지 버리는 일이 아니다. */
+once(12, () => {
+  const dups = db.prepare(`SELECT user_id, url_id FROM work WHERE state <> 'dropped'
+    GROUP BY user_id, url_id HAVING COUNT(*) > 1`).all() as
+    { user_id: string; url_id: string }[];
+  const rowsOf = db.prepare(`SELECT id, rating, visits, last_at, title, cover_url, cover_aspect
+      FROM work WHERE user_id = ? AND url_id = ? AND state <> 'dropped'
+      ORDER BY COALESCE(state_at, added_at) DESC, rowid DESC`);
+  const moveFolders = db.prepare(`INSERT OR IGNORE INTO work_folder(work_id, folder_id)
+      SELECT ?, folder_id FROM work_folder WHERE work_id = ?`);
+  const inherit = db.prepare(`UPDATE work SET rating = COALESCE(rating, ?),
+      title = COALESCE(title, ?), cover_url = COALESCE(cover_url, ?),
+      cover_aspect = COALESCE(cover_aspect, ?),
+      visits = MAX(visits, ?), last_at = MAX(last_at, ?) WHERE id = ?`);
+  const drop = db.prepare("DELETE FROM work WHERE id = ?");
+  let n = 0;
+  for (const d of dups) {
+    const rows = rowsOf.all(d.user_id, d.url_id) as any[];
+    const keep = rows[0];
+    for (const r of rows.slice(1)) {
+      moveFolders.run(keep.id, r.id);
+      inherit.run(r.rating, r.title, r.cover_url, r.cover_aspect, r.visits, r.last_at, keep.id);
+      drop.run(r.id);
+      n++;
+    }
+  }
+  if (n) console.log(`  살아 있는 줄과 감상 완료 줄을 한 줄로: ${n}줄 거둠`);
 });
 
 /* 작품 하나를 url(공용)과 work(내 것)로 가른다.
@@ -926,17 +955,18 @@ export function getWork(userId: string, id: string): Work | null {
   return toWork(r, fs.map(f => f.folder_id));
 }
 
-/** 이미 내 목록에 **살아 있는** 같은 작품 — 없으면 null.
+/** **이미 내가 들고 있는 같은 작품** — 살아 있든 감상 완료든. 없으면 null.
 
     upsertWork 가 「이미 담았나」를 가리는 것과 **같은 길**로 찾는다: url 을
     구간+시리즈로 집고, 그 줄을 내가 갖고 있는지 본다. 등록 화면이 이것을 미리 물어
     지금 값을 띄우므로, 짐작이 서로 어긋나면 화면과 저장이 갈린다 — 그래서 한 길이어야 한다.
 
-    살아 있는 것만 본다. 휴지통이나 감상 완료에 있는 것은 「없는」 것이다 —
-    담기가 그것을 되살리지 않고 새로 만드는 것과 같은 규칙이다. */
-export function findActiveWork(userId: string, platformId: string, seriesId: string): Work | null {
+    **휴지통만 「없는」 것으로 본다.** 감상 완료는 들고 있는 것이다 — 거기 있는 주소를
+    다시 담아 줄을 하나 더 만들면 같은 작품이 화면에 두 장 선다. 담기는 그 줄의 정보를
+    새로 적고, 목록으로 되돌리는 일은 「복구」가 맡는다. */
+export function findKeptWork(userId: string, platformId: string, seriesId: string): Work | null {
   const r = db.prepare(`SELECT w.id FROM work w JOIN url u ON u.id = w.url_id
-    WHERE w.user_id = ? AND u.platform_id = ? AND u.series_id = ? AND w.state = 'active'`)
+    WHERE w.user_id = ? AND u.platform_id = ? AND u.series_id = ? AND w.state <> 'dropped'`)
     .get(userId, platformId, seriesId) as { id: string } | undefined;
   return r ? getWork(userId, r.id) : null;
 }
@@ -1195,6 +1225,17 @@ function dropContributions(folderId: string, userIds: string[]): number {
    한때 부르는 쪽에서 번호만 뽑아 놓고 한 줄씩 getWork 로 다시 물었다 — 작품 한 편에
    질의 두 번이고, 그렇게 얻은 폴더 목록은 곧바로 덮어써 버려 온전히 버려지는 일이었다.
    첫 질의가 이미 줄 전체를 들고 있으니 그것으로 만든다. */
+/** 남에게 넘기는 줄 — **상태는 들고 가지 않는다.**
+
+    내가 다 봤다는 것은 나와 그 작품 사이의 일이라, 남의 화면에서는 그냥 「그 폴더에
+    있는 한 편」이다. 그대로 넘기면 두 가지가 어긋난다: 받는 쪽의 「감상 완료 보이기」
+    설정이 남의 작품을 감추고, 표지의 배지가 **남의 완료를 제 것처럼** 말한다.
+    배지는 내가 다 본 주소에만 붙어야 한다.
+
+    별점·본 횟수·마지막으로 연 때를 안 베끼는 것과 같은 잣대다 — 그 작품에 대한 것은
+    넘기고, 그 사람과 작품 사이의 것은 넘기지 않는다. */
+const asShared = <T extends { state: string }>(w: T): T => ({ ...w, state: "active" });
+
 export function contributedWorks(folderId: string, who: { not?: string; only?: string }):
   (Work & { owner: string; ownerName: string })[] {
   /* 사람 표의 별칭이 usr 인 이유: u 는 url 표가 쓴다(WORK_COLS 가 그렇게 부른다). */
@@ -1202,11 +1243,11 @@ export function contributedWorks(folderId: string, who: { not?: string; only?: s
     ${WORK_FROM}
     JOIN work_folder wf ON wf.work_id = w.id
     JOIN user usr ON usr.id = w.user_id
-    WHERE wf.folder_id = ? AND w.state = 'active' AND w.user_id ${who.only ? "=" : "<>"} ?
+    WHERE wf.folder_id = ? AND w.state <> 'dropped' AND w.user_id ${who.only ? "=" : "<>"} ?
     ORDER BY w.added_at DESC`).all(folderId, who.only ?? who.not) as any[];
   /* 폴더 목록은 비워 둔다 — 부르는 쪽이 제 폴더 번호를 달아 주므로, 여기서 물어봐야
      그 자리에서 버려질 값이다. */
-  return rows.map(r => ({ ...toWork(r, []), owner: r.user_id, ownerName: r.who ?? "이름 없음" }));
+  return rows.map(r => asShared({ ...toWork(r, []), owner: r.user_id, ownerName: r.who ?? "이름 없음" }));
 }
 
 /** 그 폴더에 무언가 걸어 둔 사람들 — 주인은 빼고 */
@@ -1472,11 +1513,15 @@ export function sharedView(ownerId: string, viewerId: string): { folders: Folder
      작품까지 모으고, 나머지는 여느 때처럼 주인 것만 본다. */
   const shared = folders.filter(f => canEdit(f.take)).map(f => f.id);
   const sMarks = shared.map(() => "?").join(",");
+  /* **감상 완료도 낸다.** 한때 살아 있는 것만 냈는데, 그러면 폴더에 그대로 두었는데도
+     내가 다 봤다는 이유만으로 그 작품이 친구 화면에서 말없이 사라졌다 — 폴더에서 뺀
+     적이 없는데 빠진 셈이다. 내려두는 것은 **내 목록의 결정**이지 폴더를 어떻게 꾸릴지의
+     결정이 아니다. 휴지통은 다르다: 그건 폴더에서도 치우겠다는 뜻이라 내지 않는다. */
   const rows = db.prepare(`
     SELECT DISTINCT ${WORK_COLS}
     ${WORK_FROM}
     JOIN work_folder wf ON wf.work_id = w.id
-    WHERE w.state = 'active' AND wf.folder_id IN (${marks})
+    WHERE w.state <> 'dropped' AND wf.folder_id IN (${marks})
       AND (w.user_id = ?${shared.length ? ` OR wf.folder_id IN (${sMarks})` : ""})
     ORDER BY w.last_at DESC`).all(...ids, ownerId, ...shared) as any[];
   const links = db.prepare(`SELECT work_id, folder_id FROM work_folder
@@ -1490,9 +1535,25 @@ export function sharedView(ownerId: string, viewerId: string): { folders: Folder
      올리지 않는다 (README 「함께 고치는 폴더」). */
   return {
     folders,
-    works: rows.map(r => ({ ...toWork(r, byWork.get(r.id) ?? []), owner: r.user_id })),
+    works: rows.map(r => asShared({ ...toWork(r, byWork.get(r.id) ?? []), owner: r.user_id })),
   };
 }
+
+/** **한 사람에게 같은 작품은 한 줄** — 표가 지킨다.
+
+    휴지통만 여러 줄이다: 담았다 버린 일은 저마다 다른 판단이고, 공유 폴더에서 온
+    같은 작품을 따로 버릴 수도 있어야 한다.
+
+    스키마가 아니라 여기서 세우는 까닭은 **차례** 때문이다. 옛 파일에는 겹친 줄이
+    남아 있을 수 있어, 합치기(once 12)보다 먼저 세우면 표를 만들다 죽는다. */
+function keepOneRow(): void {
+  db.exec(`
+    DROP INDEX IF EXISTS idx_work_live;
+    DROP INDEX IF EXISTS idx_work_done;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_work_kept
+      ON work(user_id, url_id) WHERE state <> 'dropped';`);
+}
+keepOneRow();
 
 /* ── 초대 ────────────────────────────────────────────────── */
 const INVITE_DAYS = 14;

@@ -15,7 +15,7 @@ import {
   getFolder, createFolder, canCopy, canMirror, canEdit, seenByMe, markSeen,
   folderInvites, acceptFolder, declineFolder, leaveFolder,
   noticeBreak, folderNotices, readNotices, sweepNotices, inviteToFolder, unlinkFromFolder,
-  cleanName, setDisplayName, starFolder, findOrMakeUrl, findActiveWork, knownUrl,
+  cleanName, setDisplayName, starFolder, findOrMakeUrl, findKeptWork, knownUrl,
   staleCovers, refreshCover, markChecked,
   type Work, type User, type ShareMode, type TakeMode,
 } from "./db.ts";
@@ -263,13 +263,20 @@ function withMirrors(me: string): { folders: any[]; works: any[] } {
 
      못 본 척하는 것이 옳다: 내가 내 목록에서 내려둔 것은 **내 목록의 결정**이지,
      친구 폴더를 어떻게 볼지의 결정이 아니다. 되돌리면 다시 여기 들어와 제자리를 찾는다. */
+  /* **휴지통만 뺀다.** 한때 살아 있는 것만 보았는데, 그러면 내가 감상 완료한 작품이
+     친구 폴더에 있을 때 친구 줄이 한 장 더 서서 같은 작품이 두 장 보였다.
+     들고 있는 것은 들고 있는 것이다 — 내 줄이 그 자리에 선다(배지가 붙는다).
+
+     감상 완료를 폴더에 안 세우기로 했다면 그 자리는 비어 보인다. 그건 구멍이 아니라
+     **내가 켜고 끈 것**이다 — 전체 설정이 그렇게 말하고 있다. */
   const mineByKey = new Map<string, any>(
-    works.filter(w => w.state === "active").map(w => [keyOf(w), w]));
+    works.filter(w => w.state !== "dropped").map(w => [keyOf(w), w]));
 
   /** 남의 작품 한 줄을 내 목록에 놓을 모양으로 바꾼다 */
   const asGuest = (w: any, folderId: string, owner: string, who: string,
                    take: string, folderOnly: boolean) => {
     const mark = seen.get(w.id);
+    // 상태는 이미 떼어져 온다 (db 의 asShared) — 남의 완료는 남의 일이다
     return { ...w, folders: [folderId], filed: true,
       /* 눌러 봤으면 붉은 점을 끄고, 보러 갔으면 그때를 차례로 쓴다. 한 번도 안 갔으면
          담긴 때 — 친구가 여는 것에 내 목록이 흔들리지 않게. */
@@ -389,10 +396,14 @@ function upsertWork(userId: string, input: {
   folders: string[]; filed: boolean; color?: string | null;
 }): { work: Work; made: boolean } {
   const now = Date.now();
-  /* **살아 있는 것만 본다.** 휴지통에 같은 작품이 있어도 새로 만든다 — 내려둔 것과
-     새로 담는 것은 별개다. 예전에는 여기서 찾아내 state='active' 로 되살렸는데,
-     그러면 그때 매겨 둔 별점과 폴더가 딸려 와 "새로 담았다" 와 다른 것이 생겼다.
-     살아 있는 것끼리의 중복은 여전히 막는다. */
+  /* **휴지통만 「없는」 것으로 본다.** 거기 있는 것은 새로 만든다 — 내려둔 것과 새로
+     담는 것은 별개다. 되살리면 그때 매겨 둔 별점과 폴더가 딸려 와 「새로 담았다」와
+     다른 것이 생긴다.
+
+     **감상 완료는 다르다.** 그건 들고 있는 것이라, 새 줄을 만들면 같은 작품이 화면에
+     두 장 선다. 그 줄에 정보를 새로 적고 **상태는 건드리지 않는다** — 감상 완료면
+     감상 완료인 채로 배지를 달고 선다. 목록으로 되돌리는 일은 「복구」가 맡는다:
+     주소를 한 번 더 담았다는 것이 「다시 볼 참이다」라는 뜻은 아니다. */
   /* **공용 줄을 먼저 세운다.** 이미 있으면 그대로 쓴다 — 남이 담아 둔 줄을 내가 담는다고
      고쳐 쓰면 그 사람 화면의 제목과 표지가 말없이 바뀐다. */
   const urlId = findOrMakeUrl({
@@ -403,7 +414,7 @@ function upsertWork(userId: string, input: {
 
   const existing = db.prepare(
     `SELECT id, sched_mode, sched_days, sched_next, sched_from
-       FROM work WHERE user_id = ? AND url_id = ? AND state = 'active'`)
+       FROM work WHERE user_id = ? AND url_id = ? AND state <> 'dropped'`)
     .get(userId, urlId) as {
       id: string; sched_mode: string; sched_days: string;
       sched_next: number | null; sched_from: number | null;
@@ -513,15 +524,16 @@ function takable(me: string, other: string): Map<string, Work> {
 /** 한 편을 담아 간다. 이미 있으면 새로 만들지 않고 폴더에만 넣는다. */
 async function takeWork(userId: string, src: Work, folderIds: string[]):
   Promise<{ already: boolean; id: string }> {
-  /* 살아 있는 것만 본다 — upsertWork 와 같은 잣대다. 휴지통에 내려둔 것이 있다고
-     담아가기가 막히면, 화면에는 「이미 담겨 있습니다」라는데 어디에도 안 보인다. */
+  /* 휴지통만 「없는」 것으로 본다 — upsertWork 와 같은 잣대다. 거기 내려둔 것이 있다고
+     담아가기가 막히면, 화면에는 「이미 담겨 있습니다」라는데 어디에도 안 보인다.
+     감상 완료에 있는 것은 들고 있는 것이라 폴더에만 넣어 준다. */
   const urlId = findOrMakeUrl({
     platformId: src.platformId, seriesId: src.seriesId, listUrl: src.listUrl,
     appUrl: src.appUrl, mediaType: src.mediaType, title: src.title,
     coverUrl: src.coverUrl, coverAspect: src.coverAspect, episode: src.episode,
   });
   const had = db.prepare(
-    "SELECT id FROM work WHERE user_id = ? AND url_id = ? AND state = 'active'")
+    "SELECT id FROM work WHERE user_id = ? AND url_id = ? AND state <> 'dropped'")
     .get(userId, urlId) as { id: string } | undefined;
 
   /* 이미 담아 둔 것은 건드리지 않는다 — 제목을 내가 고쳐 뒀을 수도 있고, 보관함에
@@ -702,7 +714,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
        열쇠(구간+시리즈)는 담을 때 쓰는 것과 같아야 하므로 여기서 답한다 — 화면이 짐작하면
        구간 합치기(applyMerge)를 지나온 뒤의 id 를 모른다. */
     const mine = r.ok
-      ? findActiveWork(user.id, applyMerge(user.id, r.platform.id), r.seriesId) : null;
+      ? findKeptWork(user.id, applyMerge(user.id, r.platform.id), r.seriesId) : null;
     json(res, r.ok ? 200 : 400, r.ok ? { ...r, originLabel: originLabel(r), mine } : r);
     return true;
   }
@@ -957,11 +969,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
          떨어져 「무슨 일이 났는지」를 말해 주지 못한다. 여기서 미리 가려 뜻이 담긴 답을
          준다 — 화면은 이 답을 그대로 사람에게 옮긴다. */
       if (b.state === "active") {
-        const taken = db.prepare(`SELECT 1 FROM work a
-            WHERE a.user_id = ? AND a.state = 'active' AND a.id <> ?
-              AND a.url_id = (SELECT url_id FROM work WHERE id = ?)`).get(user.id, id, id);
+        const taken = db.prepare(`SELECT a.state FROM work a
+            WHERE a.user_id = ? AND a.state <> 'dropped' AND a.id <> ?
+              AND a.url_id = (SELECT url_id FROM work WHERE id = ?)`)
+          .get(user.id, id, id) as { state: string } | undefined;
+        // 어디에 있는지까지 말한다 — 「이미 있다」만으로는 어디를 찾아봐야 할지 모른다
         if (taken) {
-          json(res, 409, { ok: false, reason: "이미 목록에 있는 작품입니다." });
+          json(res, 409, { ok: false, reason: taken.state === "watched"
+            ? "이미 감상 완료에 있는 작품입니다." : "이미 목록에 있는 작품입니다." });
           return true;
         }
       }

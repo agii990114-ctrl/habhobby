@@ -234,12 +234,28 @@ function pendingSiteNames(userId: string): { id: string; host: string }[] {
     빠진 칸이 있으면 SQLite 바인딩에서 죽으므로 여기서 막는다. */
 function normSchedule(v: any) {
   const s = v ?? {};
-  return {
-    mode: typeof s.mode === "string" ? s.mode : "unknown",
-    days: Array.isArray(s.days) ? s.days.filter((n: any) => Number.isInteger(n)) : [],
-    next: typeof s.next === "number" ? s.next : null,
-    source: s.source === "auto" ? "auto" : "user",
-  };
+  const mode = typeof s.mode === "string" ? s.mode : "unknown";
+  let days: number[] = Array.isArray(s.days)
+    ? s.days.filter((n: any) => Number.isInteger(n)) : [];
+  let next = typeof s.next === "number" ? s.next : null;
+
+  /* **날짜 지정은 days 에 날짜들을 담는다.** 그 칸은 「이 일정이 쓰는 숫자들」이라
+     매주는 요일(0~6), 매월은 날짜(1~31)를 담아 왔다 — 날짜 지정은 날짜를 담는다.
+     칸을 새로 내지 않은 것은, 담기·고치기·이관·바뀜 판정이 이미 이 칸을 지나기
+     때문이다: 칸을 늘리면 그 다섯 자리를 모두 손봐야 하고 하나만 빠뜨려도 조용히 샌다.
+
+     next 는 여기서 **다시 적는다**. 화면이 무엇을 보냈든 「다가오는 가장 가까운 날」이
+     되도록 — 캘린더의 「예정」이 그 값으로 고르고 차례를 매긴다(upcoming). 다 지났으면
+     마지막 날을 둔다: 그러면 예정에는 안 서고(오늘보다 이르다) 목록에는 남은 사실이 적힌다.
+
+     옛 줄도 받아 준다 — days 가 비고 next 만 있으면 그 하루를 날짜 목록으로 삼는다. */
+  if (mode === "dated") {
+    if (!days.length && next) days = [next];
+    days = [...new Set(days)].sort((a, b) => a - b);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    next = days.find(t => t >= today.getTime()) ?? days[days.length - 1] ?? null;
+  }
+  return { mode, days, next, source: s.source === "auto" ? "auto" : "user" };
 }
 
 /* ── 미러링 ───────────────────────────────────────────────

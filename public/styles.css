@@ -829,6 +829,28 @@
     text-transform: uppercase; color: var(--ink-3);
   }
 
+  /* 날짜 지정 — 날짜 칸을 여러 줄 세운다. 한 줄에 칸 하나와 ✕ 하나,
+     그 아래 「날짜 추가」. 요일 고르개(.dows)와 같은 무게로 보이게 맞춘다. */
+  .dates { display: flex; flex-direction: column; gap: 6px; }
+  .date-row { display: flex; align-items: center; gap: 6px; }
+  .date-row input[type="date"] { flex: 1; min-width: 0; }
+  .date-del {
+    flex: none; width: 32px; height: 32px; border-radius: 8px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--line-2); background: var(--surface-2); color: var(--ink-3);
+  }
+  .date-del:hover { border-color: var(--bad); color: var(--bad); }
+  .date-del[hidden] { display: none; }
+  /* 「날짜 추가」는 **점선**이다 — 지금 있는 값이 아니라 자리를 하나 더 여는 단추라,
+     날짜 칸들과 같은 무게로 서면 어느 것이 값인지 흐려진다(폴더 목록의 「새 폴더」와 같은 결). */
+  .date-add {
+    width: 100%; padding: 7px 8px; border-radius: 9px; cursor: pointer;
+    border: 1px dashed var(--line-2); background: none; color: var(--ink-3);
+    font-size: 12px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center; gap: 5px;
+  }
+  .date-add:hover { background: var(--surface-2); color: var(--ink-2); border-style: solid; }
+
   .dows { display: flex; gap: 4px; }
   .dows button {
     flex: 1; padding: 7px 0; border-radius: 8px; cursor: pointer; font-size: 12.5px; font-weight: 600;
@@ -1238,7 +1260,18 @@
      옆으로 내용이 비쳐 보이지 않는다. */
   /* 시트가 세로로 나뉜 통이라 머리는 애초에 구르지 않는다 — 붙여 둘 필요가 없다.
      닫기 버튼이 이 안에 있으므로 자리를 잡아 주는 기준(relative)만 남긴다. */
-  .sheet-top { position: relative; z-index: 4; flex: none; background: var(--surface); padding: 0 18px; }
+  /* **머리 영역 전체가 끌어 닫는 자리다.** 손잡이(.handle-zone)에만 touch-action: none 을
+     주었더니 손가락으로는 잘 안 닫혔다 — 그 띠는 20px 남짓이라 조금만 빗나가면 제목줄을
+     잡게 되고, 거기서는 브라우저가 그 손짓을 스크롤로 가져가 버려(pointercancel) 끌기가
+     시작도 못 한다. 아래 드래그 코드는 이미 .sheet-top 전체를 잡는 자리로 보고 있었는데
+     (onGrip), CSS 만 손잡이에 머물러 있었다. 둘의 말을 맞춘다.
+
+     단추는 그대로 눌린다 — touch-action 은 브라우저의 스크롤·확대 손짓만 끄고
+     클릭은 건드리지 않는다. */
+  .sheet-top {
+    position: relative; z-index: 4; flex: none; background: var(--surface); padding: 0 18px;
+    touch-action: none;
+  }
   .handle-zone { padding: 8px 0 12px; cursor: grab; touch-action: none; }
   .handle-zone:active { cursor: grabbing; }
   .handle { width: 34px; height: 4px; border-radius: 99px; background: var(--line-2); margin: 0 auto; }

@@ -212,7 +212,8 @@ const SCHED_MODES = [
 /* days는 주기에 따라 뜻이 다르다 — 매주·격주는 요일(0~6), 매월은 날짜(1~31).
    한 칸을 나눠 쓰는 대신 모드를 갈아탈 때 비워서 섞이지 않게 한다. */
 const daysKind = m => (m === "weekly" || m === "biweekly") ? "dow"
-  : m === "monthly" ? "dom" : m === "monthly-dow" ? "ndow" : "";
+  : m === "monthly" ? "dom" : m === "monthly-dow" ? "ndow"
+    : m === "dated" ? "date" : "";
 
 /* "매월 둘째 화요일" 같은 표기. 주차(1~4, 5=마지막)와 요일(0~6)을 한 숫자에 담는다.
    요일이 8보다 작으므로 자리를 나눠 쓰면 서로 섞이지 않는다. */
@@ -641,6 +642,18 @@ function daysLeft(t) {
 }
 const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
 
+/** 날짜 지정의 **날짜들**. days 칸을 그대로 쓴다 — 그 칸은 「이 일정이 쓰는 숫자들」이고
+    매주는 요일, 매월은 날짜를 담는다. 날짜 지정은 여태 그 칸을 비워 두고 next 한 칸에
+    하루만 담았는데, 여러 날을 담으려면 자리가 하나로는 모자란다.
+
+    **옛 줄도 여기서 받아 준다.** 날짜 하나만 담아 둔 것들은 days 가 비어 있고 next 에만
+    값이 있다 — 읽는 자리를 하나로 두었으므로 그 한 곳에서 옮겨 읽으면 이관이 따로 필요 없다. */
+const datesOf = s => (s.mode !== "dated") ? []
+  : (s.days?.length ? [...s.days] : (s.next ? [s.next] : [])).sort((a, b) => a - b);
+
+/** 그중 **아직 오지 않은 가장 가까운 날**. 없으면 null — 지난 것만 남았다는 뜻이다. */
+const nextDate = s => datesOf(s).find(t => t >= midnight().getTime()) ?? null;
+
 /** 그 날이 속한 주의 월요일 자정. 격주의 기준점을 주 단위로 맞추는 데 쓴다. */
 function mondayOf(t) {
   const d = new Date(t); d.setHours(0, 0, 0, 0);
@@ -690,7 +703,7 @@ function occursOn(w, date) {
       return d === dow && (n === 5 ? isLast : n === nth);
     });
   }
-  if (s.mode === "dated") return !!s.next && sameDay(s.next, date);
+  if (s.mode === "dated") return datesOf(s).some(t => sameDay(t, date));
   return false;
 }
 
@@ -703,9 +716,16 @@ function schedText(w) {
     return `매월 ${[...s.days].sort((a, b) => a - b).join("·")}일`;
   if (s.mode === "monthly-dow" && s.days.length)
     return `매월 ${[...s.days].sort((a, b) => a - b).map(nthLabel).join(", ")}`;
-  if (s.mode === "dated" && s.next) {
-    const d = new Date(s.next);
-    return `${d.getMonth() + 1}/${d.getDate()} (${DOW[d.getDay()]})`;
+  if (s.mode === "dated") {
+    const all = datesOf(s);
+    if (!all.length) return SCHED_LABEL[s.mode] ?? "일정 미정";
+    /* **다가오는 것을 앞에 세운다.** 지난 날짜를 먼저 적으면 목록에서 「이미 지난 것」이
+       그 콘텐츠의 얼굴이 된다 — 알고 싶은 것은 다음이 언제냐다. 다 지났으면 마지막 날을
+       적는다: 그것이 그 콘텐츠에 대해 남은 마지막 사실이다. */
+    const t = nextDate(s) ?? all[all.length - 1];
+    const d = new Date(t);
+    const one = `${d.getMonth() + 1}/${d.getDate()} (${DOW[d.getDay()]})`;
+    return all.length > 1 ? `${one} 외 ${all.length - 1}일` : one;
   }
   return SCHED_LABEL[s.mode] ?? "일정 미정";
 }
@@ -1275,7 +1295,7 @@ const secHtml = (g, allAttr) => `<section class="plat">
   </section>`;
 
 /** 공개 예정 — 날짜는 정해졌지만 아직 안 온 것. 캘린더 아래에 제 단락으로 선다. */
-const soonSection = () => ({ key: "_soon", label: "공개 예정",
+const soonSection = () => ({ key: "_soon", label: "예정",
   color: "var(--accent)", items: upcoming() });
 
 /* 추가 목록에는 **날짜 미지정만** 담는다. 공개 예정은 달력 바로 아래에서 보는 것이
@@ -1297,8 +1317,8 @@ function openSoon() {
   const g = soonSection();
   workPickAt("soon", g.items);
   openSheet(`<div data-wbar>${workBarHtml(g.items.length)}</div>
-    ${workGridHtml(g.items, "공개 예정인 콘텐츠가 없습니다.")}`,
-    { full: true, title: "공개 예정", sub: `${g.items.length}편 · 가까운 날부터` });
+    ${workGridHtml(g.items, "예정된 콘텐츠가 없습니다.")}`,
+    { full: true, title: "예정", sub: `${g.items.length}편 · 가까운 날부터` });
   pickAct(g.items.length, openSoon);
   wireWorkPick(sheet.querySelector(".sheet-body"), openSoon);
   sheet.querySelector(".sheet-body").addEventListener("click", e => {
@@ -2840,17 +2860,50 @@ function openSheet(html, opts = {}) {
     sy = e.clientY; sx = e.clientX; dy = 0; on = false;
   });
 
+  /* pointercancel 로 끝나면 pointermove 가 더 오지 않는다 — 브라우저가 손짓을 가져간
+     경우다. 위 touchmove 가 그것을 막아 주지만, 막지 못한 경우에도 값이 남아 다음
+     손짓을 방해하지 않도록 여기서 정리한다(end 가 한다). */
+
+  /** 이 손짓이 「끌어 닫기」로 볼 만한가 — 아직 시작하지 않았을 때의 잣대. */
+  const canStart = (gx, gy) => {
+    if (scroller === null) return false;
+    /* 목록을 내려 본 상태면 드래그가 아니라 스크롤이다 — 머리 영역을 잡았을 때는 빼고.
+       맨 위인지 볼 때 1px 여유를 둔다: 화면 배율이나 관성 스크롤 때문에 0.5 같은 값이
+       남아 있으면, 눈으로는 맨 위인데 드래그가 안 먹는다. */
+    if (!onGrip && scroller.scrollTop > 1) return false;
+    // 가로로 더 갔으면 가로 슬라이드다 (페이지 탭의 카드 줄 같은 것)
+    if (Math.abs(gx) > Math.abs(gy)) return false;
+    return gy >= SLOP;
+  };
+
+  /* **손가락일 때는 브라우저에서 손짓을 되찾아 온다.**
+
+     본문(.sheet-body)은 구르는 통이라 브라우저가 세로 손짓을 제 것으로 가져간다. 가져간
+     뒤에는 pointercancel 이 날아와 끌기가 시작조차 못 했다 — 머리줄에서는 되는데 본문에서는
+     안 되던 것이 이것이다(.sheet-top 에는 touch-action: none 이 있어 애초에 안 뺏겼다).
+
+     본문에 touch-action: none 을 줄 수는 없다 — 그러면 목록이 아예 안 굴러간다. 그래서
+     **맨 위에서 아래로 가는 그 순간에만** preventDefault 로 가져온다. 그 자리에서는 어차피
+     더 구를 데가 없으므로 빼앗는 것이 아니라 남는 손짓을 줍는 것이다.
+
+     passive: false 여야 preventDefault 가 먹는다. 브라우저는 touchmove 를 기본으로
+     passive 로 다루기 때문이다. */
+  sheet.addEventListener("touchmove", e => {
+    if (on) { e.preventDefault(); return; }        // 끄는 중에는 화면이 따라오면 안 된다
+    if (e.touches.length !== 1) return;            // 두 손가락은 확대·축소다
+    const t = e.touches[0];
+    if (canStart(t.clientX - sx, t.clientY - sy)) e.preventDefault();
+  }, { passive: false });
+
   sheet.addEventListener("pointermove", e => {
     if (scroller === null) return;
     const gy = e.clientY - sy;
     if (!on) {
-      /* 목록을 내려 본 상태면 드래그가 아니라 스크롤이다 — 머리 영역을 잡았을 때는 빼고.
-         맨 위인지 볼 때 1px 여유를 둔다: 화면 배율이나 관성 스크롤 때문에 0.5 같은 값이
-         남아 있으면, 눈으로는 맨 위인데 드래그가 안 먹는다. */
-      if (!onGrip && scroller.scrollTop > 1) { scroller = null; return; }
-      // 가로로 더 갔으면 가로 슬라이드다 (페이지 탭의 카드 줄 같은 것)
-      if (Math.abs(e.clientX - sx) > Math.abs(gy)) { scroller = null; return; }
-      if (gy < SLOP) return;
+      if (!canStart(e.clientX - sx, gy)) {
+        // 아직 문턱을 못 넘은 것뿐이면 다음 움직임을 기다린다 — 아주 접는 것과 가른다
+        if (Math.abs(gy) < SLOP && Math.abs(e.clientX - sx) < SLOP) return;
+        scroller = null; return;
+      }
       on = true; dragged = true;
       sheet.style.transition = "none";
       sheet.classList.add("dragging");
@@ -3735,6 +3788,19 @@ function schedSummary(s) {
     const nextWk = s.next && mondayOf(s.next) > mondayOf(Date.now());
     return `${hi(nextWk ? "다음 주" : "이번 주")}부터 격주로 ${d}에 놓입니다.`;
   }
+  if (s.mode === "dated") {
+    const all = datesOf(s);
+    if (!all.length) return warn("날짜를 하나 이상 골라주세요");
+    const soon = nextDate(s);
+    const fmt = t => { const d = new Date(t);
+      return `${d.getMonth() + 1}월 ${d.getDate()}일`; };
+    /* **지난 날은 세어 주되 앞세우지 않는다.** 달력에는 그 자국이 남아야 하지만
+       (occursOn 이 지난 날도 놓는다), 여기서 궁금한 것은 다음이 언제냐다. */
+    const past = all.length - all.filter(t => t >= midnight().getTime()).length;
+    if (!soon) return `${hi(fmt(all[all.length - 1]))}까지 ${all.length}일이 모두 지났습니다.`;
+    return `${hi(fmt(soon))}${all.length > 1 ? ` 외 ${all.length - 1}일` : ""}에 놓입니다.`
+      + (past ? ` 지난 ${past}일은 달력에만 남습니다.` : "");
+  }
   if (s.mode === "monthly") {
     if (!s.days.length) return warn("날짜를 하나 이상 골라주세요");
     return `매월 ${hi([...s.days].sort((a, b) => a - b).join("·") + "일")}에 놓입니다.`
@@ -3765,9 +3831,27 @@ function colorPickerHtml(value, fallback, label, autoText = "자동") {
 /** 달력의 어느 날에 놓이는 주기인가 — 그럴 때만 색을 고르는 뜻이 있다 */
 const placedOnDays = m => ["weekly", "biweekly", "monthly", "monthly-dow", "dated"].includes(m);
 
+/** <input type="date"> 가 읽는 꼴(YYYY-MM-DD)로. 시간대를 빼고 재야 하루가 밀리지 않는다 —
+    UTC 로 바로 자르면 한국에서는 오전 9시 이전이 전날로 적힌다. */
+const dateVal = t => t
+  ? new Date(t - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10) : "";
+
+/** 날짜 칸들. **빈 칸 하나는 늘 남겨 둔다** — 「날짜 지정」을 골랐는데 넣을 자리가 없으면
+    무엇을 하라는 화면인지 알 수 없다. 두 개부터는 각 줄에 지우는 단추가 붙는다:
+    하나뿐일 때는 지울 것이 아니라 비우면 되고, 그때 ✕ 는 「이 갈래를 그만두는 것」처럼
+    보인다. */
+function datesHtml(s) {
+  const all = datesOf(s);
+  const rows = all.length ? all : [null];
+  return rows.map(t => `<div class="date-row">
+      <input type="date" data-date value="${dateVal(t)}">
+      <button class="date-del" data-date-del type="button"
+        title="이 날짜 지우기" aria-label="이 날짜 지우기">${icon("x")}</button>
+    </div>`).join("")
+    + `<button class="date-add" data-date-add type="button">${icon("plus")} 날짜 추가</button>`;
+}
+
 function schedHtml(s, note, color) {
-  const nextVal = s.next
-    ? new Date(s.next - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10) : "";
   /* 색과 일정은 **한 단락**이다 — 둘 다 달력에서 이 작품이 어떻게 보이는지를 정한다.
      그래서 구분선은 둘을 감싼 바깥에 한 번만 긋는다. */
   return `<div class="sep">${color && placedOnDays(s.mode)
@@ -3808,7 +3892,8 @@ function schedHtml(s, note, color) {
                 </div>`}
            <div class="rest" data-sched-sum style="padding:7px 2px 0">${schedSummary(s)}</div>`
       : s.mode === "dated"
-        ? `<input type="date" data-next value="${nextVal}">`
+        ? `<div class="dates" data-dates>${datesHtml(s)}</div>
+           <div class="rest" data-sched-sum style="padding:7px 2px 0">${schedSummary(s)}</div>`
         : `<div class="rest" style="padding:2px">${SCHED_HINT[s.mode] ?? ""}</div>`}
   </div></div>`;
 }
@@ -3893,11 +3978,63 @@ function wireSched(root, s, onChange) {
       onChange(false);
     }
   });
-  const dateEl = box.querySelector("[data-next]");
-  if (dateEl) dateEl.addEventListener("change", () => {
-    s.next = dateEl.value ? new Date(dateEl.value + "T00:00").getTime() : null;
-    onChange(false);
-  });
+  /* ── 날짜 지정 ────────────────────────────────────────
+     **칸을 통째로 다시 그리지 않는다.** 날짜 하나를 고칠 때마다 새로 그리면 방금 연
+     달력이 닫히고 손이 짚던 자리가 사라진다. 줄은 붙이고 떼기만 한다. */
+  const dbox = box.querySelector("[data-dates]");
+  if (dbox) {
+    const rows = () => [...dbox.querySelectorAll(".date-row")];
+    /* 달력을 바로 열어 준다 — 새 칸을 만들어 놓고 한 번 더 누르게 하지 않는다.
+       **던질 수 있어서 감싼다**: showPicker 는 사용자 손짓 안에서만 허락되고,
+       그 밖에서 부르면 NotAllowedError 다. 손짓이 아니어도 칸은 이미 생겼으므로
+       달력이 안 열리는 것은 흠이 아니다 — 그 하나 때문에 뒷일이 멈추면 안 된다. */
+    const openPicker = el => { el?.focus(); try { el?.showPicker?.(); } catch { } };
+    /* 줄이 하나뿐이면 ✕ 를 숨긴다 — 그때는 지울 것이 아니라 비우면 되고,
+       ✕ 가 「이 갈래를 그만두는 것」처럼 보인다. */
+    const syncDel = () => {
+      const n = rows().length;
+      for (const r of rows()) {
+        const b = r.querySelector(".date-del");
+        if (b) b.hidden = n < 2;
+      }
+    };
+    /* **화면이 곧 값이다.** 칸에 적힌 것을 그대로 거둬 담는다.
+       고른 날짜는 days 에 담는다 — 그 칸은 「이 일정이 쓰는 숫자들」이라 매주는 요일을,
+       매월은 날짜를 담는다. next 는 서버가 「다가오는 가장 가까운 날」로 다시 적지만,
+       화면이 곧바로 맞도록 여기서도 채워 둔다. */
+    const take = () => {
+      const got = rows().map(r => r.querySelector("[data-date]").value)
+        .filter(Boolean).map(v => new Date(v + "T00:00").getTime());
+      s.days = [...new Set(got)].sort((a, b) => a - b);
+      s.next = nextDate(s) ?? s.days[s.days.length - 1] ?? null;
+      const sum = box.querySelector("[data-sched-sum]");
+      if (sum) sum.innerHTML = schedSummary(s);
+      onChange(false);
+    };
+
+    dbox.addEventListener("change", e => { if (e.target.matches("[data-date]")) take(); });
+
+    dbox.addEventListener("click", e => {
+      if (e.target.closest("[data-date-add]")) {
+        /* **빈 칸이 있으면 더 늘리지 않는다.** 두 번 누르면 빈 칸만 둘 늘어 무엇을
+           채우라는 것인지 흐려진다 — 그 칸부터 채우도록 손을 그리로 보낸다. */
+        const blank = rows().map(r => r.querySelector("[data-date]")).find(el => !el.value);
+        if (blank) { openPicker(blank); return; }
+        const row = document.createElement("div");
+        row.className = "date-row";
+        row.innerHTML = `<input type="date" data-date>
+          <button class="date-del" data-date-del type="button"
+            title="이 날짜 지우기" aria-label="이 날짜 지우기">${icon("x")}</button>`;
+        dbox.insertBefore(row, dbox.querySelector("[data-date-add]"));
+        syncDel();
+        openPicker(row.querySelector("input"));
+        return;
+      }
+      const del = e.target.closest("[data-date-del]");
+      if (del) { del.closest(".date-row")?.remove(); syncDel(); take(); }
+    });
+    syncDel();
+  }
 }
 
 function pickerHtml(selected) {
@@ -5166,7 +5303,7 @@ function openInbox() {
     ${headHtml("콘텐츠 추가", { back: false, actions: false, sub: "무엇을 하시겠어요?" })}
     <div class="opts">
       <button class="menu-item" data-go="unfiled" style="border:1px solid var(--line-2);border-radius:11px">
-        <span class="mi">✨</span><span class="mt">새 콘텐츠${n ? `<span class="mt-count">${n}</span>` : ""}
+        <span class="mi">✨</span><span class="mt">자동 저장된 콘텐츠${n ? `<span class="mt-count">${n}</span>` : ""}
         <small>${n ? "공유로 받은 콘텐츠를 정리합니다" : "정리할 콘텐츠가 없습니다"}</small></span></button>
       <button class="menu-item" data-go="url" style="border:1px solid var(--line-2);border-radius:11px">
         <span class="mi">🔗</span><span class="mt">URL 추가<small>주소를 붙여넣어 목록에 담기</small></span></button>
@@ -5188,21 +5325,10 @@ function openUnfiled() {
   /* **없어진 것은 고른 것에서도 뺀다.** 지우고 다시 그리면 목록이 줄어드는데, 사라진 id 를
      그대로 쥐고 있으면 셈줄이 「3개 선택」이라 말하면서 화면에는 둘만 보인다. */
   if (ufSel) for (const id of [...ufSel]) if (!list.some(w => w.id === id)) ufSel.delete(id);
-  // 고르는 중이 아니면 셀 것이 없다 — ufSel 은 그때 null 이다
-  const allOn = !!ufSel && list.length > 0 && list.every(w => ufSel.has(w.id));
-
   openSheet(`
-    ${headHtml("새 콘텐츠", { actions: false })}
+    ${headHtml("자동 저장된 콘텐츠", { actions: false })}
     <p class="sub">공유로 받아 아직 정리하지 않은 콘텐츠 ${list.length}편</p>
-    ${ufSel ? `<div class="bulk">
-      <b>${ufSel.size}개 선택</b>
-      ${list.length ? `<button class="mini-btn" data-uf-all>${
-        allOn ? "전체 해제" : "전체 선택"}</button>` : ""}
-      <span class="bulk-act">
-        ${ufSel.size ? `<button class="mini-btn on" data-uf-del
-          >${icon("check")} 확인</button>` : ""}
-        <button class="mini-btn" data-uf-off>완료</button>
-      </span></div>` : ""}
+    ${ufSel ? bulkHtml() : ""}
     <div class="uf-list">${list.length ? list.map(w => {
       const p = platformOf(w.platformId);
       /* 고르는 중에는 체크칸을 **줄 밖에** 세운다 — 줄 자체가 button 이라 그 안에 또
@@ -5279,7 +5405,12 @@ function openUnfiled() {
     openWorkSettings(b.dataset.uf, { back: openUnfiled, mode: "add" });
   });
 
-  /* 셈줄만 갈아 끼운다 — 위 손짓이 부른다. 화면을 통째로 다시 그리지 않으려고 따로 둔다. */
+  /* 셈줄. **한 자리에서 짓는다** — 처음 그릴 때와 체크가 바뀔 때 둘 다 이것을 부른다.
+     한때 두 곳에 같은 마크업을 베껴 두었는데, 그러면 「확인」을 「삭제」로 되돌리는 것
+     같은 손질을 한쪽에만 하고 지나가게 된다.
+
+     체크 하나가 바뀔 때 화면을 통째로 다시 그리지 않으려고 함수로 뺀 것이다 —
+     다시 그리면 짚고 있던 자리가 사라져 두 번째부터 헛손질이 된다. */
   function bulkHtml() {
     const on = list.length > 0 && list.every(w => ufSel.has(w.id));
     return `<div class="bulk">
@@ -5476,7 +5607,7 @@ function openAdd(prefill, fromShare) {
       // 만든 것과 고친 것은 다른 일이다 — 「담았습니다」가 둘 다를 뜻하면 뭘 했는지 모른다
       toast(!r.made ? `«${title}» 설정을 새로 적었습니다`
             : filed ? `«${title}» 목록에 담았습니다`
-                    : `«${title}» 담았습니다 · 새 콘텐츠에서 정리할 수 있어요`);
+                    : `«${title}» 담았습니다 · 자동 저장된 콘텐츠에서 정리할 수 있어요`);
     });
   };
 
@@ -6803,7 +6934,7 @@ const takeInvite = () => {
   if (saved) {
     if (location.search) history.replaceState(null, "", location.pathname + location.hash);
     toast(savedAgain ? `«${saved}» 설정을 새로 적었습니다`
-      : `«${saved}» 담았습니다 · 새 콘텐츠에서 정리할 수 있어요`);
+      : `«${saved}» 담았습니다 · 자동 저장된 콘텐츠에서 정리할 수 있어요`);
   }
 
   if ("serviceWorker" in navigator)

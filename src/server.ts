@@ -23,6 +23,7 @@ import {
 import {
   PROVIDERS, configuredProviders, availableProviders, startLogin, completeLogin, createSession,
   userFromToken, destroySession, cookieHeader, readCookie, COOKIE,
+  shareKeyUser, createShareKey, listShareKeys, deleteShareKey,
   localFallbackAllowed, redirectUri, BASE_URL,
   hashPassword, verifyPassword, validLoginId, validPassword,
 } from "./auth.ts";
@@ -432,6 +433,44 @@ async function readUrl(raw: string): Promise<{ r: Extract<Resolved, { ok: true }
           : "그런 주소가 없습니다. 도메인을 다시 확인해 주세요." } };
   if (!r.ok) return { bad: r };
   return { r };
+}
+
+/* 공유로 들어온 한 줄을 담는다.
+
+   **이 판단은 여기 한 곳에만 있다.** 예전에는 서비스 워커가 같은 일을 한 벌 더 하고
+   있었는데(sw.js 의 handleShare), 이제 들어오는 문이 셋이다 — 브라우저의 웹 공유 대상,
+   iOS 「단축어」, 안드로이드 앱. 문마다 판단을 두면 언젠가 서로 다르게 굴고, 그때 「어떤
+   기기에서 공유했느냐에 따라 다르게 담긴다」는 가장 알아채기 어려운 종류의 어긋남이 된다.
+
+   **제목을 그 페이지에서 받아왔을 때만 담는다**(origin === "og"). 짐작한 제목으로 조용히
+   담으면 담긴 줄 알고 지나갔다가 나중에 엉뚱한 이름을 발견한다. 못 받아왔으면 담지 않고
+   사람에게 넘긴다 — 그 판단은 사람이 할 일이다. */
+async function intakeShared(user: User, raw: string): Promise<
+  | { kind: "empty" }
+  | { kind: "ask"; raw: string }
+  | { kind: "saved"; title: string; made: boolean }
+> {
+  // 「제목 https://…」 처럼 글이 섞여 와도 주소만 집는다 (앱의 부팅 코드와 같은 잣대)
+  const m = raw.match(/https?:\/\/\S+/);
+  const target = m ? m[0] : raw.trim();
+  if (!target) return { kind: "empty" };
+  const ask = { kind: "ask" as const, raw: raw || target };
+
+  let got;
+  try { got = await readUrl(target); } catch { return ask; }
+  if ("bad" in got || got.r.origin !== "og" || !got.r.title) return ask;
+  const r = got.r;
+
+  const { work, made } = upsertWork(user.id, {
+    platformId: applyMerge(user.id, r.platform.id), seriesId: r.seriesId, title: r.title,
+    description: r.description, mediaType: r.mediaType, listUrl: r.listUrl, appUrl: r.appUrl,
+    coverUrl: r.coverUrl, coverAspect: r.coverAspect, episode: r.episode, schedule: r.schedule,
+    folders: [],
+    /* **「자동 저장된 콘텐츠」로 들어간다**(filed: false). 사람이 폴더도 일정도 고르지
+       않은 것이라 목록에 바로 세우면 뒤섞인다. 나중에 「확인」을 눌러 제자리로 보낸다. */
+    filed: false, color: null,
+  });
+  return { kind: "saved", title: work.title, made };
 }
 
 function upsertWork(userId: string, input: {
@@ -1639,6 +1678,32 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     return true;
   }
 
+  /* 공유 열쇠. **여기는 쿠키로만 들어온다** — 열쇠로 열쇠를 만들 수 있으면, 한 번 새어
+     나간 열쇠가 스스로 새끼를 쳐서 지워도 지워지지 않는다. /api/ 는 통째로 쿠키를 요구하고
+     (위의 401), 열쇠가 통하는 곳은 /share 하나뿐이다. */
+  if (p === "/api/share-keys" || p.startsWith("/api/share-keys/")) {
+    if (p === "/api/share-keys" && m === "GET") {
+      json(res, 200, { ok: true, keys: listShareKeys(user.id) });
+      return true;
+    }
+    if (p === "/api/share-keys" && m === "POST") {
+      const b = await readJson(req);
+      const { id, token } = createShareKey(user.id, String(b.label ?? ""));
+      /* **열쇠 값은 이때 한 번만 준다.** 서버에는 해시만 남아서 다시 보여 줄 수가 없다 —
+         잃어버리면 새로 만드는 것이 맞다. 그래야 서버가 털려도 열쇠가 함께 털리지 않는다. */
+      json(res, 201, { ok: true, id, token, keys: listShareKeys(user.id) });
+      return true;
+    }
+    if (seg[2] && m === "DELETE") {
+      if (!deleteShareKey(user.id, decodeURIComponent(seg[2]))) {
+        json(res, 404, { ok: false, reason: "없는 열쇠입니다." });
+        return true;
+      }
+      json(res, 200, { ok: true, keys: listShareKeys(user.id) });
+      return true;
+    }
+  }
+
   if (seg[0] === "api" && seg[1] === "overrides" && seg[2]) {
     const pid = decodeURIComponent(seg.slice(2).join("/"));
     const all = getOverrides(user.id);
@@ -1879,21 +1944,60 @@ const server = createServer(async (req, res) => {
   try {
     if (await auth(req, res, url)) return;
 
-    /* 공유로 들어온 것을 받는 자리. **평소에는 서비스 워커가 가로채 여기까지 오지 않는다**
-       — 워커가 담고 끝낸다(sw.js). 여기는 워커가 아직 안 잡혔을 때의 길이다:
-       앱을 갓 설치했거나, 워커를 지웠거나, 브라우저가 워커를 재웠을 때.
+    /* 공유로 들어온 것을 받는 자리. **문은 셋이지만 자리는 하나다** — 브라우저의 웹 공유
+       대상, iOS 「단축어」, 안드로이드 앱이 모두 여기로 온다. 담을지 말지는 intakeShared 가
+       혼자 정한다.
 
-       그때는 **담지 않고 등록 화면으로 넘긴다.** 여기서 담으려면 이 자리에서 주소를 읽고
-       제목을 받아 오고 실패를 가려야 하는데, 그 판단은 이미 워커에 한 벌 있다 —
-       같은 판단을 두 곳에 두면 언젠가 서로 다르게 군다. 드물게 오는 길은 짧게 둔다. */
+       **누구인지 아는 길이 둘이다.** 브라우저는 쿠키를 들고 오고, 브라우저 밖에서는 공유
+       열쇠를 Authorization 에 얹어 온다. 열쇠를 먼저 본다 — 열쇠를 들고 왔다는 것은 그
+       사람으로 담아 달라는 뜻이라, 마침 같은 기기 브라우저에 남의 쿠키가 남아 있어도
+       열쇠가 이긴다.
+
+       **답도 문에 따라 다르다.** 브라우저에는 화면을 띄워 줘야 하니 넘겨보내고(303),
+       열쇠 쪽에는 띄울 화면이 없으니 JSON 으로 답한다. 담지 못했을 때 무엇을 열면 되는지
+       (open) 까지 적어 주므로, 단축어는 그 주소를 열기만 하면 된다. */
     if (url.pathname === "/share" && req.method === "POST") {
       const body = await new Promise<string>(ok => {
         let b = ""; req.on("data", c => { b += c; }); req.on("end", () => ok(b));
       });
       const f = new URLSearchParams(body);
       const raw = f.get("url") || f.get("text") || f.get("title") || "";
-      res.writeHead(303, { Location: raw ? `/?text=${encodeURIComponent(raw)}` : "/" });
-      res.end();
+
+      /* **303 이다.** 여기 오는 것은 POST 라, 302 로 답하면 브라우저에 따라 「같은 방법으로
+         다시 가라」로 읽고 POST 를 한 번 더 보낸다 — 같은 것이 두 번 담긴다. 303 은
+         「이제 GET 으로 가서 보라」는 뜻이라 그럴 자리가 없다. 그래서 두루 쓰는
+         redirect(302) 를 쓰지 않는다. */
+      const seeOther = (to: string) => { res.writeHead(303, { Location: to }); res.end(); };
+
+      const bearer = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? "")?.[1] ?? null;
+      const byKey = shareKeyUser(bearer);
+      const ask = raw ? `/?text=${encodeURIComponent(raw)}` : "/";
+
+      /* **열쇠를 들고 왔으면 그 열쇠로만 판단한다.** 안 통한다고 쿠키로 물러서면 안 된다 —
+         남의 기기에 남아 있던 쿠키나, 로그인이 설정되지 않은 서버가 자동으로 내주는 계정에
+         조용히 담기게 된다. 담긴 사람도, 보낸 사람도 그 사실을 모른다.
+
+         안 통하면 안 통한다고 말해 준다. 브라우저 밖에서는 「조용히 아무 일도 안 일어남」이
+         가장 고치기 어려운 고장이다 — 화면이 없으니 물어볼 데가 없다. */
+      if (bearer && !byKey) {
+        json(res, 401, { ok: false, reason: "공유 열쇠가 맞지 않습니다." });
+        return;
+      }
+      const user = byKey ?? currentUser(req);
+      if (!user) { seeOther(ask); return; }
+
+      const r = await intakeShared(user, raw);
+      if (byKey) {
+        json(res, 200, r.kind === "saved"
+          ? { ok: true, saved: true, title: r.title, made: r.made }
+          : { ok: true, saved: false, open: BASE_URL + (r.kind === "ask" ? ask : "/") });
+        return;
+      }
+      /* 만든 것과 고친 것은 다른 일이다 — 화면이 다른 말을 하도록 함께 넘긴다
+         (등록 화면의 토스트와 같은 규칙). */
+      seeOther(r.kind === "saved"
+        ? `/?saved=${encodeURIComponent(r.title)}${r.made ? "" : "&again=1"}`
+        : r.kind === "ask" ? ask : "/");
       return;
     }
 

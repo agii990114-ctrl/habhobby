@@ -263,6 +263,41 @@ export const destroySession = (token: string | null): void => {
   if (token) db.prepare("DELETE FROM session WHERE token_hash = ?").run(hash(token));
 };
 
+/* ── 공유 열쇠 ────────────────────────────────────────────
+   브라우저 밖에서 오는 길(iOS 단축어·TWA)의 신분증. 세션과 **나란히** 두되 섞지 않는다 —
+   왜 따로인지는 db.ts 의 share_key 표에 적어 두었다. 여기서는 만들고, 알아보고, 지운다.
+
+   **앞에 hhk_ 를 붙인다.** 열쇠가 여기저기 적혀 다니다 보면 어느 것이 무엇인지 헷갈리는데,
+   그때 눈으로 가릴 수 있어야 한다. 알아보는 쪽도 이 표만 보므로 세션 쿠키를 여기에
+   넣어 봐야 통하지 않고, 그 반대도 마찬가지다. */
+export function createShareKey(userId: string, label: string): { id: string; token: string } {
+  const token = "hhk_" + randomBytes(24).toString("base64url");
+  const id = randomBytes(8).toString("base64url");
+  db.prepare("INSERT INTO share_key(id, user_id, token_hash, label, created_at) VALUES(?,?,?,?,?)")
+    .run(id, userId, hash(token), label.trim().slice(0, 40) || "이름 없는 기기", Date.now());
+  return { id, token };
+}
+
+/** 열쇠를 든 사람. **쓴 때를 적는다** — 어느 열쇠가 살아 있는지 화면에서 가리려면 필요하다. */
+export function shareKeyUser(token: string | null): User | null {
+  if (!token) return null;
+  const row = db.prepare("SELECT id, user_id FROM share_key WHERE token_hash = ?")
+    .get(hash(token)) as { id: string; user_id: string } | undefined;
+  if (!row) return null;
+  db.prepare("UPDATE share_key SET used_at = ? WHERE id = ?").run(Date.now(), row.id);
+  return getUser(row.user_id);
+}
+
+export const listShareKeys = (userId: string): ShareKey[] =>
+  db.prepare(`SELECT id, label, created_at AS createdAt, used_at AS usedAt
+              FROM share_key WHERE user_id = ? ORDER BY created_at DESC`).all(userId) as ShareKey[];
+
+/** 남의 열쇠를 지우지 못하도록 user_id 를 함께 짚는다 — id 만으로 지우면 남의 것도 지워진다. */
+export const deleteShareKey = (userId: string, id: string): boolean =>
+  db.prepare("DELETE FROM share_key WHERE id = ? AND user_id = ?").run(id, userId).changes > 0;
+
+export type ShareKey = { id: string; label: string; createdAt: number; usedAt: number | null };
+
 export const COOKIE = "hh_session";
 
 export function cookieHeader(token: string, maxAgeSec: number): string {

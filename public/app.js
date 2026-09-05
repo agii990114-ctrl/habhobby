@@ -6464,6 +6464,16 @@ function openAppSettings() {
          탭마다 따로 켠다: 캘린더는 채우고 싶지만 페이지는 깔끔하기를 바랄 수 있다. */""}
     <div class="field sep"><label>보관 보이기</label>
       <div data-done-tabs>${doneTabsHtml()}</div></div>
+    ${/* **브라우저 밖에서 공유하는 길.** 아이폰의 「단축어」나 안드로이드 앱은 사파리·크롬의
+         로그인을 나눠 쓰지 못한다 — 그쪽에서 보낸 요청에는 쿠키가 없다. 그래서 그 기기에
+         따로 열쇠를 쥐어 준다. 여기서는 문만 열고, 만들고 지우는 일은 제 창에서 한다:
+         이 창은 이미 길고, 열쇠는 한 번 만들면 다시 볼 일이 드물다. */""}
+    ${me && !guestMode() ? `<div class="field sep"><label>다른 앱에서 공유</label>
+      <div class="link-row"><button class="btn" data-share-keys>공유 열쇠</button></div>
+      <div class="rest" style="text-align:left;padding:7px 2px 0">
+        아이폰 「단축어」처럼 브라우저 밖에서 주소를 보낼 때 쓰는 열쇠입니다.
+        안드로이드·아이폰에서 앱을 열지 않고 담을 수 있습니다.</div>
+    </div>` : ""}
     ${me ? `<div class="field sep sep-end">
       <div class="link-row">
         ${me.provider === "local" || guestMode()
@@ -6546,6 +6556,9 @@ function openAppSettings() {
     });
   }
 
+  const keys = sheet.querySelector("[data-share-keys]");
+  if (keys) keys.onclick = () => openShareKeys();
+
   const out = sheet.querySelector("[data-logout]");
   if (out) out.onclick = guard(async () => {
     await api("POST", "/api/logout");
@@ -6563,6 +6576,111 @@ function openAppSettings() {
     await api("DELETE", "/api/account");
     location.href = "/";
   });
+}
+
+/* ── 공유 열쇠 ────────────────────────────────────────────
+
+   브라우저 밖에서 담는 길. 아이폰의 「단축어」도, 앞으로 만들 안드로이드 앱(TWA)도
+   사파리·크롬의 로그인을 나눠 쓰지 못한다 — 그쪽에서 나가는 요청에는 쿠키가 없다.
+
+   **열쇠는 만들 때 한 번만 보인다.** 서버에는 해시만 남아서 다시 꺼내 줄 수가 없다.
+   잃어버리면 새로 만들고 옛 것을 지우는 것이 맞다 — 다시 보여 주려면 서버가 열쇠를
+   그대로 들고 있어야 하고, 그러면 서버가 털릴 때 열쇠도 함께 털린다.
+
+   **이 열쇠로 할 수 있는 일은 담기 하나다.** 목록을 읽지도, 지우지도 못한다(서버의
+   /api 는 쿠키만 받는다). 열쇠가 놓이는 자리가 안전하지 않기 때문이다 — 단축어 앱 안에
+   글자 그대로 남고 iCloud 로 따라다닌다. */
+async function openShareKeys() {
+  let keys = [];
+  try { keys = (await api("GET", "/api/share-keys")).keys; }
+  catch (e) { toast(e.message); return; }
+
+  const day = t => { const d = new Date(t); return `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()}.`; };
+  const rows = () => keys.length ? keys.map(k => `<div class="uf-row">
+    <div class="uf-item flat"><span class="ub"><b>${esc(k.label)}</b>
+      ${/* 마지막에 쓴 때를 적는다 — 기기를 바꾸다 보면 열쇠가 여럿 쌓이는데, 어느 것이
+           아직 살아 있는지 가릴 길이 이것뿐이다. */""}
+      <span>${day(k.createdAt)} 만듦${k.usedAt ? ` · ${day(k.usedAt)} 마지막 사용` : " · 아직 쓴 적 없음"}</span>
+    </span></div>
+    <button class="mini-btn" data-del="${esc(k.id)}">지우기</button>
+  </div>`).join("") : `<div class="empty">아직 만든 열쇠가 없습니다.<br>기기마다 하나씩 만들어 두면 됩니다.</div>`;
+
+  openSheet(`
+    ${headHtml("공유 열쇠", { actions: false,
+      sub: "브라우저 밖에서 주소를 담을 때 쓰는 열쇠입니다. 기기마다 하나씩 만드세요." })}
+    <div class="field"><div data-keys>${rows()}</div></div>
+    <div class="field sep"><label>새로 만들기</label>
+      <div class="name-row">
+        <input id="sk-label" placeholder="기기 이름 (예: 아이폰)" maxlength="40">
+        <button class="btn primary" data-make>만들기</button>
+      </div>
+    </div>
+    ${/* 쓰는 법을 여기 둔다. 열쇠를 만든 사람은 곧바로 「그래서 이걸 어디에 넣지」를
+         묻는데, 그 답이 다른 창에 있으면 열쇠를 손에 든 채 찾아다니게 된다. */""}
+    <div class="field sep sep-end"><label>아이폰에서 쓰는 법</label>
+      <div class="rest" style="text-align:left;padding:2px 2px 0;line-height:1.7">
+        <b>①</b> 「단축어」 앱 → 새 단축어 → ⓘ → <b>공유 시트에 표시</b> 켜기<br>
+        <b>②</b> 동작 <b>「URL의 콘텐츠 가져오기」</b> 를 넣고 이렇게 채웁니다<br>
+        &nbsp;&nbsp;· URL — <code>${esc(location.origin)}/share</code><br>
+        &nbsp;&nbsp;· 방법 — <code>POST</code><br>
+        &nbsp;&nbsp;· 헤더 — <code>Authorization</code> : <code>Bearer 열쇠</code><br>
+        &nbsp;&nbsp;· 본문 — <b>양식</b>, <code>url</code> 에 「단축어 입력」<br>
+        <b>③</b> 제목을 못 읽은 주소는 <code>saved</code> 가 <code>false</code> 로 옵니다.
+        그때만 <code>open</code> 주소를 열도록 「만약」 을 붙이면, 앱이 뜨면서 등록 화면이 섭니다.<br>
+        ${/* 안드로이드는 지금도 앱 자체가 공유 목록에 서므로 열쇠가 없어도 된다.
+             열쇠가 필요해지는 것은 창 없이 담는 TWA 를 만들 때다. */""}
+        <span style="color:var(--ink-3)">안드로이드는 앱이 이미 공유 목록에 서므로
+        열쇠가 없어도 됩니다. 창을 띄우지 않고 담으려 할 때만 필요합니다.</span>
+      </div>
+    </div>`);
+
+  sheet.querySelector("[data-head-back]").onclick = openAppSettings;
+
+  const paint = () => { sheet.querySelector("[data-keys]").innerHTML = rows(); };
+  const label = sheet.querySelector("#sk-label");
+
+  sheet.querySelector("[data-make]").onclick = guard(async () => {
+    const r = await api("POST", "/api/share-keys", { label: label.value.trim() || "이름 없는 기기" });
+    keys = r.keys;
+    openShareKeyMade(r.token, () => { openShareKeys(); });
+  });
+  label.addEventListener("keydown", e => {
+    if (e.key === "Enter") sheet.querySelector("[data-make]").click();
+  });
+
+  sheet.querySelector("[data-keys]").addEventListener("click", guard(async e => {
+    const b = e.target.closest("[data-del]");
+    if (!b) return;
+    const k = keys.find(x => x.id === b.dataset.del);
+    const yes = await askSure({
+      title: "이 열쇠를 지울까요?", ok: "지우기", back: openShareKeys,
+      body: `${esc(k?.label ?? "")} 에서 공유로 담을 수 없게 됩니다. 그 기기에서 다시 쓰려면 새로 만들어야 합니다.`,
+    });
+    if (!yes) return;
+    keys = (await api("DELETE", `/api/share-keys/${encodeURIComponent(b.dataset.del)}`)).keys;
+    openShareKeys();
+  }));
+}
+
+/** 갓 만든 열쇠. **이 화면을 닫으면 다시 볼 수 없다** — 그 사실을 글로 적어 둔다. */
+function openShareKeyMade(token, back) {
+  openSheet(`
+    ${headHtml("열쇠를 만들었습니다", { actions: false,
+      sub: "지금 복사해서 기기에 넣으세요. 이 창을 닫으면 다시 볼 수 없습니다." })}
+    <div class="field"><label>열쇠</label>
+      <textarea id="sk-token" readonly rows="2">${esc(token)}</textarea></div>
+    <div class="field"><label>단축어의 헤더에 넣을 값</label>
+      <textarea id="sk-hdr" readonly rows="2">Bearer ${esc(token)}</textarea></div>
+    <div class="link-row">
+      <button class="btn" data-copy="sk-token">열쇠 복사</button>
+      <button class="btn primary" data-copy="sk-hdr">헤더 값 복사</button>
+    </div>`, { over: back });
+  sheet.querySelector("[data-head-back]").onclick = back;
+  for (const b of sheet.querySelectorAll("[data-copy]")) b.onclick = async () => {
+    const el = sheet.querySelector("#" + b.dataset.copy);
+    try { await navigator.clipboard.writeText(el.value); toast("복사했습니다"); }
+    catch { el.select(); toast("복사가 막혀 있어 직접 선택했습니다"); }
+  };
 }
 
 /* ── 사이드 메뉴 ─────────────────────────────────────────── */

@@ -1008,6 +1008,10 @@
     padding: 9px 4px; cursor: pointer; color: inherit; border-radius: 8px;
   }
   .uf-item:hover { background: var(--surface-2); }
+  /* 눌리지 않는 줄 — 열쇠 목록처럼 줄 자체는 보여 주기만 하고 단추가 옆에 따로 선다.
+     손 모양과 덧칠은 「눌러도 된다」는 말이라, 아무 일도 안 일어나는 줄에는 두지 않는다. */
+  .uf-item.flat { cursor: default; }
+  .uf-item.flat:hover { background: none; }
   /* 고르는 중의 한 줄 — 체크칸과 줄을 나란히. 줄 자체가 button 이라 그 안에 label 을
      넣을 수 없어 형제로 둔다(폴더 줄 .folder-row 와 같은 까닭). */
   .uf-row { display: flex; align-items: center; gap: 6px; }

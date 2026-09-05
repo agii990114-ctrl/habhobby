@@ -171,6 +171,26 @@ CREATE TABLE IF NOT EXISTS oauth_state (
   created_at INTEGER NOT NULL
 );
 
+/* 브라우저 밖에서 들어오는 길. iOS 「단축어」나 안드로이드 앱(TWA)이 공유한 주소를
+   보낼 때 쓰는 열쇠다.
+
+   **세션과 같은 표에 두지 않는다.** 세션 쿠키는 계정을 통째로 쓸 수 있는데, 이 열쇠가
+   놓이는 자리는 그만한 자리가 못 된다 — 단축어 앱 안에 글자 그대로 남고 iCloud 로
+   따라다니며, 안드로이드 앱에서는 기기에 적힌다. 새 나갔을 때 잃는 것이 「주소 담기」
+   하나로 끝나도록 아예 다른 표에 둔다. 이 열쇠로는 목록을 읽을 수도, 지울 수도 없다.
+
+   **만료를 두지 않는다.** 기기에 한 번 넣어 두는 것이라 어느 날 조용히 끊기면
+   「공유가 안 되네」로만 보이고 까닭을 알 길이 없다. 대신 손으로 지울 수 있게 하고,
+   마지막에 쓴 때(used_at)를 적어 어느 것이 살아 있는지 눈으로 가릴 수 있게 한다. */
+CREATE TABLE IF NOT EXISTS share_key (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  label      TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  used_at    INTEGER
+);
+
 /* 작품 하나가 두 표에 나뉘어 있다.
 
    가르는 잣대는 하나다 — **남의 서버에서 받아온 것**이냐, **내가 정하고 고치는 것**이냐.
@@ -316,6 +336,7 @@ CREATE INDEX IF NOT EXISTS idx_notice_user ON folder_notice(user_id, created_at)
 CREATE INDEX IF NOT EXISTS idx_work_user   ON work(user_id, state);
 CREATE INDEX IF NOT EXISTS idx_folder_user ON folder(user_id);
 CREATE INDEX IF NOT EXISTS idx_session_exp ON session(expires_at);
+CREATE INDEX IF NOT EXISTS idx_sharekey_user ON share_key(user_id, created_at);
 
 
 -- work_folder 의 기본키는 (work_id, folder_id) 라 **작품에서 폴더로** 가는 길만 나 있다.

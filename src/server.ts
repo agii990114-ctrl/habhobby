@@ -17,6 +17,7 @@ import {
   noticeBreak, folderNotices, readNotices, sweepNotices, inviteToFolder, unlinkFromFolder,
   cleanName, setDisplayName, starFolder, findOrMakeUrl, findKeptWork, knownUrl,
   staleCovers, refreshCover, markChecked,
+  listArchFolders, createArchFolder, renameArchFolder, deleteArchFolder, setArchFolder,
   type Work, type User, type ShareMode, type TakeMode,
 } from "./db.ts";
 import {
@@ -277,7 +278,10 @@ function withMirrors(me: string): { folders: any[]; works: any[] } {
                    take: string, folderOnly: boolean) => {
     const mark = seen.get(w.id);
     // 상태는 이미 떼어져 온다 (db 의 asShared) — 남의 완료는 남의 일이다
-    return { ...w, folders: [folderId], filed: true,
+    /* **남의 보관 폴더는 비운다.** 보관 폴더는 나만 보는 갈래라, 남의 줄을 비쳐 오면서
+       그 사람의 폴더 id 까지 실어 오면 안 된다 — 화면에 이름이 뜨지는 않아도 내보낼
+       까닭이 없는 값이다. 상태를 떼어 오는 것(asShared)과 같은 결이다. */
+    return { ...w, folders: [folderId], filed: true, archFolder: null,
       /* 눌러 봤으면 붉은 점을 끄고, 보러 갔으면 그때를 차례로 쓴다. 한 번도 안 갔으면
          담긴 때 — 친구가 여는 것에 내 목록이 흔들리지 않게. */
       visits: mark?.seen ? 1 : 0,
@@ -368,6 +372,9 @@ function stateSnapshot(user: User) {
   return {
     works,
     folders,
+    /* 보관 폴더는 folders 와 **따로** 실어 보낸다. 한 배열에 섞으면 폴더 탭이 그것까지
+       세우고, 공유·초대 화면도 함께 훑게 된다 — 표를 가른 뜻이 화면에서 무너진다. */
+    archFolders: listArchFolders(user.id),
     settings: getSettings(user.id),
     platforms: platformViews(user.id, ids),
     me: { id: user.id, provider: user.provider, name: user.name,
@@ -405,7 +412,7 @@ async function readUrl(raw: string): Promise<{ r: Extract<Resolved, { ok: true }
   if (r.ok && r.dead && r.dead !== "generic")
     return { bad: { ok: false, dead: r.dead, reason:
       r.dead === "notfound" ? "그 주소에 페이지가 없습니다. 주소를 다시 확인해 주세요."
-        : r.dead === "moved" ? "그 작품을 찾을 수 없습니다 — 주소가 대문으로 넘어갑니다."
+        : r.dead === "moved" ? "그 콘텐츠를 찾을 수 없습니다 — 주소가 대문으로 넘어갑니다."
           : "그런 주소가 없습니다. 도메인을 다시 확인해 주세요." } };
   if (!r.ok) return { bad: r };
   return { r };
@@ -786,11 +793,21 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       folders: Array.isArray(b.folders) ? b.folders : [],
       filed: !!b.filed, color: hex(b.color),
     });
+    /* **등록 화면에서 고친 소개글은 내 덮어쓰기로 남는다.** 받아온 글은 공용 줄(url)의
+       것이라 그 자리에 적으면 같은 주소를 담은 남의 화면까지 바뀐다 — 담을 때든 고칠
+       때든 내 줄에만 적는다(setOwnDescription 이 그 규칙을 쥐고 있다).
+       값을 안 보내면 손대지 않는다: 그때는 공용 줄이 그대로 비쳐 보인다. */
+    /* 적었으면 **다시 읽어서** 돌려준다 — 위의 work 는 덮어쓰기 전에 뜬 줄이라
+       방금 적은 소개글이 안 담겨 있다. 화면은 곧 reload 하지만, 돌려주는 값이
+       사실과 다르면 그 값을 믿는 다음 사람이 틀린다. */
+    const saved = typeof b.description === "string"
+      ? (setOwnDescription(work.id, b.description), getWork(user.id, work.id) ?? work)
+      : work;
     /* 구간 이름은 여기서 정하지 않는다. 이 페이지가 밝힌 og:site_name 을 믿었더니
        교보문고 전자책 페이지가 "IMDb" 라고 답하는 일이 있었다 — 남의 메타 태그를 그대로
        베껴 둔 것이다. 사이트 이름은 대문에 물어보는 게 맞고, 그건 site-names 가 한다. */
     // 만든 것과 고친 것은 다른 일이다 — 화면이 다른 말을 해야 한다
-    json(res, made ? 201 : 200, { ok: true, work, made });
+    json(res, made ? 201 : 200, { ok: true, work: saved, made });
     return true;
   }
 
@@ -947,7 +964,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     if (m === "PATCH") {
       const b = await readJson(req);
       const w = getWork(user.id, id);
-      if (!w) { json(res, 404, { ok: false, reason: "없는 작품입니다." }); return true; }
+      if (!w) { json(res, 404, { ok: false, reason: "없는 콘텐츠입니다." }); return true; }
 
       /* **주소를 붙이는 일은 옮겨 다는 일이다.**
 
@@ -979,7 +996,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
             .get(user.id, urlId, id) as { state: string } | undefined;
           if (taken) {
             json(res, 409, { ok: false, reason: taken.state === "watched"
-              ? "그 주소는 이미 보관에 있는 작품입니다." : "그 주소는 이미 목록에 있는 작품입니다." });
+              ? "그 주소는 이미 보관에 있는 콘텐츠입니다." : "그 주소는 이미 목록에 있는 콘텐츠입니다." });
             return true;
           }
           const old = w.urlId;
@@ -1015,13 +1032,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
          빈 문자열은 「공용 것을 쓴다」가 아니라 **「비워 둔다」**로 읽는다 — 사이트가
          적어 둔 것이 마음에 안 들어 지웠는데 그것이 도로 살아나면 지운 뜻이 없다.
          공용 줄이 비어 있을 때만 둘이 같아져 덮어쓰기가 비워진다. */
-      if (typeof b.description === "string") {
-        const want = b.description.trim().slice(0, 400);
-        const base = db.prepare("SELECT u.description FROM work w JOIN url u ON u.id = w.url_id WHERE w.id = ?")
-          .get(id) as { description: string | null } | undefined;
-        db.prepare("UPDATE work SET description=? WHERE id=?")
-          .run((base?.description ?? "") === want ? null : want, id);
-      }
+      if (typeof b.description === "string") setOwnDescription(id, b.description);
       /* 언제 내렸는지 남긴다 — 캘린더에 "보던 기간" 을 그리는 데 쓴다.
 
          **보관은 한 작품에 한 줄이다.** 같은 것을 두 번 보고 두 번 끝내면 목록에
@@ -1044,7 +1055,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
         // 어디에 있는지까지 말한다 — 「이미 있다」만으로는 어디를 찾아봐야 할지 모른다
         if (taken) {
           json(res, 409, { ok: false, reason: taken.state === "watched"
-            ? "이미 보관에 있는 작품입니다." : "이미 목록에 있는 작품입니다." });
+            ? "이미 보관에 있는 콘텐츠입니다." : "이미 목록에 있는 콘텐츠입니다." });
           return true;
         }
       }
@@ -1075,6 +1086,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       if (typeof b.filed === "boolean")
         db.prepare("UPDATE work SET filed=? WHERE id=?").run(b.filed ? 1 : 0, id);
       if (Array.isArray(b.folders)) setWorkFolders(user.id, id, b.folders);
+      /* 보관 폴더 — **하나거나 null**. 배열을 받지 않는 것이 곧 규칙이다: 여럿을 담을
+         자리가 없으니 둘에 넣는 요청이 아예 만들어지지 않는다.
+         값을 안 보내면 손대지 않는다(undefined 와 null 은 다른 말이다). */
+      if (b.archFolder === null || typeof b.archFolder === "string")
+        setArchFolder(user.id, id, b.archFolder || null);
       json(res, 200, { ok: true, work: getWork(user.id, id) });
       return true;
     }
@@ -1084,7 +1100,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       for (const ext of ["jpg", "png", "webp"])
         await unlink(pathResolve(COVERS, `${id}.${ext}`)).catch(() => {});
       const rw = db.prepare("DELETE FROM work WHERE id = ? AND user_id = ?").run(id, user.id);
-      if (!rw.changes) { json(res, 404, { ok: false, reason: "없는 작품입니다." }); return true; }
+      if (!rw.changes) { json(res, 404, { ok: false, reason: "없는 콘텐츠입니다." }); return true; }
       json(res, 200, { ok: true });
       return true;
     }
@@ -1127,6 +1143,45 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     if (validTake(b.take)) setFolderTake(id, normTake(b.take) as TakeMode);
   };
 
+  /* ── 보관 폴더 ─────────────────────────────────────────
+     폴더와 **다른 길**이다. 공유·초대·미러링이 붙지 않으므로 확인할 것도 그만큼 없다:
+     내 것인가, 이름이나 아이콘이 있는가. 그 둘뿐이다. */
+  if (p === "/api/arch-folders" || p.startsWith("/api/arch-folders/")) {
+    const id = p.slice("/api/arch-folders/".length);
+    const nameEmoji = (b: any) => {
+      const name = String(b.name ?? "").trim().slice(0, 40);
+      const emoji = String(b.emoji ?? "").trim().slice(0, 8);
+      /* 폴더와 같은 잣대 — 이름이나 아이콘 중 하나만 있으면 가리킬 수 있다.
+
+         **빈 아이콘을 몰래 채우지 않는다.** 한때 여기서 📦 로 되돌렸는데, 그러면 화면의
+         「없음」이 눌리지 않는 단추가 된다 — 골라 놓고 저장하면 아이콘이 도로 살아난다.
+         folder 쪽 createFolder 가 같은 까닭으로 같은 말을 적어 두고 있다. */
+      return !name && !emoji ? null : { name, emoji };
+    };
+
+    if (p === "/api/arch-folders" && m === "POST") {
+      const v = nameEmoji(await readJson(req));
+      if (!v) { json(res, 400, { ok: false, reason: "이름이나 아이콘 중 하나는 정해 주세요." }); return true; }
+      json(res, 201, { ok: true, folder: createArchFolder(user.id, v.name, v.emoji) });
+      return true;
+    }
+    if (id && m === "PATCH") {
+      const v = nameEmoji(await readJson(req));
+      if (!v) { json(res, 400, { ok: false, reason: "이름이나 아이콘 중 하나는 정해 주세요." }); return true; }
+      const f = renameArchFolder(user.id, id, v.name, v.emoji);
+      if (!f) { json(res, 404, { ok: false, reason: "없는 폴더입니다." }); return true; }
+      json(res, 200, { ok: true, folder: f });
+      return true;
+    }
+    if (id && m === "DELETE") {
+      if (!deleteArchFolder(user.id, id)) {
+        json(res, 404, { ok: false, reason: "없는 폴더입니다." }); return true;
+      }
+      json(res, 200, { ok: true });
+      return true;
+    }
+  }
+
   if (p === "/api/folders" && m === "POST") {
     const b = await readJson(req);
     const name = String(b.name ?? "").trim();
@@ -1153,7 +1208,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
   if (seg[1] === "works" && seg[3] === "cover" && m === "PUT") {
     const id = seg[2];
     const w = getWork(user.id, id);
-    if (!w) { json(res, 404, { ok: false, reason: "없는 작품입니다." }); return true; }
+    if (!w) { json(res, 404, { ok: false, reason: "없는 콘텐츠입니다." }); return true; }
 
     const type = String(req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
     const ext = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" }[type];
@@ -1476,7 +1531,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
         /* 한 작품이 여러 폴더에 들어 있을 수 있는데, 그중 **하나라도** 담아가기를
            허락하면 담을 수 있다 — 주인이 그 작품을 가져가도 좋다고 한 것이다. */
         const src = takable(user.id, other).get(b.work);
-        if (!src) { json(res, 403, { ok: false, reason: "담아갈 수 없는 작품입니다." }); return true; }
+        if (!src) { json(res, 403, { ok: false, reason: "담아갈 수 없는 콘텐츠입니다." }); return true; }
         /* 번호를 함께 돌려준다 — 화면이 곧바로 그 작품의 설정 창을 열어, 친구가 정해 둔
            값을 보면서 내 것으로 손볼 수 있게 한다. */
         const { already, id } = await takeWork(user.id, src, []);
@@ -1586,6 +1641,19 @@ const redirect = (res: ServerResponse, to: string, cookie?: string): void => {
   res.writeHead(302, h);
   res.end();
 };
+
+/** 소개글 덮어쓰기 한 줄. **공용 줄과 같으면 비운다** — 같은 글을 두 층에 겹쳐
+    두면 나중에 사이트가 소개글을 고쳤을 때 내 줄이 옛 글을 붙들고 있게 된다.
+
+    담을 때(POST)와 고칠 때(PATCH)가 같은 규칙을 써야 한다. 한쪽만 고치면 등록 화면에서
+    적은 것과 설정에서 적은 것이 서로 다르게 저장된다. */
+function setOwnDescription(workId: string, text: string): void {
+  const want = text.trim().slice(0, 400);
+  const base = db.prepare("SELECT u.description FROM work w JOIN url u ON u.id = w.url_id WHERE w.id = ?")
+    .get(workId) as { description: string | null } | undefined;
+  db.prepare("UPDATE work SET description=? WHERE id=?")
+    .run((base?.description ?? "") === want ? null : want, workId);
+}
 
 /** 현재 요청의 사용자. 제공자가 하나도 설정되지 않았으면 로컬 계정으로 동작한다. */
 function currentUser(req: IncomingMessage): User | null {
@@ -1783,6 +1851,24 @@ const server = createServer(async (req, res) => {
   res.setHeader("Content-Security-Policy", CSP);
   try {
     if (await auth(req, res, url)) return;
+
+    /* 공유로 들어온 것을 받는 자리. **평소에는 서비스 워커가 가로채 여기까지 오지 않는다**
+       — 워커가 담고 끝낸다(sw.js). 여기는 워커가 아직 안 잡혔을 때의 길이다:
+       앱을 갓 설치했거나, 워커를 지웠거나, 브라우저가 워커를 재웠을 때.
+
+       그때는 **담지 않고 등록 화면으로 넘긴다.** 여기서 담으려면 이 자리에서 주소를 읽고
+       제목을 받아 오고 실패를 가려야 하는데, 그 판단은 이미 워커에 한 벌 있다 —
+       같은 판단을 두 곳에 두면 언젠가 서로 다르게 군다. 드물게 오는 길은 짧게 둔다. */
+    if (url.pathname === "/share" && req.method === "POST") {
+      const body = await new Promise<string>(ok => {
+        let b = ""; req.on("data", c => { b += c; }); req.on("end", () => ok(b));
+      });
+      const f = new URLSearchParams(body);
+      const raw = f.get("url") || f.get("text") || f.get("title") || "";
+      res.writeHead(303, { Location: raw ? `/?text=${encodeURIComponent(raw)}` : "/" });
+      res.end();
+      return;
+    }
 
     // 로그인 화면이 어떤 버튼을 그릴지 알려준다 — 인증 없이 열려 있어야 한다
     if (url.pathname === "/api/auth/providers") {

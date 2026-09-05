@@ -72,6 +72,10 @@
   /* 문서 끝에서 고무줄처럼 튕기는 것은 그대로 둔다 — 손맛이고, 아이폰다운 움직임이다.
      그 움직임에 ＋ 버튼이 딸려 나오던 문제는 app.js 의 onScroll 에서 가른다. */
   html, body { margin: 0; padding: 0; }
+  /* 창이 떠 있는 동안에는 **당겨서 새로고침을 끈다.** 시트는 끌어내려 닫는 물건이라
+     그 손짓이 새로고침으로 읽히면 닫으려다 화면을 날린다. 창이 없을 때는 그대로 둔다 —
+     평소의 새로고침까지 막을 이유는 없다. (lockScroll 이 이 표를 켜고 끈다) */
+  html.no-pull, html.no-pull body { overscroll-behavior-y: none; }
   body {
     background: var(--bg);
     color: var(--ink);
@@ -91,7 +95,17 @@
     background: var(--surface); border: 1px solid var(--line-2);
     border-radius: 22px; box-shadow: var(--shadow);
     overflow: hidden; display: flex; flex-direction: column;
-    height: calc(100vh - 40px); max-height: 820px; min-height: 520px; position: relative;
+    /* **화면 아래까지 채운다.** 한때 max-height: 820px 로 잘라 두었는데, 세로로 긴 화면
+       (태블릿 세로 · 큰 모니터)에서는 앱이 위쪽에만 서고 아래가 통째로 비었다 — 목록은
+       스크롤해야 하는데 바로 밑에 빈 자리가 넓게 남아 있으니 어긋나 보였다.
+       가로는 880px 로 묶어 둔다: 글줄이 지나치게 길어지는 것은 다른 이야기다.
+
+       dvh 를 함께 적는다 — vh 는 모바일에서 주소창을 뺀 높이를 모른다. 아래 700px
+       규칙이 이미 그렇게 하고 있는데, 태블릿은 그 규칙에 안 걸리면서도 같은 문제를
+       겪는다(폭이 넓어 데스크톱 쪽으로 읽힌다). 모르는 브라우저는 앞 줄을 쓴다. */
+    height: calc(100vh - 40px);
+    height: calc(100dvh - 40px);
+    min-height: 520px; position: relative;
     max-width: 880px; margin: 0 auto;
   }
 
@@ -736,17 +750,6 @@
     .rest { text-align: left; }
   }
 
-  /* 별점 고르기 */
-  .stars { display: flex; gap: 2px; justify-content: center; padding: 4px 0 2px; }
-  .stars button {
-    border: 0; background: none; cursor: pointer; padding: 5px 6px;   /* 44px 터치 영역 */
-    font-size: 34px; line-height: 1; color: var(--line-2); transition: color .1s;
-  }
-  .stars button.on { color: var(--star); }
-
-  /* 별점 글자는 어디에 놓이든 같은 색으로 읽힌다 */
-  .stars-h { color: var(--star); letter-spacing: .06em; font-style: normal; }
-
   /* 보관함 검색 */
   /* 머리줄의 돋보기 옆에 서는 찾기 칸 — 한 줄에 맞게 낮고 좁다. 좁은 화면에서는 제목을
      밀지 않을 만큼만 차지한다. */
@@ -882,6 +885,13 @@
     border: 1px solid var(--line-2); background: var(--surface-2); line-height: 1;
   }
   .emoji-row button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+  /* 「없음」 — 견본과 **같은 줄에 같은 크기로** 선다. 고를 수 있는 것 하나이지 지우개가
+     아니라서, 딴 자리에 다른 모양으로 두면 「지우는 버튼」으로 읽힌다. 다만 글자가 들어가
+     34px 정사각에는 좁으므로 가로만 늘리고, 글씨는 작게 해 이모지들과 무게를 맞춘다. */
+  .emoji-row .emo-none {
+    width: auto; padding: 0 9px; font-size: 11.5px; font-weight: 600; color: var(--ink-3);
+  }
+  .emoji-row .emo-none[aria-pressed="true"] { color: var(--accent-ink); }
 
   /* 하루에 여러 편이 몰려도 칸이 끝없이 길어지지 않게 — 나머지는 팝업으로.
      주간의 요일 칸과 월간의 날짜 목록이 **같은 버튼**을 쓴다. 한때 이 규칙이
@@ -976,6 +986,12 @@
     padding: 9px 4px; cursor: pointer; color: inherit; border-radius: 8px;
   }
   .uf-item:hover { background: var(--surface-2); }
+  /* 고르는 중의 한 줄 — 체크칸과 줄을 나란히. 줄 자체가 button 이라 그 안에 label 을
+     넣을 수 없어 형제로 둔다(폴더 줄 .folder-row 와 같은 까닭). */
+  .uf-row { display: flex; align-items: center; gap: 6px; }
+  .uf-row .uf-item { flex: 1; min-width: 0; border-bottom: 0; }
+  .uf-row { border-bottom: 1px solid var(--line); }
+  .uf-row:last-child { border-bottom: 0; }
   .uf-item:last-child { border-bottom: 0; }
   .uf-item .ub { min-width: 0; flex: 1; }
   .uf-item .ub b {
@@ -1135,6 +1151,16 @@
      한쪽 이름을 다른 쪽에 붙이면 아무 일도 안 일어나고, CSS 는 그것을 알려 주지 않는다. */
   .btn.bad { background: var(--bad); border-color: var(--bad); color: #fff; }
   .btn.bad:hover { background: var(--bad-ink); border-color: var(--bad-ink); }
+
+  /* **잠긴 단추는 잠겨 보여야 한다.** 여태 disabled 는 손짓만 막고 모양은 그대로였다 —
+     보관한 콘텐츠의 빨간 「휴지통」이 멀쩡히 서서 손이 올라가면 색까지 바뀌는데 눌러도
+     아무 일이 없었다(복구가 막힌 「보관 해제」도 같았다). 눌리지 않는 것은 **눌러 보기
+     전에** 알아야 한다: 흐리게 두고, 손짓도 막고, 마우스 모양으로 한 번 더 말한다.
+     :hover 는 뒤에 오는 규칙이 이기므로 여기서 원래 색으로 되돌려 놓는다. */
+  .btn:disabled { opacity: .42; cursor: not-allowed; }
+  .btn:disabled:hover { border-color: var(--line-2); }
+  .btn.primary:disabled:hover { background: var(--accent); border-color: var(--accent); }
+  .btn.bad:disabled:hover { background: var(--bad); border-color: var(--bad); }
 
   /* ── Sheet ───────────────────────── */
   .sheet-back {
@@ -1456,7 +1482,15 @@
   .kv dd { margin: 0; word-break: break-all; }
   /* 소개글은 **문장**이다. 위의 값들은 주소가 섞여 있어 아무 데서나 끊어야 하지만
      (word-break: break-all), 글은 그렇게 끊으면 읽기가 나빠진다 — 낱말 단위로 넘긴다. */
-  .kv dd.desc { word-break: keep-all; overflow-wrap: anywhere; line-height: 1.62; color: var(--ink-2); }
+  /* **다섯 줄까지만 자리를 준다.** 소개글은 사이트가 주는 대로라 길이를 고를 수 없어서,
+     긴 것 하나가 창을 통째로 늘여 놓으면 그 아래 「마지막 실행」도 버튼들도 밀려난다 —
+     읽으러 온 값이 아니라 **누르러 온 것**이 화면 밖으로 나가는 셈이다. 넘치는 만큼은
+     이 칸 안에서 굴린다: 잘라 버리면 뒷부분을 볼 길이 아예 없어진다.
+     1.62(줄 높이) x 5 = 8.1em. 굴대가 글자를 덮지 않게 오른쪽만 조금 띄운다. */
+  .kv dd.desc {
+    word-break: keep-all; overflow-wrap: anywhere; line-height: 1.62; color: var(--ink-2);
+    max-height: 8.1em; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px;
+  }
   /* 등록 화면에서 미리 보여 주는 소개글 — 읽기만 하는 값이라 칸처럼 보이지 않게 둔다 */
   .ov-desc {
     margin-top: 9px; padding: 9px 11px; border-radius: 9px;

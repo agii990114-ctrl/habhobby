@@ -22,6 +22,9 @@ async function api(method, path, body) {
 // 서버에서 받기 전의 첫 값 — 서버의 기본값과 같아야 첫 그림이 흔들리지 않는다
 let works = [], folders = [], settings = { openMode: "app", doneIn: ["home", "lib"] },
   platforms = {}, me = null;
+/* 보관 폴더. **folders 와 한 배열에 담지 않는다** — 폴더 탭·공유·초대가 모두 folders 를
+   훑으므로, 섞는 순간 나만 보는 갈래가 그 화면들에 따라 들어간다. 서버도 다른 표다. */
+let archFolders = [];
 /* 친구 목록은 첫 화면에 실려 오지 않는다 — null 이면 아직 안 불러온 것이다.
    쓰는 곳은 폴더 탭의 "친구 폴더 보기" 와 사이드 메뉴뿐이라, 캘린더만 보고 나가는
    사람에게는 200명분 17KB가 그냥 버려진다. 사이드 메뉴에 적을 숫자만 미리 받는다. */
@@ -54,6 +57,7 @@ let siteNamesPending = 0;
 async function reload(fresh = false) {
   const s = await api("GET", "/api/state" + (fresh ? "?fresh=1" : ""));
   works = s.works; folders = s.folders; settings = s.settings;
+  archFolders = s.archFolders ?? [];
   /* **내가 다 본 주소들.** 배지가 이것을 짚는다 — 남의 작품이라도 주소가 같으면
      「내가 다 본 것」이라고 말해 줘야 한다. 카드마다 훑으면 목록 길이의 제곱이 되므로
      받아 올 때 한 번만 짓는다. */
@@ -124,7 +128,7 @@ function byInitial(list) {
     **두 가지를 함께 바꿔야 한다** — 눌린 표시(aria-pressed)는 색을 금색으로 바꾸고,
     아이콘의 on 은 속을 채운다. 색만 바꾸면 금색 빈 별이라는 어중간한 것이 남아, 다시
     그리기 전까지 켠 것인지 아닌지 알 수 없다. 실제로 친구 목록에서 그 탈이 났다.
-    칠하는 자리가 넷(친구 줄·폴더 줄·폴더 창·별점 매기기)이라 한 곳으로 모은다. */
+    칠하는 자리가 셋(친구 줄·폴더 줄·폴더 창)이라 한 곳으로 모은다. */
 const paintStar = (btn, on) => {
   btn.setAttribute("aria-pressed", !!on);
   btn.innerHTML = icon("star", on ? "on" : "");
@@ -182,8 +186,8 @@ const nthLabel = v => { const [n, d] = unpackNth(v);
   return `${NTH.find(x => x[0] === n)?.[1] ?? n} ${DOW[d]}요일`; };
 const isMonthly = m => m === "monthly" || m === "monthly-dow";
 const SCHED_HINT = {
-  always: "한 번에 전부 공개된 작품. 넷플릭스 오리지널 시즌 전체 공개처럼 요일에 매이지 않는 것들입니다.",
-  done: "연재가 끝난 작품. 상시와 함께 &ldquo;언제든&rdquo;에 모입니다.",
+  always: "한 번에 전부 공개된 콘텐츠. 넷플릭스 오리지널 시즌 전체 공개처럼 요일에 매이지 않는 것들입니다.",
+  done: "연재가 끝난 콘텐츠. 상시와 함께 &ldquo;언제든&rdquo;에 모입니다.",
   hiatus: "쉬어가는 중. 캘린더의 &ldquo;일정 없음&rdquo;에 모입니다.",
   unknown: "일정을 모르는 상태. 캘린더의 &ldquo;일정 없음&rdquo;에 모입니다.",
 };
@@ -228,6 +232,10 @@ const ICONS = {
   pencil:  `<path d="M4 20h4L18.4 9.6a2.4 2.4 0 0 0-3.4-3.4L4.6 16.6z"/><path d="M14.4 7.4l2.6 2.6"/>`,
   star:    `<path d="M12 3.6l2.7 5.5 6 .9-4.35 4.2 1.03 6-5.38-2.83L6.62 20.2l1.03-6L3.3 10l6-.9z"/>`,
   check:   `<path d="M4.8 12.6l4.8 4.8L19.2 6.9"/>`,
+  /* 보관 — 자물쇠. 체크는 「끝냈다」였는데 보관은 **치워 두고 잠가 둔 것**에 가깝다:
+     목록에서 내려놓되 지우지는 않고, 여기서는 휴지통도 안 열린다. 고리는 몸통보다
+     좁게(7.6 vs 4.4~19.6) 그려야 작게 줄여도 자물쇠로 읽힌다. */
+  lock:    `<rect x="4.4" y="10.4" width="15.2" height="9.9" rx="2.2"/><path d="M8.2 10.4V7.8a3.8 3.8 0 0 1 7.6 0v2.6"/><circle cx="12" cy="15.3" r="1.35"/>`,
   trash:   `<path d="M3.8 6.8h16.4"/><path d="M9.4 6.8V5A1.4 1.4 0 0 1 10.8 3.6h2.4A1.4 1.4 0 0 1 14.6 5v1.8"/><path d="M6.4 6.8l.95 12.3a2 2 0 0 0 2 1.85h5.3a2 2 0 0 0 2-1.85l.95-12.3"/><path d="M10.3 10.6v6.6M13.7 10.6v6.6"/>`,
   left:    `<path d="M14.8 5.2L8 12l6.8 6.8"/>`,
   right:   `<path d="M9.2 5.2L16 12l-6.8 6.8"/>`,
@@ -237,6 +245,10 @@ const ICONS = {
   dots:    `<circle cx="12" cy="5.2" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18.8" r="1.5"/>`,
   // 「미분류」 — 아직 안 갈라 놓은 것이 담기는 함
   inbox:   `<path d="M3 12.5h4.6l1.5 3h5.8l1.5-3H21"/><path d="M5 5.6L3 12.5v5.1a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5.1l-2-6.9a2 2 0 0 0-1.9-1.4H6.9A2 2 0 0 0 5 5.6z"/>`,
+  /* 폴더 창의 「넣기」 — 맨 + 와 갈라 세운다. 화면 아래 둥근 + 는 **새로 만드는** 일이고
+     이것은 **이미 담아 둔 것을 이 폴더로 옮겨 다는** 일이라(openFolderAdd 는 activeWorks
+     에서 고른다), 같은 모양이면 같은 일로 읽힌다. 폴더를 둘러 그 차이를 그린다. */
+  "folder-plus": `<path d="M3.2 7.4a2 2 0 0 1 2-2h3.9l2 2.4h7.7a2 2 0 0 1 2 2v8.4a2 2 0 0 1-2 2H5.2a2 2 0 0 1-2-2z"/><path d="M12 11.3v5M9.5 13.8h5"/>`,
 };
 
 /** 구간 마크. **사이트 표가 있으면 그림, 없으면 글자.**
@@ -296,14 +308,10 @@ const doneBadge = w => {
 const DONE_TABS = [["all", "전체"], ["cal", "캘린더"], ["home", "페이지"], ["lib", "폴더"]];
 
 const STATES = {
-  watched: { label: "보관", icon: "check", desc: "끝까지 본 시리즈" },
+  watched: { label: "보관", icon: "lock", desc: "끝까지 본 시리즈" },
   dropped: { label: "휴지통", icon: "trash", desc: "더 보지 않는 시리즈" },
 };
 
-const MAX_STAR = 5;
-/* 별점은 **그린 별**로 적는다. ★☆ 는 글꼴이 그리는 것이라 기기마다 굵기가 달랐고,
-   켠 것과 안 켠 것의 대비도 글꼴에 맡겨야 했다. 여기서는 안을 채우고 비우는 차이다. */
-const starText = n => icon("star", "on").repeat(n) + icon("star").repeat(MAX_STAR - n);
 
 /** 받침에 따라 "으로 / 로"를 고른다 — "휴지통으로", "보관으로" */
 function ro(word) {
@@ -465,7 +473,7 @@ const SHARE_MODES = [
 const TAKE_FLAGS = [
   ["copy", "클로닝", "한 벌 떠 갑니다. 그 뒤로는 내가 고쳐도 그쪽엔 안 갑니다."],
   ["mirror", "미러링", "내 폴더를 그대로 비춥니다. 내가 고치면 그쪽에도 바뀝니다."],
-  ["edit", "쉐어링", "고른 사람에게 초대를 보냅니다. 수락하면 함께 넣고 뺍니다. 작품 자체는 넣은 사람만 고칩니다."],
+  ["edit", "쉐어링", "고른 사람에게 초대를 보냅니다. 수락하면 함께 넣고 뺍니다. 콘텐츠 자체는 넣은 사람만 고칩니다."],
 ];
 /** 일반 폴더에서 켜고 끄는 둘 — 쉐어링은 여기 없다(그건 폴더의 갈래 자체다) */
 const PLAIN_FLAGS = TAKE_FLAGS.filter(([v]) => v !== "edit");
@@ -520,12 +528,24 @@ const filedWorks = () => works.filter(w =>
 const worksInState = s => byRecent(works.filter(w => w.state === s));
 const unfiled = () => byRecent(activeWorks().filter(w => !w.filed && !w.folders.length));
 
-/** 이 작품이 든 폴더 이름들. 지워진 폴더의 자국은 걸러낸다 —
-    작품의 folders 는 폴더가 사라져도 그 id 를 들고 있을 수 있다. */
+/** 폴더 이름 한 줄 — **아이콘이 없으면 그 자리도 없다.**
+
+    아이콘은 「없음」으로 둘 수 있다(폴더 창의 고르개). 그래서 `${f.emoji} ${f.name}` 로
+    이어 붙이면 이름 앞에 빈칸이 하나 남는다 — 한 글자라 눈에 잘 안 띄지만, 목록에서는
+    줄마다 왼쪽이 어긋나 보인다. 붙이는 일을 한 자리에서 한다.
+
+    **다듬는 것도 여기서 한다.** 아이콘은 사람이 친 글자이고(서버는 길이만 자른다),
+    그리는 자리가 열몇 군데다 — 한 곳이라도 그냥 꽂으면 그 한 곳이 구멍이 된다.
+    맨 글이 필요한 자리(aria-label · 토스트)는 folderText 를 쓴다. */
+const folderText = f => (f.emoji ? f.emoji + " " : "") + f.name;
+const folderLabel = f => (f.emoji ? esc(f.emoji) + " " : "") + esc(f.name);
+
+/** 이 콘텐츠가 든 폴더 이름들. 지워진 폴더의 자국은 걸러낸다 —
+    콘텐츠의 folders 는 폴더가 사라져도 그 id 를 들고 있을 수 있다. */
 const folderNames = w => w.folders
   .map(id => folders.find(f => f.id === id))
   .filter(Boolean)
-  .map(f => (f.emoji ? f.emoji + " " : "") + f.name)
+  .map(folderText)
   .join(", ");
 /** 목록에서 **손댄 지 가장 가까운 것**이 위로 온다.
 
@@ -719,8 +739,21 @@ const softFocus = el => { if (el && !narrow()) el.focus(); };
    문서가 못 구르면 그만이므로 손짓을 가로채는 장치는 두지 않는다.
    시트와 사이드 메뉴가 겹쳐 뜰 수 있어 잠금은 세어 둔다. */
 let locks = 0, lockedAt = 0;
+/* 창이 몇 겹 떠 있는지. locks 와 따로 센다 — 그쪽은 좁은 화면에서만 늘어난다. */
+let overlays = 0;
 
 function lockScroll(on) {
+  /* **당겨서 새로고침을 막는다.** 시트는 손잡이를 끌어내려 닫는 물건이라, 맨 위에서
+     끄는 손짓을 브라우저가 「새로고침해 달라」로 읽는다 — 닫으려던 손이 화면을 통째로
+     날린다. 본문 안쪽은 이미 overscroll-behavior: contain 으로 막혀 있지만(.sheet-body),
+     손잡이는 그 통 **밖**이라 거기서 끌면 그대로 문서로 넘어간다.
+
+     **넓은 화면에서 더 잘 난다.** 거기서는 .app 이 화면 높이에 딱 맞아 문서가 구를 일이
+     없으니, 조금만 당겨도 곧바로 새로고침으로 넘어간다. 그래서 아래 문서 붙들기와 달리
+     이 막음은 너비를 가리지 않는다. */
+  if (on) { if (!overlays++) document.documentElement.classList.add("no-pull"); }
+  else if (overlays > 0 && !--overlays) document.documentElement.classList.remove("no-pull");
+
   if (!narrow()) return;                     // 넓은 화면은 문서가 구르지 않는다
   if (on) {
     if (locks++) return;
@@ -756,7 +789,7 @@ function workCard(w, when) {
       ${w.episode ? `<span class="ep">${esc(w.episode)}</span>` : ""}
       ${/* 아직 한 번도 안 열어 본 것. 담자마자 목록 맨 앞에 서므로 눈에 띄는 표가
            하나 있어야 "새로 온 것" 과 "늘 거기 있던 것" 이 갈린다. */""}
-      ${w.visits ? "" : `<span class="new-dot" aria-label="아직 안 본 작품"></span>`}
+      ${w.visits ? "" : `<span class="new-dot" aria-label="아직 안 본 콘텐츠"></span>`}
       ${doneBadge(w)}
     </div>
     ${/* 찍는 시각은 **차례를 정한 그 값**이다(touchedAt). lastAt 만 찍던 때는 복구한
@@ -913,7 +946,7 @@ function wireWorkPick(box, redraw) {
     toast(added
       ? `${added}편 담았습니다${already ? ` · ${already}편은 이미 있었습니다` : ""}`
       : already ? `${already}편 모두 이미 담겨 있습니다`
-        : "담아갈 수 있는 작품이 없습니다");
+        : "담아갈 수 있는 콘텐츠가 없습니다");
   }));
 
   /* 골라 둔 작품을 한꺼번에 한 폴더에 넣는다.
@@ -986,29 +1019,48 @@ function wireWorkPick(box, redraw) {
     if (!picked.length) return;
     const label = STATES[to].label;
 
-    /* **보관은 별점을 묻는다** — 한 편을 옮길 때와 같다. 나중에 별점별로 모아 보는
-       것이 그 값의 쓰임이라, 여럿을 한꺼번에 끝낼 때야말로 매겨 둘 만하다. */
+    /* **보관은 어느 폴더에 둘지 묻는다** — 하나를 옮길 때와 같다. 내린 뒤에 폴더별로
+       모아 보는 것이 그 값의 쓰임이라, 여럿을 한꺼번에 끝낼 때야말로 갈라 둘 만하다. */
     if (to === "watched") {
       // 취소는 보던 목록으로 — 고른 것도 그대로 남는다 (askSure 의 back 과 같은 규칙)
-      return openRating(picked, to, { back: redraw, after: () => {
+      return openArchiveTo(picked, to, { back: redraw, after: () => {
         workSel = null;
         toast(`${picked.length}편을 ${label}${ro(label)} 옮겼습니다`);
         redraw();
       } });
     }
 
-    /* 휴지통은 묻지 않는다 — 버리는 것에 점수를 매길 일은 없다. 대신 정말 내릴 것인지는
+    /* **보관해 둔 것은 이 길로 내리지 않는다.** 전체 설정에서 「보관 보이기」를 켜면
+       보관한 것이 목록과 폴더에 함께 선다(listedWorks). 통째로 골라 휴지통을 누르면
+       갈무리해 둔 것까지 딸려 내려간다 — 치우려던 손짓이 남겨 두려던 것을 치우는 셈이다.
+
+       빼고 진행하되 **뺐다는 것을 말한다.** 조용히 빼면 「왜 저것만 그대로지」가 남고,
+       아예 막으면 나머지를 치우려고 고르기를 다시 해야 한다. 보관한 것을 정말 내리려면
+       보관함에서 — 거기서는 그것이 하려던 일이 맞다. */
+    const kept = picked.filter(w => w.state === "watched");
+    const movable = picked.filter(w => w.state !== "watched");
+    if (!movable.length) {
+      toast(`보관된 ${kept.length}편뿐입니다 — 보관함에서 내릴 수 있어요`);
+      return;
+    }
+
+    /* 휴지통은 폴더를 묻지 않는다 — 치우는 것을 갈라 둘 일은 없다. 대신 정말 내릴 것인지는
        묻는다. 취소는 **보던 목록으로** 돌아간다: 되묻는 창만 닫히고 창까지 닫히면 안 된다. */
     const yes = await askSure({
-      title: `${picked.length}편을 ${label}${ro(label)} 옮길까요?`,
+      title: `${movable.length}편을 ${label}${ro(label)} 옮길까요?`,
       ok: label, danger: true, back: redraw,
-      body: "지워지지 않습니다. 왼쪽 메뉴의 보관함으로 옮겨지고, 거기서 되돌릴 수 있습니다. 매겨 둔 별점도 그대로 남습니다.",
+      body: `지워지지 않습니다. 왼쪽 메뉴의 휴지통으로 옮겨지고, 거기서 되돌릴 수 있습니다.${
+        kept.length ? ` 보관된 ${kept.length}편은 빼고 옮깁니다.` : ""}`,
     });
     if (!yes) return;
-    for (const id of ids) await api("PATCH", `/api/works/${id}`, { state: to });
+    /* **고른 것 중 옮길 수 있는 것만 보낸다.** 한때 여기가 ids 를 통째로 돌렸는데,
+       그러면 위에서 걸러 낸 남의 것까지 보내 놓고 셈은 걸러 낸 수로 적었다 —
+       서버는 404 를 돌려주고 화면은 옮겼다고 말했다. 세는 것과 보내는 것을 하나로 둔다. */
+    for (const w of movable) await api("PATCH", `/api/works/${w.id}`, { state: to });
     workSel = null;
     await reload(); render();
-    toast(`${picked.length}편을 ${label}${ro(label)} 옮겼습니다`);
+    toast(`${movable.length}편을 ${label}${ro(label)} 옮겼습니다${
+      kept.length ? ` · 보관된 ${kept.length}편은 제외` : ""}`);
     redraw();
   }));
 }
@@ -1016,7 +1068,7 @@ function wireWorkPick(box, redraw) {
 /* 홈 — 플랫폼별 가로 슬라이드. 입력이 최근순이라 Map 삽입 순서가 곧 최근 플랫폼 순이다. */
 function railsHtml(list) {
   if (!list.length)
-    return `<div class="empty">아직 등록된 작품이 없습니다.<br>왼쪽 아래 ＋ 버튼으로 추가해보세요.</div>`;
+    return `<div class="empty">아직 등록된 콘텐츠가 없습니다.<br>왼쪽 아래 ＋ 버튼으로 추가해보세요.</div>`;
   const groups = new Map();
   for (const w of list) {
     if (!groups.has(w.platformId)) groups.set(w.platformId, []);
@@ -1208,7 +1260,7 @@ function openSoon() {
   const g = soonSection();
   workPickAt("soon", g.items);
   openSheet(`<div data-wbar>${workBarHtml(g.items.length)}</div>
-    ${workGridHtml(g.items, "공개 예정인 작품이 없습니다.")}`,
+    ${workGridHtml(g.items, "공개 예정인 콘텐츠가 없습니다.")}`,
     { full: true, title: "공개 예정", sub: `${g.items.length}편 · 가까운 날부터` });
   pickAct(g.items.length, openSoon);
   wireWorkPick(sheet.querySelector(".sheet-body"), openSoon);
@@ -1339,7 +1391,7 @@ function drawDayList(t) {
 
   const title = `${d.getMonth() + 1}월 ${d.getDate()}일 (${DOW[d.getDay()]})`;
   const body = !total
-    ? `<div class="empty">이 날에는 놓인 작품이 없습니다.</div>`
+    ? `<div class="empty">이 날에는 놓인 콘텐츠가 없습니다.</div>`
     : g
       ? `<div data-wbar>${workBarHtml(g.items.length)}</div>
          ${workGridHtml(g.items, "비어 있습니다.")}`
@@ -1413,8 +1465,8 @@ function openFolderAdd(f, back) {
   const body = () => {
     const gs = groups();
     if (!gs.length)
-      return `<div class="empty">${q ? "찾는 작품이 없습니다."
-        : "넣을 수 있는 작품이 없습니다.<br>이 폴더에 이미 다 들어 있어요."}</div>`;
+      return `<div class="empty">${q ? "찾는 콘텐츠가 없습니다."
+        : "넣을 수 있는 콘텐츠가 없습니다.<br>이 폴더에 이미 다 들어 있어요."}</div>`;
 
     // 한 구간을 펼쳐 본 화면 — 그 구간의 것을 격자로 다 늘어놓는다
     if (detail) {
@@ -1480,7 +1532,7 @@ function openFolderAdd(f, back) {
   const paint = () => { sheet.querySelector("[data-add-body]").innerHTML = body(); paintBulk(); };
 
   const put = guard(async () => {
-    if (!picked.size) { toast("넣을 작품을 골라 주세요"); return; }
+    if (!picked.size) { toast("넣을 콘텐츠를 골라 주세요"); return; }
     const { added } = await api("POST", `/api/folders/${f.id}/works`, { works: [...picked] });
     await reload(); render();
     /* 몇 편이 들었는지 그대로 말한다 — 골랐는데 일부만 들어가는 경우가 있다(함께 쓰는
@@ -1499,7 +1551,7 @@ function openFolderAdd(f, back) {
     ${searchHtml("제목으로 좁히기", "", "margin-bottom:10px")}
     <div data-add-bulk></div>
     <div data-add-body></div>`,
-    { full: true, title: "작품 넣기", sub: `${f.emoji} ${esc(f.name)}` });
+    { full: true, title: "콘텐츠 넣기", sub: folderLabel(f) });
 
   const acts = document.createElement("span");
   acts.className = "head-act";
@@ -1566,7 +1618,7 @@ function openFolderSheet(id) {
      실제로 「전체」와 「미분류」 제목에 <svg …> 가 통째로 나왔다. 사람이 친 쪽만 여기서
      다듬고, 아래로는 이미 다듬어진 것으로 넘긴다. */
   const name = id === "_all" ? icon("grid") + " 전체"
-    : id === "_none" ? icon("inbox") + " 미분류" : `${esc(f.emoji)} ${esc(f.name)}`;
+    : id === "_none" ? icon("inbox") + " 미분류" : folderLabel(f);
   const inFolder = byRecent(worksIn(id));
   const shown = inFolder.filter(w => filter === "all" || w.mediaType === filter);
   const types = ["all", ...Object.keys(MEDIA).filter(t => inFolder.some(w => w.mediaType === t))];
@@ -1578,7 +1630,7 @@ function openFolderSheet(id) {
             t === "all" ? "전체" : MEDIA[t]}</button>`).join("")}</div>`
       : ""}
     <div data-wbar>${workBarHtml(shown.length)}</div>
-    ${workGridHtml(shown, id === "_none" ? "미분류 작품이 없습니다." : "이 폴더는 비어 있습니다.")}`, {
+    ${workGridHtml(shown, id === "_none" ? "미분류 콘텐츠가 없습니다." : "이 폴더는 비어 있습니다.")}`, {
     full: true,
     title: name,               // 위에서 이미 다듬었다 — 여기서 또 esc 하면 아이콘이 글자가 된다
     /* 버튼이 무엇을 하는지는 버튼이 말한다 — 안내말에 "오른쪽 위 ⋯ 로 고칠 수 있습니다"
@@ -1647,7 +1699,7 @@ function openFolderSheet(id) {
       sheet.append(b);
     };
     if (!f.mirror || f.canEdit)
-      fab("plus", "작품 넣기", "", () => openFolderAdd(f, () => openFolderSheet(id)));
+      fab("folder-plus", "콘텐츠 넣기", "", () => openFolderAdd(f, () => openFolderSheet(id)));
     fab("cog", "폴더 설정", "right", () => openFolderForm(f, f2 => {
       closeSheet();
       render();
@@ -1889,7 +1941,7 @@ function openFolderInvites(back) {
       ${headHtml("폴더 초대", { back: !!back, actions: false })}
       ${folderInvites.length ? `<div class="fr-list">${folderInvites.map(v => `
         <div class="inv">
-          <span class="ub"><b>${esc(v.emoji)} ${esc(v.name)}</b>
+          <span class="ub"><b>${folderLabel(v)}</b>
             <span>${esc(v.ownerName)}님이 불렀습니다 · ${v.count}편</span></span>
           <span class="inv-act">
             <button class="mini-btn" data-no="${esc(v.folder)}">거절</button>
@@ -1898,7 +1950,7 @@ function openFolderInvites(back) {
         </div>`).join("")}</div>`
         : `<div class="empty">받은 초대가 없습니다.</div>`}
       <div class="rest" style="text-align:left;padding:10px 2px 0">
-        함께 고치는 폴더입니다. 수락하면 내 작품을 넣고 뺄 수 있고, 남이 넣은 작품은
+        함께 고치는 폴더입니다. 수락하면 내 콘텐츠를 넣고 뺄 수 있고, 남이 넣은 콘텐츠는
         폴더 안에서만 보입니다 — 내 캘린더에는 올라오지 않습니다.</div>`);
     if (back) sheet.querySelector("[data-head-back]").onclick = back;
 
@@ -1925,7 +1977,7 @@ function openBreakNotices(back) {
     ${headHtml("알림", { back: !!back, actions: false })}
     ${folderNotices.length ? `<div class="fr-list">${folderNotices.map(n => `
       <div class="inv${n.read ? "" : " new"}">
-        <span class="ub"><b>${esc(n.emoji)} ${esc(n.name)}</b>
+        <span class="ub"><b>${folderLabel(n)}</b>
           <span>${esc(n.ownerName)}님의 폴더 · ${esc(n.reason)} · ${ago(n.at)}</span></span>
       </div>`).join("")}</div>`
       : `<div class="empty">새 소식이 없습니다.</div>`}`);
@@ -2020,7 +2072,7 @@ function openFriendFolder(fid) {
       }).join("")
       : `<div class="empty">이 폴더는 비어 있습니다.</div>`}`, {
     full: true,
-    title: `${f.emoji} ${esc(f.name)}`,
+    title: folderLabel(f),
     sub: `${esc(viewing.name)}님의 폴더 · ${items.length}개`,
   });
 
@@ -2031,7 +2083,7 @@ function openFriendFolder(fid) {
   if (takeF) takeF.onclick = guard(async () => {
     const yes = await askSure({
       title: `이 폴더를 담아갈까요?`,
-      body: `${esc(f.name)} · 작품 ${items.length}편이 함께 담깁니다.
+      body: `${esc(f.name)} · 콘텐츠 ${items.length}편이 함께 담깁니다.
         담아간 뒤로는 ${esc(viewing.name)}님이 폴더를 고쳐도 내 것은 그대로입니다.`,
       ok: "담아가기", danger: false, back: () => openFriendFolder(fid),
     });
@@ -2178,7 +2230,7 @@ async function openFolderPeople(f, back) {
 
   const wait = mine ? (f.people ?? []).filter(x => x.state !== "ok").length : 0;
   openSheet(`
-    ${headHtml(`${f.emoji} ${esc(f.name)}`, { back: true, actions: false,
+    ${headHtml(folderLabel(f), { back: true, actions: false,
       sub: mine
         ? `함께 쓰는 사람${wait ? ` · ${wait}명이 아직 대기 중입니다` : ""}`
         : `${esc(f.mirrorOf)}님과 함께 쓰는 폴더` })}
@@ -2202,7 +2254,7 @@ async function openFolderPeople(f, back) {
     const who = nameOf(cut.dataset.cut);
     const yes = await askSure({
       title: `${who}님의 연결을 해제할까요?`,
-      body: `이 폴더를 더 볼 수 없게 되고, 넣어 둔 작품도 이 폴더에서 빠집니다.
+      body: `이 폴더를 더 볼 수 없게 되고, 넣어 둔 콘텐츠도 이 폴더에서 빠집니다.
         ${who}님에게 끊겼다는 알림이 갑니다.`,
       ok: "해제", danger: true, back: () => openFolderPeople(f, back),
     });
@@ -2222,7 +2274,7 @@ async function openInviteMore(f, done, back) {
   const out = [];
   openSheet(`
     ${headHtml("더 부르기", { back: true, save: "부르기",
-      sub: `${f.emoji} ${esc(f.name)}` })}
+      sub: folderLabel(f) })}
     ${friends.length
       ? `<div data-pk></div>`
       : `<div class="empty">아직 친구가 없습니다.</div>`}`);
@@ -2364,7 +2416,7 @@ function render() {
       done ? ` (보관 ${done}편 포함)` : ""}
       ${list.length && !workSel ? `<button class="mini-btn" data-wsel>선택</button>` : ""}</div>`;
     html += `<div data-wbar>${workBarHtml(list.length)}</div>`;
-    html += workGridHtml(list, "아직 담아 둔 작품이 없습니다.<br>왼쪽 아래 ＋ 버튼으로 추가해보세요.");
+    html += workGridHtml(list, "아직 담아 둔 콘텐츠가 없습니다.<br>왼쪽 아래 ＋ 버튼으로 추가해보세요.");
   } else if (tab === "cal") {
     html = renderCalendar();
   } else if (tab === "home") {
@@ -2403,9 +2455,9 @@ function render() {
         const mini = list.length
           ? `<div class="mini">${list.map(w => `<i style="${coverStyle(w)}"></i>`).join("")}
              ${"<i></i>".repeat(Math.max(0, 4 - list.length))}</div>`
-          : `<div class="mini solo">${f.emoji}</div>`;
+          : `<div class="mini solo">${f.emoji || icon("inbox")}</div>`;
         return `<button class="folder" data-fr-folder="${esc(f.id)}">${mini}
-          <span class="txt"><b>${f.emoji} ${esc(f.name)}</b><span>${all.length}개</span></span>
+          <span class="txt"><b>${folderLabel(f)}</b><span>${all.length}개</span></span>
           <span class="chev">${icon("right")}</span></button>`;
       }).join("")
       : `<div class="empty">${esc(viewing.name)}님이 나에게 공개한 폴더가 없습니다.</div>`;
@@ -3055,12 +3107,18 @@ function openWork(id, over) {
         <dt>플랫폼</dt><dd>${esc(p.name)}${linked ? ` · ${MEDIA[w.mediaType] ?? "링크"}` : ""}</dd>
         <dt>연재 일정</dt><dd>${esc(schedText(w))}</dd>
         ${w.episode ? `<dt>회차</dt><dd>${esc(w.episode)}</dd>` : ""}
-        ${w.rating ? `<dt>별점</dt><dd><i class="stars-h">${starText(w.rating)}</i></dd>` : ""}
         ${st ? `<dt>상태</dt><dd>${icon(st.icon)} ${esc(st.label)}</dd>` : ""}
         ${/* 어느 폴더에 넣어 뒀는지. 「이걸 어디에 넣었더라」 를 알아보려고 설정을 열고
              폴더 고르개를 펼쳐 보는 일이 잦았다 — 읽기만 하면 되는 값이라 여기 적는다.
              안 넣은 것은 줄 자체를 두지 않는다: 「없음」 은 알려 주는 바가 없다. */""}
         ${(() => { const n = folderNames(w); return n ? `<dt>폴더</dt><dd>${esc(n)}</dd>` : ""; })()}
+        ${/* 보관 폴더는 **내려 둔 것에만** 적는다. 살아 있는 줄에 적어 두면 위의 「폴더」와
+             나란히 서서 두 갈래가 한 가지로 읽힌다 — 하나는 목록을 가르는 것이고 하나는
+             치운 자리라 서로 다른 것이다. 안 넣었으면 줄 자체를 두지 않는다. */""}
+        ${(() => {
+          const f = w.archFolder && archFolders.find(x => x.id === w.archFolder);
+          return f ? `<dt>보관 폴더</dt><dd>${folderLabel(f)}</dd>` : "";
+        })()}
         <dt>마지막 실행</dt><dd>${ago(w.lastAt)}</dd>
         ${/* **맨 밑이다.** 위의 값들은 한 줄로 끝나는 사실이고 이것만 여러 줄이라,
              가운데 두면 그 아래 것들이 멀리 밀려 한눈에 안 들어온다. 없으면 줄 자체를
@@ -3077,20 +3135,31 @@ function openWork(id, over) {
 
          이미 내려 둔 작품이면 되돌리는 길만 둔다. 보관을 다시 누를 일도,
          휴지통에 있는 것을 또 버릴 일도 없다. */""}
-    ${/* **내려 둔 작품에는 「복구」와 「치우기」뿐이다.** 보관에서 한 단계 더 내리는
+    ${/* **내려 둔 콘텐츠에는 되돌리는 길과 치우는 길뿐이다.** 보관에서 한 단계 더 내리는
          것은 휴지통이고, 휴지통에서 더 내릴 곳은 없으므로 거기서는 영구 삭제다.
 
-         복구는 **자리가 비어 있을 때만** 눌린다 — 목록에 같은 작품이 이미 서 있으면
+         되돌리기는 **자리가 비어 있을 때만** 눌린다 — 목록에 같은 콘텐츠가 이미 서 있으면
          살아 있는 것끼리의 규칙에 걸린다. 눌러 놓고 나서 「안 됩니다」를 듣는 것보다,
          누를 수 없는 것으로 서 있는 편이 낫다. */""}
+    ${/* **보관한 것은 여기서 못 버린다.** 보관은 치워 두고 잠가 두는 자리라, 그 잠금이
+         한 곳에서만 풀려야 뜻이 있다 — 콘텐츠 창은 어디서든 열리므로(목록 · 폴더 ·
+         캘린더 · 검색) 여기에 휴지통을 두면 훑어보다 손이 스치는 자리가 그만큼 많아진다.
+         버리려면 보관함에서 — 거기는 **보관한 것을 다루러 들어가는 자리**다.
+
+         단추를 걷지 않고 **잠가서 세운다.** 없애 버리면 「보관하면 못 버리나」를 눌러 볼
+         데가 없어 어딘가에 있으려니 하고 찾아다니게 된다. 잠긴 채로 서 있고 왜 잠겼는지
+         말해 주면, 한 번 읽고 보관함으로 간다. */""}
     ${st
       ? `<div class="link-row" style="margin-top:9px">
            <button class="btn" data-act="active"${
              keptSame(w) ? ` disabled title="${whereKept(w)}"` : ""
-           }>${icon("left")} 목록으로 복구</button>
+           }>${icon("left")} ${w.state === "watched" ? "보관 해제" : "목록으로 복구"}</button>
            ${w.state === "watched"
-             ? `<button class="btn bad" data-act="dropped">${icon("trash")} 휴지통</button>`
+             ? `<button class="btn bad" disabled
+                  title="보관한 것은 보관함에서 버립니다">${icon("trash")} 휴지통</button>`
              : `<button class="btn bad" data-act="delete">${icon("trash")} 영구 삭제</button>`}</div>
+         ${w.state === "watched" ? `<div class="rest" style="text-align:left;padding:6px 2px 0">
+             버리려면 왼쪽 메뉴의 「보관」에서 골라 휴지통으로 옮기세요.</div>` : ""}
          ${keptSame(w) ? `<div class="rest" style="text-align:left;padding:6px 2px 0">
              ${whereKept(w)}.</div>` : ""}`
       : `<div class="link-row" style="margin-top:9px">
@@ -3109,8 +3178,8 @@ function openWork(id, over) {
   const cog = document.createElement("button");
   cog.className = "sheet-cog";
   cog.type = "button";
-  cog.title = "작품 설정";
-  cog.setAttribute("aria-label", "작품 설정");
+  cog.title = "콘텐츠 설정";
+  cog.setAttribute("aria-label", "콘텐츠 설정");
   cog.innerHTML = icon("cog");
   cog.onclick = () => openWorkSettings(id, { back: () => openWork(id, over) });
   sheetAct(cog);
@@ -3120,13 +3189,14 @@ function openWork(id, over) {
   const move = guard(async to => {
     await api("PATCH", `/api/works/${id}`, { state: to });
     await reload(); render(); closeSheet();
-    toast(to === "active" ? "목록으로 되돌렸습니다" : `${STATES[to].label}${ro(STATES[to].label)} 옮겼습니다`);
+    toast(to !== "active" ? `${STATES[to].label}${ro(STATES[to].label)} 옮겼습니다`
+      : w.state === "watched" ? "보관을 해제했습니다" : "목록으로 되돌렸습니다");
   });
   const act = sel => sheet.querySelector(`[data-act="${sel}"]`);
-  // 보관은 별점을 물어본다 — 나중에 별점별로 모아 보기 위한 것이다
-  if (act("watched")) act("watched").onclick = () => openRating(w, "watched", { back: again });
-  /* 휴지통은 별점을 묻지 않는다 — 버리는 것에 점수를 매길 일은 없다. 대신 정말 내릴
-     것인지는 묻는다. 이미 매긴 점수는 지우지 않으므로 되돌리면 그대로 살아난다. */
+  // 보관은 어느 폴더에 둘지 물어본다 — 나중에 폴더별로 모아 보기 위한 것이다
+  if (act("watched")) act("watched").onclick = () => openArchiveTo(w, "watched", { back: again });
+  /* 휴지통은 폴더를 묻지 않는다 — 치우는 것을 갈라 둘 일은 없다. 대신 정말 내릴
+     것인지는 묻는다. 넣어 둔 폴더는 지우지 않으므로 되돌리면 그대로 살아난다. */
   if (act("dropped")) act("dropped").onclick = guard(async () => {
     const yes = await askSure({
       title: "휴지통으로 옮길까요?", ok: "휴지통", back: again,
@@ -3134,7 +3204,21 @@ function openWork(id, over) {
     });
     if (yes) await move("dropped");
   });
-  if (act("active")) act("active").onclick = () => move("active");
+  /* **보관 해제도 묻는다.** 한때 바로 옮겼는데, 보관은 「다 봐서 치워 둔 것」이라
+     목록으로 도로 올리는 것은 그 판단을 무르는 일이다 — 훑다가 잘못 눌러 목록이
+     늘어나면, 무엇이 왜 올라왔는지 나중에 알 길이 없다(내린 때는 그대로 남지만
+     그것을 들여다볼 자리가 없다). 휴지통에서 꺼내는 것은 되돌리기 쉬운 일이라
+     그때는 묻지 않던 것을 그대로 둔다. */
+  if (act("active")) act("active").onclick = w.state !== "watched"
+    ? () => move("active")
+    : guard(async () => {
+      const yes = await askSure({
+        danger: false,               // 되살리는 일이라 빨강이 아니다 (보관함의 「복구」와 같다)
+        title: "보관을 해제할까요?", ok: "보관 해제", back: again,
+        body: `${esc(w.title)} 을(를) 목록에 다시 세웁니다. 넣어 둔 보관 폴더는 지워집니다.`,
+      });
+      if (yes) await move("active");
+    });
   /* 휴지통에서 한 번 더 내릴 곳은 없다 — 거기서는 지우는 것이 남은 일이다. 되돌릴 수
      없으므로 반드시 묻는다(보관함 줄의 「삭제」와 같은 말로). */
   if (act("delete")) act("delete").onclick = guard(async () => {
@@ -3164,7 +3248,7 @@ function openWorkSettings(id, opts) {
   const again = () => openWorkSettings(id, { ...o, mode, back: o.back, snap, draft });
 
   openSheet(`
-    <div class="crumb"><button data-back-work aria-label="돌아가기">${icon("left")}</button><h3>작품 설정</h3>
+    <div class="crumb"><button data-back-work aria-label="돌아가기">${icon("left")}</button><h3>콘텐츠 설정</h3>
       <span class="crumb-act">
         <button class="mini-btn" data-cancel>취소</button>
         <button class="mini-btn on" data-done>저장</button>
@@ -3174,7 +3258,7 @@ function openWorkSettings(id, opts) {
       <label for="w-title">제목
         <span style="text-transform:none;letter-spacing:0">— 사이트가 준 제목이 길거나 어색하면 고쳐 쓰세요</span>
       </label>
-      <input id="w-title" value="${esc(draft.title)}" placeholder="작품 제목" maxlength="120">
+      <input id="w-title" value="${esc(draft.title)}" placeholder="콘텐츠 제목" maxlength="120">
     </div>
     ${/* 사이트가 준 소개글 위에 내가 고쳐 쓰는 자리. 비우면 **비운 채로** 남는다 —
          사이트 것이 도로 살아나면 지운 뜻이 없다(서버의 PATCH 규칙과 같은 이야기). */""}
@@ -3183,7 +3267,7 @@ function openWorkSettings(id, opts) {
         <span style="text-transform:none;letter-spacing:0">— 사이트가 준 소개글입니다. 고치거나 비울 수 있어요</span>
       </label>
       <textarea id="w-desc" rows="4" maxlength="400"
-        placeholder="이 작품이 어떤 것인지">${esc(draft.description)}</textarea>
+        placeholder="이 콘텐츠가 어떤 것인지">${esc(draft.description)}</textarea>
     </div>
     ${w.listUrl ? "" : `<div class="field">
       <label for="w-url">주소 <span style="text-transform:none;letter-spacing:0">— 나중에 페이지가 생기면</span></label>
@@ -3202,15 +3286,10 @@ function openWorkSettings(id, opts) {
       </div></div>
     ${schedHtml(draft.schedule, null, { value: draft.color, fallback: platformOf(w.platformId).color })}
     ${pickerHtml(draft.folders)}
-    ${/* 휴지통은 **되돌리기 쉬운 일이 아니다** — 빨강으로 갈라 세운다. 옆의 「보관」과
-         같은 갈래로 보이면 안 된다: 하나는 다 봤다는 표시고, 하나는 목록에서 치우는 일이다.
-         작품 창에서는 이미 그렇게 서 있었는데 이 창만 검게 남아 있었다. */""}
-    <div class="field"><label>목록에서 내리기</label>
-      <div class="link-row">
-        <button class="btn" data-act="watched">${icon("check")} 시리즈 보관</button>
-        <button class="btn bad" data-act="dropped">${icon("trash")} 휴지통</button>
-      </div>
-    </div>
+    ${/* **목록에서 내리는 일은 여기 없다.** 콘텐츠 창에 이미 그 둘이 서 있고(openWork),
+         거기가 그 일을 하는 자리다 — 창을 열자마자 손이 닿는 곳. 이 창은 **고치는** 자리라
+         제목·설명·표지·일정·폴더가 모인다. 같은 일을 두 곳에 두면 한쪽만 고치게 되고,
+         고치러 들어와서 실수로 내리는 일도 생긴다. */""}
     <div class="link-row wide-only" style="margin-top:4px">
       <button class="btn" data-cancel>취소</button>
       <button class="btn primary" data-done>${mode === "add" ? "설정 완료" : "저장"}</button></div>
@@ -3263,7 +3342,7 @@ function openWorkSettings(id, opts) {
     /* 주소를 새로 넣었으면 **그 줄이 가리키는 곳을 옮긴다**(서버의 PATCH url).
 
        한때 화면이 이 일을 「새로 담고 옛것을 지우는」 것으로 했다. 그러면 무엇을 새 줄에
-       넘길지 여기서 손으로 세어야 했고, 실제로 **별점과 소개글이 빠져 있었다** — 보관해
+       넘길지 여기서 손으로 세어야 했고, 실제로 **소개글이 빠져 있었다** — 보관해
        둔 것이 목록으로 되살아나기도 했다. 값이 하나 늘 때마다 조용히 틀리는 방식이다.
 
        이제 저장 하나로 끝난다: 옮겨 달고, 같은 요청이 제목·일정·폴더까지 적는다. */
@@ -3284,101 +3363,164 @@ function openWorkSettings(id, opts) {
   for (const b of sheet.querySelectorAll("[data-cancel]")) b.onclick = cancel;
   // 되돌아가기(‹)는 담는 중이면 취소, 고치는 중이면 저장이다 — 하던 일을 잃지 않게
   sheet.querySelector("[data-back-work]").onclick = mode === "add" ? cancel : commit;
-
-  // 보관은 별점을 물어본다 — 나중에 별점별로 모아 보기 위한 것이다.
-  sheet.querySelector('[data-act="watched"]').onclick = () => openRating(w, "watched");
-  /* 휴지통은 별점을 묻지 않는다 — 버리는 것에 점수를 매길 일은 없다. 대신 정말 내릴
-     것인지는 묻는다. 이미 매긴 점수는 지우지 않으므로 되돌리면 그대로 살아난다. */
-  sheet.querySelector('[data-act="dropped"]').onclick = guard(async () => {
-    const yes = await askSure({
-      title: "휴지통으로 옮길까요?", ok: "휴지통", back: again,
-      body: `${esc(w.title)} 을(를) 목록에서 내립니다. 지워지지 않고 왼쪽 메뉴의 휴지통에 남습니다.`,
-    });
-    if (!yes) return;
-    await api("PATCH", `/api/works/${id}`, { state: "dropped" });
-    await reload(); render(); closeSheet();
-    toast("휴지통으로 옮겼습니다");
-  });
 }
 
-/* 목록에서 내릴 때 별점을 묻는다. 나중에 보관함에서 별점별로 모아 보기 위한 것이라
-   건너뛸 수 있어야 한다 — 강요하면 내리기 자체를 망설이게 된다. */
-/* 한 편도, 여럿도 이 창으로 온다 — 별점을 묻는 자리가 둘이면 한쪽만 고치게 된다.
+/* ── 보관 폴더 ────────────────────────────────────────────
+   **폴더 탭의 폴더와 다른 것이다.** 이름이 비슷해서 한 물건으로 보기 쉽지만, 여기 것은
+   나만 보는 갈래다 — 공유도, 미러링도, 초대도 없다. 그래서 만드는 창도 갈래를 묻지
+   않고(openFolderKind), 고치는 창도 공개 설정을 세우지 않는다. 물어볼 것이 이름과
+   아이콘뿐이라 창 하나로 끝난다.
 
-   **여럿일 때 안 고르면 손대지 않는다.** 한 편일 때는 이미 매긴 점수가 초기값이라 그냥
-   옮겨도 그대로 남지만, 여럿은 저마다 다른 점수를 갖고 있어 0 을 보내면 그것들이 통째로
-   지워진다. 값을 아예 안 실어 보내 서버가 그 칸을 건드리지 않게 한다. */
-function openRating(target, state, opts = {}) {
+   서버도 다른 표에 담는다(arch_folder). 화면에서만 갈라 두면 언젠가 한 배열에 섞이지만,
+   표가 다르면 섞일 자리가 없다. */
+
+/** 보관 폴더 하나를 만들거나 고친다. @param f 없으면 새로 만든다. */
+function openArchFolderForm(f, after) {
+  let emoji = f?.emoji ?? "📦", name = f?.name ?? "";
+  const done = v => after(v);
+
+  const draw = () => {
+    openSheet(`
+      ${headHtml(f ? "보관 폴더" : "새 보관 폴더", { back: false, actions: false,
+        sub: "보관함에서만 쓰는 갈래입니다 · 남에게 보이지 않습니다" })}
+      ${/* **폴더 창과 같은 고르개다.** 한때 여기만 따로 만들어 두었는데, 그러다 보니
+           직접 넣는 칸이 이쪽에만 없었다 — 폴더에서 쓰던 아이콘을 여기서 찾다가 없어서
+           다른 것을 고르게 된다. 같은 것을 고르는 자리는 같은 물건을 쓴다. */""}
+      ${emojiPickHtml(emoji)}
+      <div class="field"><label for="af-name">이름</label>
+        <input id="af-name" value="${esc(name)}" placeholder="예: 다시 볼 것" maxlength="40"></div>
+      ${/* **공개 설정이 없다.** 폴더 창에는 「누구에게 보일지」와 「함께 쓸 친구」가 서는데,
+           보관 폴더에는 그 물음 자체가 없다 — 밖으로 나가지 않는 갈래라서다. 없는 것을
+           꺼 둔 채로 세워 두면 「켜면 되겠네」로 읽힌다. */""}
+      <div class="link-row" style="margin-top:4px">
+        <button class="btn" data-cancel>취소</button>
+        <button class="btn primary" data-save>${f ? "저장" : "만들기"}</button></div>
+      ${f ? `<div class="link-row">
+        <button class="btn bad" data-del>${icon("trash")} 폴더 삭제</button></div>
+        <div class="rest" style="text-align:left;padding:6px 2px 0">
+          묶음만 사라지고 보관한 콘텐츠는 그대로 남습니다 — 「폴더 없음」으로 모입니다.</div>` : ""}`,
+      { over: () => done(null) });
+
+    wireEmojiPick(sheet, emoji, v => { emoji = v; });
+    const nameEl = sheet.querySelector("#af-name");
+    nameEl.addEventListener("input", () => { name = nameEl.value; });
+
+    sheet.querySelector("[data-cancel]").onclick = () => done(null);
+    sheet.querySelector("[data-save]").onclick = guard(async () => {
+      const v = { name: name.trim(), emoji };
+      if (!v.name) { nameEl.focus(); return; }
+      const r = f ? await api("PATCH", `/api/arch-folders/${f.id}`, v)
+                  : await api("POST", "/api/arch-folders", v);
+      await reload();
+      done(r.folder);
+    });
+    const del = sheet.querySelector("[data-del]");
+    if (del) del.onclick = guard(async () => {
+      const yes = await askSure({
+        title: "이 보관 폴더를 지울까요?", ok: "삭제", danger: true, back: draw,
+        body: `${folderLabel(f)} · 묶음만 사라지고 보관한 콘텐츠는 그대로 남습니다.`,
+      });
+      if (!yes) return;
+      await api("DELETE", `/api/arch-folders/${f.id}`);
+      await reload(); render();
+      done(null);
+    });
+  };
+  draw();
+}
+
+/* 목록에서 내릴 때 **어느 보관 폴더에 둘지** 묻는다. 나중에 보관함에서 폴더별로 모아
+   보기 위한 것이라 건너뛸 수 있어야 한다 — 강요하면 내리기 자체를 망설이게 된다.
+
+   한때 여기서 별점을 물었다. 그런데 점수는 **되짚어 볼 때만** 쓰이는 값이라 매기는
+   자리와 쓰는 자리가 멀었고, 다섯 칸은 「이건 4점인가 5점인가」를 매번 새로 정하게 했다.
+   폴더는 이름으로 부르는 것이라 다시 찾을 때 그 이름을 그대로 짚으면 된다. */
+/* **하나만 고른다.** 폴더 탭의 폴더는 여럿에 걸 수 있지만(folders 는 배열) 보관은
+   「어디에 치웠나」라서 답이 하나여야 한다 — 둘에 들어 있으면 보관함을 훑을 때 같은 것이
+   두 번 나오고, 「저건 어디 넣었더라」에 답이 둘이 된다. 서버도 한 칸(arch_folder_id)이라
+   둘에 넣는 요청은 만들어지지도 않는다.
+
+   한 개도, 여럿도 이 창으로 온다 — 묻는 자리가 둘이면 한쪽만 고치게 된다. 여럿일 때는
+   **고른 모두가 같은 폴더로** 간다. 안 고르면 값을 아예 안 실어 보내 서버가 그 칸을
+   건드리지 않는다: 이미 보관해 둔 것을 다시 옮길 때 넣어 둔 자리가 지워지지 않게. */
+function openArchiveTo(target, state, opts = {}) {
   const list = Array.isArray(target) ? target : [target];
   const one = list.length === 1 ? list[0] : null;
   const meta = STATES[state];
-  let picked = one?.rating ?? 0;
+  /* 새 폴더를 만들고 돌아오면 이 창을 다시 그린다 — 고르던 것을 들고 돌아와야 한다
+     (콘텐츠 설정의 draft 와 같은 규칙). */
+  let picked = opts.picked !== undefined ? opts.picked : (one?.archFolder ?? null);
+  const again = () => openArchiveTo(target, state, { ...opts, picked });
+
+  const body = () => `
+    <div class="field sep"><label>보관 폴더</label>
+      <div class="pickers" data-arch-pick>
+        ${archFolders.map(f => `<button class="pick" data-af="${esc(f.id)}"
+          aria-pressed="${picked === f.id}">${folderLabel(f)}</button>`).join("")}
+        <button class="pick add" data-af-new>${icon("plus")} 새 폴더</button>
+      </div></div>
+    <div class="rest" data-pick-sum style="text-align:left;padding:4px 2px 0"></div>`;
 
   openSheet(`
     ${headHtml(`${icon(meta.icon)} ${meta.label}`,
       { back: false, save: `${esc(meta.label)}${ro(meta.label)} 옮기기`,
         sub: one ? esc(one.title) : `고른 ${list.length}편` })}
-    <div class="field"><label>별점</label>
-      <div class="stars">${Array.from({ length: MAX_STAR }, (_, i) =>
-        `<button data-star="${i + 1}" aria-label="${i + 1}점">${icon("star")}</button>`).join("")}</div>
-      <div class="rest" data-star-sum style="padding:4px 2px 0"></div>
-    </div>
+    <div data-arch-box>${body()}</div>
     <div class="link-row wide-only">
       <button class="btn" data-cancel>취소</button>
       <button class="btn primary" data-done>${esc(meta.label)}${ro(meta.label)} 옮기기</button>
     </div>`);
 
-  const box = sheet.querySelector(".stars");
-  /* **속을 채워야 켠 별이다.** 한때 단추에 on 만 붙여 금색으로만 물들였는데, 아이콘은
-     테두리만 그린 별이라 「금색 빈 별」이라는 어중간한 것이 남았다. 아래 요약글은
-     꽉 찬 별로 적히고 있어서 같은 화면에서 두 가지 별이 서로 다른 말을 했다.
-
-     빛깔은 단추의 on 이(.stars button.on), 속은 아이콘의 on 이(.ic.on) 채운다 —
-     둘 다 있어야 한 벌이다. 이 짝은 paintStar 가 아는 것이므로 그것을 부른다. */
-  const paint = n => box.querySelectorAll("[data-star]").forEach(b => {
-    const on = +b.dataset.star <= n;
-    /* **안 바뀌면 손대지 않는다.** paintStar 는 innerHTML 을 갈아 끼우는데, 이 함수는
-       마우스가 별 위를 지날 때마다 불린다 — 그대로 두면 손을 올려놓은 것만으로 별 다섯의
-       속을 매번 새로 짓고, 누르는 도중에 갈리면 눌린 요소가 사라져 클릭이 샌다. */
-    if (b.classList.contains("on") === on) return;
-    b.classList.toggle("on", on);
-    paintStar(b, on);
-  });
+  /* 고른 것을 글로도 적는다. 켠 단추만으로도 보이지만, **여럿일 때 무슨 일이 일어나는지**는
+     단추가 말해 주지 않는다 — 고른 모두가 한곳으로 간다는 것이 여기서 드러난다. */
   const sum = () => {
-    sheet.querySelector("[data-star-sum]").innerHTML =
-      picked ? `${starText(picked)} ${picked}점${one ? "" : " · 고른 전부에 같은 점수"}`
-        : one ? "안 매겨도 됩니다." : "안 매기면 저마다 매겨 둔 점수를 그대로 둡니다.";
+    const f = archFolders.find(x => x.id === picked);
+    sheet.querySelector("[data-pick-sum]").textContent = f
+      ? (one ? folderText(f) : `고른 ${list.length}편을 ${folderText(f)} 에 함께 넣습니다`)
+      : (one ? "안 넣어도 됩니다 — 「폴더 없음」에 모입니다."
+             : "안 고르면 저마다 넣어 둔 자리를 그대로 둡니다.");
   };
-  paint(picked); sum();
+  /* 상자만 갈아 끼운다 — 새 폴더를 만들고 오면 단추가 하나 늘어야 하고, 그때 창을 통째로
+     다시 열면 머리줄이 다시 붙어 손짓이 두 번 걸린다. */
+  const repaint = () => {
+    sheet.querySelector("[data-arch-box]").innerHTML = body();
+    wire(); sum();
+  };
+  const wire = () => {
+    sheet.querySelector("[data-arch-pick]").onclick = guard(async e => {
+      const nw = e.target.closest("[data-af-new]");
+      if (nw) {
+        // 만들고 오면 그것이 곧 고른 것이 된다 — 만들어 놓고 또 눌러야 하면 한 걸음이 남는다
+        return openArchFolderForm(null, f => { if (f) picked = f.id; again(); });
+      }
+      const b = e.target.closest("[data-af]"); if (!b) return;
+      // 같은 것을 다시 누르면 풀린다 — 잘못 골랐을 때 되돌릴 길(별 다시 누르기와 같다)
+      picked = picked === b.dataset.af ? null : b.dataset.af;
+      for (const x of sheet.querySelectorAll("[data-af]"))
+        x.setAttribute("aria-pressed", x.dataset.af === picked);
+      sum();
+    });
+  };
+  wire(); sum();
 
-  box.addEventListener("mouseover", e => {
-    const b = e.target.closest("[data-star]"); if (b) paint(+b.dataset.star);
-  });
-  box.addEventListener("mouseleave", () => paint(picked));
-  box.addEventListener("click", e => {
-    const b = e.target.closest("[data-star]"); if (!b) return;
-    const n = +b.dataset.star;
-    picked = picked === n ? 0 : n;     // 같은 별을 다시 누르면 취소된다
-    paint(picked); sum();
-  });
-
-  /* 별점은 안 고르면 그만이라 따로 건너뛸 버튼을 두지 않는다.
-     이미 매긴 점수는 picked 의 초기값이므로 그냥 옮기면 그대로 남는다. */
   wireHead({
     save: guard(async () => {
-      // 한 편이면 0 도 뜻이 있다(점수를 지운다). 여럿이면 안 고른 것은 손대지 않는다.
-      const rating = picked || (one ? null : undefined);
-      for (const x of list) await api("PATCH", `/api/works/${x.id}`, { state, rating });
+      for (const x of list) {
+        /* 안 고르면 archFolder 를 아예 안 실어 보낸다 — null 은 「비운다」이고 없는 것은
+           「손대지 말라」다. 서버가 그 둘을 가려 읽는다. */
+        await api("PATCH", `/api/works/${x.id}`,
+          picked === null && !one ? { state } : { state, archFolder: picked });
+      }
       await reload(); render();
       if (opts.after) opts.after(); else closeSheet();
     }),
     /* 취소는 아무것도 바꾸지 않고 **왔던 자리로** 한 걸음 뒤로 — 잘못 눌렀을 때 빠져나갈 길.
 
        한때 여기가 `openWorkSettings(w.id)` 였는데, 이 함수에는 `w` 가 없다(list · one 뿐).
-       작품 설정에서만 별점을 물었을 때 베껴 온 이름이 그대로 남은 것이라, 취소를 누르면
+       콘텐츠 설정에서만 이것을 물었을 때 베껴 온 이름이 그대로 남은 것이라, 취소를 누르면
        ReferenceError 로 조용히 멈췄다. 부르는 쪽이 돌아갈 자리를 일러 주게 한다. */
     cancel: () => opts.back ? opts.back()
-      : one ? openWorkSettings(one.id) : closeSheet(),
+      : one ? openWork(one.id) : closeSheet(),
   });
 }
 
@@ -3593,7 +3735,7 @@ function schedHtml(s, note, color) {
      그래서 구분선은 둘을 감싼 바깥에 한 번만 긋는다. */
   return `<div class="sep">${color && placedOnDays(s.mode)
       ? colorPickerHtml(color.value, color.fallback,
-          `캘린더 점 색 <span style="text-transform:none;letter-spacing:0">— 달력에서 이 작품을 나타내는 색</span>`)
+          `캘린더 점 색 <span style="text-transform:none;letter-spacing:0">— 달력에서 이 콘텐츠를 나타내는 색</span>`)
       : ""}
     <div class="field" data-sched>
     <label>연재 일정${note ? ` <span style="text-transform:none;letter-spacing:0">— ${note}</span>` : ""}</label>
@@ -3729,7 +3871,7 @@ function pickerHtml(selected) {
       ${folders.filter(f => !f.mirror || f.canEdit).map(f =>
         `<button class="pick" data-fid="${f.mirror ? f.mirror.folder : f.id}"
           aria-pressed="${selected.includes(f.mirror ? f.mirror.folder : f.id)}"
-          >${f.emoji} ${esc(f.name)}${f.mirror ? " (함께)" : ""}</button>`).join("")}
+          >${folderLabel(f)}${f.mirror ? " (함께)" : ""}</button>`).join("")}
       <button class="pick add" data-picker-new>${icon("plus")} 새 폴더</button>
     </div></div>`;
 }
@@ -3751,6 +3893,76 @@ function wirePicker(root, selected, onChange, reopen) {
 
 /* ── 폴더 ────────────────────────────────────────────────── */
 const EMOJIS = ["📁", "📌", "⚔️", "💕", "🍿", "📖", "🎬", "🔥", "🌙", "😂", "👻", "🏆"];
+
+/** 아이콘 고르개 — 견본 열둘 · 「없음」 · 직접 넣기.
+
+    **폴더 창과 보관 폴더 창이 같은 물건을 쓴다.** 한때 보관 폴더 쪽만 따로 만들었더니
+    거기에는 직접 넣는 칸이 없었다 — 같은 것을 고르는 자리인데 한쪽에만 길이 있으면,
+    폴더에서 쓰던 아이콘을 보관 폴더에서 찾다가 없어서 다른 것을 고르게 된다.
+    찾기 칸(searchHtml)을 한 자리에서 만드는 것과 같은 까닭이다.
+
+    id 를 박아 둔다(#emo · #emo-in). 시트는 한 번에 하나만 서므로(openSheet 가 통째로
+    갈아 끼운다) 두 창이 같은 이름을 써도 겹칠 자리가 없다. */
+function emojiPickHtml(emoji) {
+  /* 견본에 없는 아이콘을 쓰고 있었다면 직접 입력칸을 **열어 둔 채로** 시작한다.
+     **빈 값은 견본에 없지만 「직접 넣은 것」도 아니다** — 「없음」 단추가 그것을 맡는다.
+     안 가르면 아이콘 없는 폴더를 열 때마다 빈 입력칸이 펼쳐진 채로 뜬다. */
+  const own = !!emoji && !EMOJIS.includes(emoji);
+  return `<div class="field"><label>아이콘</label>
+    <div class="emoji-row" id="emo">${EMOJIS.map(e =>
+      `<button type="button" data-e="${e}" aria-pressed="${e === emoji}">${e}</button>`).join("")}
+      ${/* **「없음」은 지우는 것이 아니라 고르는 것이다.** 아이콘 없는 폴더는 목록에서
+           표지 넷을 얼굴로 세우는데(folderRow), 그 모양을 고르는 길이 여태 없었다 —
+           견본 열둘 중 하나를 반드시 짚어야 했다. 견본과 같은 줄에 같은 크기로 세운다:
+           「고를 수 있는 것 하나」이지 딴 데 있는 지우개가 아니다. */""}
+      <button type="button" class="emo-none" data-e="" aria-pressed="${!emoji}"
+        title="아이콘 없음" aria-label="아이콘 없음">없음</button>
+      <button type="button" class="emo-more" data-emo-more aria-pressed="${own}"
+        title="직접 넣기" aria-label="아이콘 직접 넣기">${icon("plus")}</button>
+    </div>
+    <div class="emoji-own"${own ? "" : " hidden"}>
+      <input id="emo-in" value="${own ? esc(emoji) : ""}" maxlength="8" spellcheck="false"
+             placeholder="🙂" aria-label="아이콘 직접 입력">
+    </div></div>`;
+}
+
+/** 위 고르개를 잇는다. 고른 것이 바뀔 때마다 `set` 을 부른다 —
+    값을 쥐고 있는 것은 부르는 쪽이고, 여기는 고르는 손짓만 안다. */
+function wireEmojiPick(root, emoji, set) {
+  const row = root.querySelector("#emo");
+  const emoIn = root.querySelector("#emo-in");
+  const ownBox = root.querySelector(".emoji-own");
+  const moreBtn = root.querySelector("[data-emo-more]");
+  const mark = () => row.querySelectorAll("button[data-e]")
+    .forEach(x => x.setAttribute("aria-pressed", x.dataset.e === emoji));
+  const pick = v => { emoji = v; mark(); set(v); };
+
+  row.addEventListener("click", e => {
+    if (e.target.closest("[data-emo-more]")) {     // 직접 넣는 칸을 여닫는다
+      const show = ownBox.hidden;
+      ownBox.hidden = !show;
+      moreBtn.setAttribute("aria-pressed", show);
+      if (show) emoIn.focus();
+      return;
+    }
+    const b = e.target.closest("button[data-e]"); if (!b) return;
+    /* 견본을 골랐으면 직접 넣던 칸은 닫는다 — 값을 비워 두고 칸만 열어 두면
+       무엇이 골라져 있는지 두 곳을 견줘 봐야 한다.
+       dataset.e 는 「없음」일 때 빈 문자열이다 — 참/거짓으로 거르면 그 단추가 안 먹는다. */
+    emoIn.value = "";
+    ownBox.hidden = true;
+    moreBtn.setAttribute("aria-pressed", false);
+    pick(b.dataset.e);
+  });
+
+  /* 이모지만 받는다. **비우면 「없음」이다** — 한때 기본 아이콘(📁)으로 되돌렸는데,
+     그때는 아이콘을 안 쓰는 길이 아예 없어서 그것이 유일한 대답이었다. 이제 「없음」이
+     제 단추로 서 있으므로, 지운 것을 몰래 채워 넣으면 고른 것과 다른 것이 저장된다. */
+  emoIn.addEventListener("input", () => {
+    emoIn.value = emojiOnly(emoIn.value);
+    pick(emoIn.value);
+  });
+}
 
 /** 이모지 한 글자만 남긴다. 글자나 숫자가 섞이면 폴더 마크가 아니라 이름처럼 보인다.
     사람 눈에 한 글자로 보이는 단위(👨‍👩‍👧 처럼 여러 부호가 이어진 것)를 통째로 다룬다. */
@@ -3840,8 +4052,8 @@ const deleteFolders = guard(async () => {
   const yes = await askSure({
     title: `폴더 ${ids.length}개를 삭제할까요?`,
     body: `${esc(names.slice(0, 3).join(", "))}${names.length > 3
-      ? ` 외 ${names.length - 3}개` : ""}. 묶음만 사라지고 내 작품은 목록에 남습니다.${
-      mirrors ? ` 비추는 폴더 ${mirrors}개는 미러링이 끊기고, 그 안의 작품은 원래 내 것이 아니라 함께 사라집니다.` : ""}`,
+      ? ` 외 ${names.length - 3}개` : ""}. 묶음만 사라지고 내 콘텐츠는 목록에 남습니다.${
+      mirrors ? ` 비추는 폴더 ${mirrors}개는 미러링이 끊기고, 그 안의 콘텐츠는 원래 내 것이 아니라 함께 사라집니다.` : ""}`,
   });
   if (!yes) return;
   for (const id of ids) await api("DELETE", `/api/folders/${id}`);
@@ -3897,19 +4109,19 @@ function openFavFolders() {
 function openMirrorInfo(f, after) {
   const n = worksIn(f.id).length;
   openSheet(`
-    ${headHtml(`${f.emoji} ${esc(f.name)}`, { back: false, actions: false,
+    ${headHtml(folderLabel(f), { back: false, actions: false,
       sub: `${esc(f.mirrorOf)}님의 폴더${f.canEdit ? "를 함께 쓰는 중" : "를 미러링 중"}` })}
     <div class="rest" style="text-align:left;padding:2px 2px 10px">${f.broken
       ? `지금은 볼 수 없습니다 — ${esc(f.broken)}. 폴더는 남아 있지만 비어 있습니다.`
       : f.canEdit
-        ? `지금 ${n}편이 담겨 있습니다. <b>내 작품을 넣고 뺄 수 있고</b>, 넣은 것은
+        ? `지금 ${n}편이 담겨 있습니다. <b>내 콘텐츠를 넣고 뺄 수 있고</b>, 넣은 것은
            ${esc(f.mirrorOf)}님에게도 보입니다. 폴더 이름과 공개 설정은 ${esc(f.mirrorOf)}님 것이고,
-           남이 넣은 작품은 그 사람만 고칩니다 — 내 캘린더에도 올라오지 않습니다.`
+           남이 넣은 콘텐츠는 그 사람만 고칩니다 — 내 캘린더에도 올라오지 않습니다.`
         : `${esc(f.mirrorOf)}님의 폴더에서 지금 ${n}편이 비쳐 오고 있습니다. 그쪽에서 넣거나 빼면 여기도 바뀝니다.
            이름·아이콘·공개 설정은 ${esc(f.mirrorOf)}님 것이라 내가 고칠 수 없고,
-           안의 작품도 마찬가지입니다.`}</div>
+           안의 콘텐츠도 마찬가지입니다.`}</div>
     <button class="btn" style="width:100%" id="fdel">${f.canEdit ? "함께 쓰기 그만두기" : "미러링 끊기"}</button>
-    <div class="note">그만두어도 ${esc(f.mirrorOf)}님 폴더는 그대로입니다. 내가 넣어 둔 작품도
+    <div class="note">그만두어도 ${esc(f.mirrorOf)}님 폴더는 그대로입니다. 내가 넣어 둔 콘텐츠도
       내 목록에 그대로 남고, 이 묶음에서만 빠집니다.</div>`);
 
   sheet.querySelector("#fdel").onclick = guard(async () => {
@@ -4059,8 +4271,6 @@ function openFolderForm(existing, after, kind, draft) {
      주인만 정한다 — 여기서는 칸 자체를 세우지 않는다. */
   const mine = !existing?.mirror;
   let emoji = draft?.emoji ?? (existing ? existing.emoji : "📁");
-  // 견본에 없는 아이콘을 쓰고 있었다면 직접 입력칸을 열어 둔 채로 시작한다
-  const own = !EMOJIS.includes(emoji);
   // 지금 이 폴더를 누구에게 열어 두었는가. 새 폴더는 늘 나만 본다.
   const share = draft?.share
     ? { mode: draft.share.mode, with: [...draft.share.with] }
@@ -4126,16 +4336,7 @@ function openFolderForm(existing, after, kind, draft) {
     ${headHtml(existing ? "폴더 편집" : (team ? "새 공유 폴더" : "새 폴더"), { back: false,
       save: existing ? "저장" : "만들기",
       sub: mine ? (team ? "공유 폴더 — 부른 친구와 함께 씁니다" : "일반 폴더") : "" })}
-    <div class="field"><label>아이콘</label>
-      <div class="emoji-row" id="emo">${EMOJIS.map(e =>
-    `<button data-e="${e}" aria-pressed="${e === emoji}">${e}</button>`).join("")}
-        <button class="emo-more" data-emo-more aria-pressed="${own}"
-          title="직접 넣기" aria-label="아이콘 직접 넣기">${icon("plus")}</button>
-      </div>
-      <div class="emoji-own"${own ? "" : " hidden"}>
-        <input id="emo-in" value="${own ? esc(emoji) : ""}" maxlength="8" spellcheck="false"
-               placeholder="🙂" aria-label="아이콘 직접 입력">
-      </div></div>
+    ${emojiPickHtml(emoji)}
     <div class="field"><label for="fname">이름</label>
       <input id="fname" value="${esc(name0)}" placeholder="예: 주말에 몰아볼 것" maxlength="24"></div>
     ${/* 여기서부터 **남에게 보이는 이야기**다 — 위(아이콘·이름)는 내 폴더를 꾸미는
@@ -4176,37 +4377,7 @@ function openFolderForm(existing, after, kind, draft) {
     </div>
   `);
   const nameEl = sheet.querySelector("#fname");
-  const emoIn = sheet.querySelector("#emo-in");
-  const markEmoji = () => sheet.querySelectorAll("#emo button")
-    .forEach(x => x.setAttribute("aria-pressed", x.dataset.e === emoji));
-
-  const ownBox = sheet.querySelector(".emoji-own");
-  const moreBtn = sheet.querySelector("[data-emo-more]");
-
-  sheet.querySelector("#emo").addEventListener("click", e => {
-    if (e.target.closest("[data-emo-more]")) {     // 직접 넣는 칸을 여닫는다
-      const show = ownBox.hidden;
-      ownBox.hidden = !show;
-      moreBtn.setAttribute("aria-pressed", show);
-      if (show) emoIn.focus();
-      return;
-    }
-    const b = e.target.closest("button[data-e]"); if (!b) return;
-    emoji = b.dataset.e;
-    /* 견본을 골랐으면 직접 넣던 칸은 닫는다 — 값을 비워 두고 칸만 열어 두면
-       무엇이 골라져 있는지 두 곳을 견줘 봐야 한다. */
-    emoIn.value = "";
-    ownBox.hidden = true;
-    moreBtn.setAttribute("aria-pressed", false);
-    markEmoji();
-  });
-
-  // 이모지만 받는다. 비우면 마지막으로 고른 견본이나 기본 아이콘으로 돌아간다.
-  emoIn.addEventListener("input", () => {
-    emoIn.value = emojiOnly(emoIn.value);
-    emoji = emoIn.value || (EMOJIS.includes(emoji) ? emoji : "📁");
-    markEmoji();
-  });
+  wireEmojiPick(sheet, emoji, v => { emoji = v; });
   const whoBox = sheet.querySelector("[data-share-who]");
   if (whoBox) {
     /* 이름표에 사람 이름을 적으려면 친구 목록이 있어야 한다. 창을 세울 때는 아직 없을 수
@@ -4298,14 +4469,14 @@ function openFolderForm(existing, after, kind, draft) {
       const n = works.filter(w => w.mirror && w.folders.includes(existing.id)).length;
       return { title: "함께 쓰기를 그만둘까요?",
         body: `함께 쓰던 사람들이 이 폴더를 더 볼 수 없게 됩니다.${
-          n ? ` 그 사람들이 넣어 둔 ${n}편도 이 폴더에서 빠집니다 — 작품은 각자 목록에 남습니다.` : ""}`,
+          n ? ` 그 사람들이 넣어 둔 ${n}편도 이 폴더에서 빠집니다 — 콘텐츠는 각자 목록에 남습니다.` : ""}`,
         ok: "그만두기" };
     }
     if (wasTeam && gone.length) {
       const names = nameList(gone);
       return { title: `${gone.length}명을 명단에서 뺄까요?`,
         body: `${esc(names.join(", ") || "고른 사람")}${names.length ? "님" : ""}이 이 폴더를 더 볼 수 없게 되고,
-          넣어 둔 작품도 이 폴더에서 빠집니다 — 작품은 그 사람 목록에 남습니다.`,
+          넣어 둔 콘텐츠도 이 폴더에서 빠집니다 — 콘텐츠는 그 사람 목록에 남습니다.`,
         ok: "빼기" };
     }
     /* 넓은 것부터 묻는다 — 공개를 아예 거두면 보던 사람도 비추던 사람도 한꺼번에 잃는다. */
@@ -4366,7 +4537,7 @@ function openFolderForm(existing, after, kind, draft) {
   if (del) del.onclick = guard(async () => {
     const yes = await askSure({
       title: "폴더를 삭제할까요?",
-      body: `${esc(existing.name)} · ${worksIn(existing.id).length}개. 묶음만 사라지고 작품은 목록에 남습니다.`,
+      body: `${esc(existing.name)} · ${worksIn(existing.id).length}개. 묶음만 사라지고 콘텐츠는 목록에 남습니다.`,
       back: () => openFolderForm(existing, after),
     });
     if (!yes) return;
@@ -4382,10 +4553,10 @@ function openFind() {
   findQuery = "";
   const body = () => {
     const q = findQuery.trim().toLowerCase();
-    if (!q) return `<div class="empty">작품명을 입력하세요.<br>
+    if (!q) return `<div class="empty">콘텐츠명을 입력하세요.<br>
       보관함에 있는 것도 함께 찾습니다.</div>`;
     const hit = works.filter(w => w.title.toLowerCase().includes(q));
-    if (!hit.length) return `<div class="empty">찾는 작품이 없습니다.</div>`;
+    if (!hit.length) return `<div class="empty">찾는 콘텐츠가 없습니다.</div>`;
     // 보고 있는 목록에 있는 것을 먼저, 내려둔 것은 뒤에
     const rank = w => (w.state === "active" ? 0 : 1);
     return byRecent(hit).sort((a, b) => rank(a) - rank(b))
@@ -4395,7 +4566,7 @@ function openFind() {
   };
 
   openSheet(`
-    ${searchHtml("작품명으로 검색")}
+    ${searchHtml("콘텐츠명으로 검색")}
     <div data-find-body>${body()}</div>`,
     /* **수를 말하지 않는다.** 여기서 뒤지는 것에는 비쳐 온 남의 줄과 휴지통까지 들어 있어,
        그 수는 내가 담아 둔 편수와도 화면의 편수와도 다르다. 어긋나는 수를 적느니
@@ -4449,7 +4620,7 @@ function drawPlatformList(pid, back) {
     const q = platQuery.trim().toLowerCase();
     const hits = shownNow();
     if (!hits.length)
-      return `<div class="empty">${q ? "찾는 작품이 없습니다." : "비어 있습니다."}</div>`;
+      return `<div class="empty">${q ? "찾는 콘텐츠가 없습니다." : "비어 있습니다."}</div>`;
     return (q ? `<div class="rest" style="text-align:left;padding:0 2px 8px">
         &ldquo;${esc(platQuery.trim())}&rdquo; · ${hits.length}편</div>` : "")
       + `<div data-wbar>${workBarHtml(hits.length)}</div>`
@@ -4465,7 +4636,7 @@ function drawPlatformList(pid, back) {
 
   workPickAt("plat:" + pid, shownNow());           // 다른 구간으로 넘어가면 고른 것은 버린다
   openSheet(`
-    ${all.length > 7 ? searchHtml("작품명으로 검색", platQuery) : ""}
+    ${all.length > 7 ? searchHtml("콘텐츠명으로 검색", platQuery) : ""}
     <div data-plat-body>${body()}</div>`,
     { full: true, title: `${esc(p.name)}`, sub: `${all.length}편`,
       back, over: back });
@@ -4545,22 +4716,34 @@ function openPlatformIndex() {
 }
 
 /* ── 보관함 ──────────────────────────────────────────────── */
-/* 별점 묶음을 폴더처럼 여닫고, 작품명으로 찾는다.
+/* 폴더 묶음을 여닫고, 제목으로 찾는다.
    화면 상태라 시트 밖에 둔다 — 되돌리기·삭제 뒤 다시 그려도 보던 자리가 유지된다. */
 /* picked 가 **null 이면 아직 고르는 중이 아니다.** 빈 Set 과 가르는 것이 요점이다 —
    빈 Set 은 「고르는 중인데 아직 하나도 안 골랐다」라서 체크칸과 고르기 줄이 서야 하고,
    null 은 그냥 목록이라 아무것도 서지 않는다. 작품 격자(workSel)와 같은 규칙이다. */
 let arch = { state: "watched", group: null, q: "", picked: null };
 
-/** 별점 높은 것부터. 안 매긴 것은 섞이지 않게 맨 뒤로 따로 모은다. */
+/** 폴더별로 모은다. **폴더 목록의 차례를 그대로 따른다** — 같은 것을 두 화면이 다른
+    차례로 세우면, 보관함에서 찾던 폴더를 폴더 탭에서 다시 찾아야 한다.
+
+    **한 개가 여러 묶음에 선다.** 폴더는 하나만 고르는 것이 아니라서(folders 는 배열),
+    두 폴더에 넣어 둔 것은 양쪽에 모두 보인다 — 폴더 탭이 이미 그렇게 보여 준다.
+    어디에도 안 넣은 것은 섞이지 않게 맨 뒤로 따로 모은다. */
 function archGroups(list) {
   const out = [];
-  for (let n = MAX_STAR; n >= 1; n--) {
-    const items = list.filter(w => w.rating === n);
-    if (items.length) out.push({ key: n, label: starText(n), stars: true, items });
+  for (const f of archFolders) {
+    const items = list.filter(w => w.archFolder === f.id);
+    /* label 은 **이미 다듬은 글**(이모지 + esc 한 이름)이라 그리는 쪽에서 또 다듬으면
+       안 되고, text 는 아직 안 다듬은 맨 글이라 aria-label 처럼 글자만 필요한 자리에 쓴다.
+       한 값으로 두 자리를 대면 한쪽이 반드시 틀린다 — 폴더 창 제목과 같은 이야기다. */
+    if (items.length) out.push({ key: f.id, label: folderLabel(f), text: folderText(f), items });
   }
-  const none = list.filter(w => !w.rating);
-  if (none.length) out.push({ key: 0, label: "별점 없음", stars: false, items: none });
+  /* **하나는 한 묶음에만 선다.** archFolder 가 한 칸이라 여기서 셀 것이 없다 — 어느
+     묶음에도 안 들어간 것이 곧 「폴더 없음」이다. 지워진 폴더를 가리키던 것도 여기 모인다:
+     서버가 살아 있는 폴더만 이어 읽어(LEFT JOIN) null 로 돌려준다. */
+  const none = list.filter(w => !w.archFolder);
+  if (none.length) out.push({ key: "_none", label: `${icon("inbox")} 폴더 없음`,
+    text: "폴더 없음", items: none });
   return out;
 }
 
@@ -4569,7 +4752,7 @@ function archGroups(list) {
     한때 작은 표지 조각(27×36 .thumb)이 붙은 한 줄이었다. 그런데 여기 서 있는 것은
     이미 다 본 것들이라, 제목보다 표지로 알아보는 일이 많다 — 「그 파란 표지」가
     「나노마신」보다 먼저 떠오른다. 표지를 크게 보는 것은 격자가 이미 하는 일이고,
-    별점 묶음 화면에서는 진작 그렇게 서 있었다. 두 화면이 같은 것을 다르게 그릴
+    묶음 화면에서는 진작 그렇게 서 있었다. 두 화면이 같은 것을 다르게 그릴
     이유가 없다.
 
     **줄에 있던 「복구」·「휴지통」 단추는 걷는다.** 카드에는 그것들이 설 자리가 없고,
@@ -4598,8 +4781,8 @@ const archGrid = list => `<div class="grid">${list.map(archCard).join("")}</div>
    화면이 서버보다 더 막으면, 눌러 볼 수도 없는 채로 안 되는 이유마저 틀리게 된다. */
 const keptSame = w => works.find(a =>
   a.id !== w.id && !a.mirror && a.state !== "dropped" && a.urlId === w.urlId)?.state ?? null;
-const whereKept = w => keptSame(w) === "watched" ? "이미 보관에 있는 작품입니다"
-  : "이미 목록에 있는 작품입니다";
+const whereKept = w => keptSame(w) === "watched" ? "이미 보관에 있는 콘텐츠입니다"
+  : "이미 목록에 있는 콘텐츠입니다";
 
 /** 지금 화면에 보이는 작품들 — 전체 선택이 "보이는 것"만 집도록 */
 function archVisible() {
@@ -4629,7 +4812,16 @@ function archBulk() {
     <b>${n}개 선택</b>
     ${vis.length ? `<button class="mini-btn" data-pick-all>${allPicked ? "전체 해제" : "전체 선택"}</button>` : ""}
     <span class="bulk-act">
-      ${n ? `<button class="mini-btn" data-bulk="restore">복구</button>
+      ${/* **여기가 이미 보관해 둔 것의 폴더를 정하는 자리다.** 넣을 때 묻기는 하지만
+           그때 안 골랐거나 나중에 마음이 바뀌는 일이 있고, 목록에 없는 것은 콘텐츠 창에
+           보관 버튼이 서지 않아 다시 물을 길이 없다. 휴지통에는 두지 않는다 — 버린 것을
+           갈라 둘 일은 없다(보관함에만 갈래가 있는 것과 같은 까닭). */""}
+      ${n && trash ? `<button class="mini-btn" data-bulk="archfolder"
+        >${icon("inbox")} 보관 폴더</button>` : ""}
+      ${/* 같은 일을 두 이름으로 부르지 않는다 — 콘텐츠 창이 「보관 해제」라고 하는데
+           여기서만 「복구」면, 같은 것을 두고 두 번 배우게 된다. 휴지통에서는 「복구」가
+           맞다: 거기서 꺼내는 것은 해제가 아니라 되살리는 일이다. */""}
+      ${n ? `<button class="mini-btn" data-bulk="restore">${trash ? "보관 해제" : "복구"}</button>
       ${trash ? `<button class="mini-btn danger" data-bulk="trash">${icon("trash")} 휴지통</button>`
               : `<button class="mini-btn danger" data-bulk="delete">삭제</button>`}` : ""}
       <button class="mini-btn" data-asel-off>완료</button>
@@ -4638,18 +4830,18 @@ function archBulk() {
 }
 
 /* 보관을 어떻게 세울 것인가. **최신이 기본**이다 — 「끝까지 본 시리즈」를 열 때
-   가장 먼저 궁금한 것은 「요즘 뭘 끝냈더라」이지 「5점짜리가 뭐였더라」가 아니다.
-   별점은 되짚어 볼 때 쓰는 갈래라 한 번 더 눌러 들어간다.
+   가장 먼저 궁금한 것은 「요즘 뭘 끝냈더라」이지 「그 폴더에 뭐가 있더라」가 아니다.
+   폴더는 되짚어 볼 때 쓰는 갈래라 한 번 더 눌러 들어간다.
 
-   휴지통에는 이 물음이 없다 — 버린 것에 점수를 매길 일이 없어 세울 갈래가 하나뿐이다. */
+   휴지통에는 이 물음이 없다 — 버린 것을 갈라 둘 일이 없어 세울 갈래가 하나뿐이다. */
 /* 「전체」가 기본이고 **왼쪽에 선다.** 기본으로 켜져 있는 것이 왼쪽 끝에 있어야
    「지금 어디에 있나」가 눌린 자리로 바로 읽힌다 — 켠 것이 오른쪽에 있으면 왼쪽에 있는
    것을 두고 왜 저쪽이 켜져 있나를 한 번 생각하게 된다. 화면 아래 탭줄도, 캘린더의
    주간↔월간도 같다: 넓게 보는 쪽이 먼저고 좁히는 쪽이 다음이다. */
-const ARCH_SORTS = [["recent", "전체"], ["star", "별점"]];
+const ARCH_SORTS = [["recent", "전체"], ["folder", "폴더"]];
 const archSorted = () => arch.state === "watched";
-/** 별점 묶음으로 세우는 중인가 — 찾는 중에는 묶음을 무시한다(어느 별점인지 모르니 찾는 것이다) */
-const archGrouped = () => archSorted() && arch.sort === "star" && !arch.q.trim();
+/** 폴더 묶음으로 세우는 중인가 — 찾는 중에는 묶음을 무시한다(어느 폴더인지 모르니 찾는 것이다) */
+const archGrouped = () => archSorted() && arch.sort === "folder" && !arch.q.trim();
 
 /** 보관한 **최근 순**. state_at 이 없던 옛 줄은 담은 때로 대신한다. */
 const byDone = list => [...list].sort((a, b) =>
@@ -4659,28 +4851,32 @@ function archBody() {
   const list = worksInState(arch.state);
   const q = arch.q.trim().toLowerCase();
 
-  // 검색 중에는 묶음을 무시한다 — 어느 별점에 있는지 모르니까 찾는 것이다
+  // 검색 중에는 묶음을 무시한다 — 어느 폴더에 있는지 모르니까 찾는 것이다
   if (q) {
     const hits = byDone(list.filter(w => w.title.toLowerCase().includes(q)));
     return `<div class="rest" style="text-align:left;padding:0 2px 8px">
         &ldquo;${esc(arch.q.trim())}&rdquo; · ${hits.length}편</div>
-      ${hits.length ? archGrid(hits) : `<div class="empty">찾는 작품이 없습니다.</div>`}`;
+      ${hits.length ? archGrid(hits) : `<div class="empty">찾는 콘텐츠가 없습니다.</div>`}`;
   }
 
   if (!archGrouped())
     return list.length ? archGrid(byDone(list)) : `<div class="empty">비어 있습니다.</div>`;
 
   const groups = archGroups(list);
-  /* 별점 묶음은 다섯뿐이라 **가로로 훑고 들어간다** — 캘린더의 「추가 목록」과 같은 모양이다.
+  /* 묶음마다 **가로로 훑고 들어간다** — 캘린더의 「추가 목록」과 같은 모양이다.
      묶음마다 표지를 늘어놓아 눈으로 고르고, ☰ 로 그 묶음 전부를 편다. */
   if (arch.group === null)
     return groups.length
       ? groups.map(g => `<section class="plat">
           <div class="plat-h">
-            <b${g.stars ? ' class="stars-h"' : ""}>${g.label}</b><span>${g.items.length}편</span>
+            <b>${g.label}</b><span>${g.items.length}편</span>
             <span class="plat-act">
-              <button class="edit-dom" data-grp="${g.key}"
-                title="전체 목록" aria-label="${esc(g.label)} 전체 목록">${icon("list")}</button>
+              ${/* 「폴더 없음」은 진짜 폴더가 아니라 고칠 것이 없다 — 폴더 탭의
+                   🗂 전체·🫙 미분류와 같은 규칙이다. */""}
+              ${g.key === "_none" ? "" : `<button class="edit-dom" data-grp-edit="${esc(g.key)}"
+                title="폴더 고치기" aria-label="${esc(g.text)} 고치기">${icon("pencil")}</button>`}
+              <button class="edit-dom" data-grp="${esc(g.key)}"
+                title="전체 목록" aria-label="${esc(g.text)} 전체 목록">${icon("list")}</button>
             </span>
           </div>
           <div class="rail">${byDone(g.items).map(w => workCard(w)).join("")}</div>
@@ -4719,7 +4915,7 @@ function drawArchive() {
     ${archSorted() && !g ? `<div class="cal-switch" style="margin-bottom:12px">${
       ARCH_SORTS.map(([v, t]) => `<button data-asort="${v}"
         aria-selected="${arch.sort === v}">${t}</button>`).join("")}</div>` : ""}
-    ${searchHtml("작품명으로 검색", arch.q)}
+    ${searchHtml("콘텐츠명으로 검색", arch.q)}
     <div data-arch-bulk>${archBulk()}</div>
     <div data-arch-body>${archBody()}</div>`,
     { full: true,
@@ -4744,7 +4940,7 @@ function drawArchive() {
     if (bk) bk.hidden = !now;
   };
   /* 「선택」은 창의 머리줄에 — 다른 창과 같은 자리, 같은 손짓이다.
-     레일 화면(별점 묶음)에서는 고르지 않으므로 archVisible 이 빈 목록을 내주고,
+     레일 화면(폴더 묶음)에서는 고르지 않으므로 archVisible 이 빈 목록을 내주고,
      그때는 이 단추도 서지 않는다. */
   if (!arch.picked && archVisible().length) {
     const b = actBtn(null, "선택", "mini-btn");
@@ -4792,7 +4988,7 @@ function drawArchive() {
      손가락으로 「선택」을 찾아 누르는 것보다 짧고, 무엇보다 **같은 물건을 같은 손짓으로**
      다루게 된다.
 
-     **레일 화면(별점 묶음 목록)에서는 잡지 않는다.** 거기 서 있는 것은 묶음을 훑어보는
+     **레일 화면(폴더 묶음 목록)에서는 잡지 않는다.** 거기 서 있는 것은 묶음을 훑어보는
      카드고, 고르기는 묶음에 들어가서 하는 일이다 — 「추가 목록」이 묶음 화면에서 고르기를
      열지 않는 것과 같은 규칙이다. archVisible 도 그 화면에서는 빈 목록을 내준다. */
   holdToPick(sheet.querySelector(".sheet-body"), ".work[data-id]", el => {
@@ -4817,11 +5013,20 @@ function drawArchive() {
       return;
     }
 
-    const g = e.target.closest("[data-grp]");
-    // 머리줄이 묶음 이름을 말하므로 몸만 갈아 끼워서는 안 된다 — 통째로 다시 그린다
-    if (g) { arch.group = +g.dataset.grp; return drawArchive(); }
+    const ed = e.target.closest("[data-grp-edit]");
+    if (ed) {
+      const f = archFolders.find(x => x.id === ed.dataset.grpEdit);
+      if (f) return openArchFolderForm(f, () => drawArchive());
+      return;
+    }
 
-    /* 세우는 갈래를 바꾸면 **고르던 것도 놓는다.** 최신 목록에서 고른 것들이 별점 묶음
+    const g = e.target.closest("[data-grp]");
+    /* 머리줄이 묶음 이름을 말하므로 몸만 갈아 끼워서는 안 된다 — 통째로 다시 그린다.
+       **숫자로 바꾸지 않는다.** 묶음 열쇠가 별점이던 때는 +로 받아야 했지만 지금은
+       폴더 id(글자)라, +를 붙이면 NaN 이 되어 어느 묶음과도 안 맞는다. */
+    if (g) { arch.group = g.dataset.grp; return drawArchive(); }
+
+    /* 세우는 갈래를 바꾸면 **고르던 것도 놓는다.** 최신 목록에서 고른 것들이 폴더 묶음
        화면에서는 흩어져 있어, 셈줄이 「3개 선택」이라 말하는데 화면에는 하나도 안 보이는
        일이 생긴다. 폴더를 옮길 때 고른 것을 놓는 것과 같은 규칙이다. */
     const so = e.target.closest("[data-asort]");
@@ -4849,12 +5054,27 @@ function drawArchive() {
       const what = bulk.dataset.bulk;
       let ids = [...(arch.picked ?? [])];
       if (!ids.length) return;
+
+      /* 폴더를 정하는 것은 **옮기는 일이 아니라 갈라 두는 일**이라 되묻지 않는다 —
+         고르는 창이 곧 되묻는 창이고, 거기 취소가 있다. 상태는 그대로 watched 로 보내
+         서버가 그 칸을 건드리지 않게 한다(같은 값이라 stateAt 도 안 흔들린다). */
+      if (what === "archfolder") {
+        const picked = ids.map(id => works.find(w => w.id === id)).filter(Boolean);
+        if (!picked.length) return;
+        return openArchiveTo(picked, "watched", { back: drawArchive, after: () => {
+          arch.picked = null;
+          toast(`${picked.length}편의 보관 폴더를 정했습니다`);
+          drawArchive();
+        } });
+      }
       /* **복구는 자리가 비어 있는 것만.** 고른 것 중에 목록에 이미 있는 작품이 섞여 있으면
          그것만 빼고 나머지를 복구한다 — 통째로 물리면 「그럼 뭘 골라야 하나」가 되고,
          조용히 빼면 몇 편이 안 돌아왔는지 세어 봐야 안다. 몇 편이 빠지는지 말하고 묻는다. */
+      let askedRestore = false;          // 막힌 것을 이미 물었으면 또 묻지 않는다
       if (what === "restore") {
         const all = ids.map(id => works.find(w => w.id === id)).filter(Boolean);
         const blocked = all.filter(keptSame);
+        askedRestore = blocked.length > 0;
         ids = all.filter(w => !keptSame(w)).map(w => w.id);
         if (blocked.length) {
           /* 복구는 **되살리는 일**이라 빨강이 아니다. askSure 는 기본이 빨강(danger)인데
@@ -4869,6 +5089,22 @@ function drawArchive() {
           });
           if (!yes || !ids.length) return;
         }
+      }
+      /* **보관 해제도 한 번 더 묻는다** — 콘텐츠 창의 같은 이름 단추와 같은 손짓이라야
+         한다. 휴지통에서 꺼내는 「복구」는 그대로 묻지 않는다: 버린 것을 되살리는 일은
+         되돌리기 쉽고, 거기서는 잘못 눌러도 잃는 것이 없다.
+
+         **바로 위에서 이미 물었으면 건너뛴다.** 막힌 것이 있어 「N편은 복구되지 않습니다」
+         를 띄웠다면 그것이 곧 이 물음이다 — 확인을 두 번 받으면 두 번째는 읽지 않고 누른다. */
+      if (what === "restore" && arch.state === "watched" && !askedRestore) {
+        const yes = await askSure({
+          danger: false, back: drawArchive, ok: "보관 해제",
+          title: ids.length === 1 ? "보관을 해제할까요?" : `${ids.length}편의 보관을 해제할까요?`,
+          body: `${ids.length === 1
+            ? esc(works.find(w => w.id === ids[0])?.title ?? "")
+            : `고른 ${ids.length}편`} 을(를) 목록에 다시 세웁니다. 넣어 둔 보관 폴더는 지워집니다.`,
+        });
+        if (!yes) return;
       }
       /* 한 편만 골랐으면 **제목을 말한다.** 「1편을 휴지통으로」보다 「나노마신 을(를)」이
          낫다 — 고른 것이 하나라면 그것이 무엇인지가 되묻는 말의 전부다. */
@@ -4890,11 +5126,11 @@ function drawArchive() {
 function openInbox() {
   const n = unfiled().length;
   openSheet(`
-    ${headHtml("작품 추가", { back: false, actions: false, sub: "무엇을 하시겠어요?" })}
+    ${headHtml("콘텐츠 추가", { back: false, actions: false, sub: "무엇을 하시겠어요?" })}
     <div class="opts">
       <button class="menu-item" data-go="unfiled" style="border:1px solid var(--line-2);border-radius:11px">
         <span class="mi">✨</span><span class="mt">새 콘텐츠${n ? `<span class="mt-count">${n}</span>` : ""}
-        <small>${n ? "공유로 받은 작품을 정리합니다" : "정리할 작품이 없습니다"}</small></span></button>
+        <small>${n ? "공유로 받은 콘텐츠를 정리합니다" : "정리할 콘텐츠가 없습니다"}</small></span></button>
       <button class="menu-item" data-go="url" style="border:1px solid var(--line-2);border-radius:11px">
         <span class="mi">🔗</span><span class="mt">URL 추가<small>주소를 붙여넣어 목록에 담기</small></span></button>
       <button class="menu-item" data-go="manual" style="border:1px solid var(--line-2);border-radius:11px">
@@ -4905,23 +5141,132 @@ function openInbox() {
   sheet.querySelector('[data-go="manual"]').onclick = openManual;
 }
 
+/* 새 콘텐츠에서 여러 개를 골라 한 번에 지운다. **null 이면 평소 화면, Set 이면 고르는 중**
+   — 보관함(arch.picked)·폴더(folderSel)와 같은 규칙이라 손짓도 같다.
+   화면 밖에 두는 것도 같은 까닭이다: 지운 뒤 다시 그려도 고르던 중인지가 남아야 한다. */
+let ufSel = null;
+
 function openUnfiled() {
   const list = unfiled();
+  /* **없어진 것은 고른 것에서도 뺀다.** 지우고 다시 그리면 목록이 줄어드는데, 사라진 id 를
+     그대로 쥐고 있으면 셈줄이 「3개 선택」이라 말하면서 화면에는 둘만 보인다. */
+  if (ufSel) for (const id of [...ufSel]) if (!list.some(w => w.id === id)) ufSel.delete(id);
+  // 고르는 중이 아니면 셀 것이 없다 — ufSel 은 그때 null 이다
+  const allOn = !!ufSel && list.length > 0 && list.every(w => ufSel.has(w.id));
+
   openSheet(`
     ${headHtml("새 콘텐츠", { actions: false })}
-    <p class="sub">공유로 받아 아직 정리하지 않은 작품 ${list.length}편</p>
+    <p class="sub">공유로 받아 아직 정리하지 않은 콘텐츠 ${list.length}편</p>
+    ${ufSel ? `<div class="bulk">
+      <b>${ufSel.size}개 선택</b>
+      ${list.length ? `<button class="mini-btn" data-uf-all>${
+        allOn ? "전체 해제" : "전체 선택"}</button>` : ""}
+      <span class="bulk-act">
+        ${ufSel.size ? `<button class="mini-btn on" data-uf-del
+          >${icon("check")} 확인</button>` : ""}
+        <button class="mini-btn" data-uf-off>완료</button>
+      </span></div>` : ""}
     <div class="uf-list">${list.length ? list.map(w => {
       const p = platformOf(w.platformId);
-      return `<button class="uf-item" data-uf="${w.id}">
+      /* 고르는 중에는 체크칸을 **줄 밖에** 세운다 — 줄 자체가 button 이라 그 안에 또
+         button 이나 label 을 넣으면 누를 때 둘이 엉킨다(폴더 줄과 같은 짜임새다). */
+      const row = `<button class="uf-item" data-uf="${w.id}">
         <span class="thumb" style="${coverStyle(w)}">${coverChar(w)}</span>
         <span class="ub"><b>${esc(w.title)}</b><span>${esc(p.name)} · ${esc(schedText(w))}</span></span>
         <span class="chev">${icon("right")}</span></button>`;
+      return ufSel
+        ? `<div class="uf-row"><label class="arch-pick"><input type="checkbox"
+             data-uf-pick="${w.id}"${ufSel.has(w.id) ? " checked" : ""}
+             aria-label="${esc(w.title)} 선택"></label>${row}</div>`
+        : row;
     }).join("") : `<div class="empty">모두 정리했습니다.<br>다른 앱에서 공유하면 여기에 쌓입니다.</div>`}</div>`);
-  sheet.querySelector("[data-head-back]").onclick = openInbox;
-  sheet.querySelector(".uf-list").addEventListener("click", e => {
+
+  sheet.querySelector("[data-head-back]").onclick = () => { ufSel = null; openInbox(); };
+
+  /* 「선택」과 「모두 지우기」는 머리줄에 나란히 — 다른 창과 같은 자리다(보관함의 「선택」).
+     고르는 중에는 세우지 않는다: 그때 할 일은 셈줄이 다 들고 있다. */
+  if (!ufSel && list.length) {
+    const pick = actBtn(null, "선택", "mini-btn");
+    pick.textContent = "선택";
+    pick.onclick = () => { ufSel = new Set(); openUnfiled(); };
+    sheetAct(pick);
+
+    const wipe = actBtn(null, "전체 확인", "mini-btn");
+    wipe.textContent = "전체 확인";
+    wipe.onclick = guard(async () => {
+      /* **지우는 것이 아니라 이 목록에서만 빼는 것이다.** 여기는 「받아 두고 아직 안 본
+         것」을 모아 두는 자리라, 확인은 「봤다」는 표시다 — 콘텐츠는 목록에 그대로 있다.
+         한꺼번에 비우는 일이라 한 번 묻되, 되돌릴 수 없는 일이 아니므로 빨강이 아니다. */
+      const yes = await askSure({
+        danger: false,
+        title: "모두 확인할까요?", ok: "전체 확인", back: openUnfiled,
+        body: `${list.length}편을 이 목록에서 뺍니다. 콘텐츠는 지워지지 않고 목록에 그대로 남습니다.`,
+      });
+      if (!yes) return;
+      for (const w of list) await api("PATCH", `/api/works/${w.id}`, { filed: true });
+      ufSel = null;
+      await reload(); render(); openUnfiled();
+      toast(`${list.length}편을 확인했습니다`);
+    });
+    sheetAct(wipe);
+  }
+
+  const box = sheet.querySelector(".uf-list");
+  box.addEventListener("click", e => {
+    /* **그 줄만 뒤집는다.** 통째로 다시 그리면 짚고 있던 자리가 사라졌다 새로 생겨,
+       훑으며 톡톡 짚을 때 두 번째부터 헛손질이 된다(보관함 카드와 같은 이야기). */
+    const pk = e.target.closest("[data-uf-pick]");
+    if (pk) {
+      const id = pk.dataset.ufPick;
+      pk.checked ? ufSel.add(id) : ufSel.delete(id);
+      sheet.querySelector(".bulk").outerHTML = bulkHtml();
+      return;
+    }
     const b = e.target.closest("[data-uf]"); if (!b) return;
+    // 고르는 중에는 열지 않는다 — 누르는 뜻이 「고른다」로 바뀌어 있다
+    if (ufSel) {
+      const id = b.dataset.uf;
+      const el = sheet.querySelector(`[data-uf-pick="${id}"]`);
+      if (el) { el.checked = !el.checked; el.checked ? ufSel.add(id) : ufSel.delete(id); }
+      sheet.querySelector(".bulk").outerHTML = bulkHtml();
+      return;
+    }
     openWorkSettings(b.dataset.uf, { back: openUnfiled, mode: "add" });
   });
+
+  /* 셈줄만 갈아 끼운다 — 위 손짓이 부른다. 화면을 통째로 다시 그리지 않으려고 따로 둔다. */
+  function bulkHtml() {
+    const on = list.length > 0 && list.every(w => ufSel.has(w.id));
+    return `<div class="bulk">
+      <b>${ufSel.size}개 선택</b>
+      ${list.length ? `<button class="mini-btn" data-uf-all>${
+        on ? "전체 해제" : "전체 선택"}</button>` : ""}
+      <span class="bulk-act">
+        ${ufSel.size ? `<button class="mini-btn on" data-uf-del
+          >${icon("check")} 확인</button>` : ""}
+        <button class="mini-btn" data-uf-off>완료</button>
+      </span></div>`;
+  }
+
+  sheet.querySelector(".sheet-body").addEventListener("click", guard(async e => {
+    if (e.target.closest("[data-uf-off]")) { ufSel = null; return openUnfiled(); }
+    if (e.target.closest("[data-uf-all]")) {
+      // 보이는 것만 집고 푼다 — 이 화면에는 좁혀 놓은 것이 없으니 곧 전부다
+      const on = list.length > 0 && list.every(w => ufSel.has(w.id));
+      ufSel = new Set(on ? [] : list.map(w => w.id));
+      return openUnfiled();
+    }
+    if (e.target.closest("[data-uf-del]")) {
+      /* **되묻지 않는다.** 확인은 이 목록에서 빼는 일일 뿐이고 콘텐츠는 남는다 —
+         잘못 눌러도 잃는 것이 없다. 이 저장소는 「되돌리기 어려운 일」에만 묻는다
+         (휴지통·영구 삭제는 묻고, 보관함의 복구는 안 묻는 것과 같은 잣대). */
+      const picked = list.filter(w => ufSel.has(w.id));
+      if (!picked.length) return;
+      for (const w of picked) await api("PATCH", `/api/works/${w.id}`, { filed: true });
+      await reload(); render(); openUnfiled();
+      toast(`${picked.length}편을 확인했습니다`);
+    }
+  }));
 }
 
 /* fromShare — 다른 앱의 공유 시트에서 넘어온 경우.
@@ -4987,7 +5332,7 @@ function openAdd(prefill, fromShare) {
   const shell = (url = "") => {
     openSheet(`
       ${headHtml("URL 추가", { save: "담기" })}
-      <p class="sub">작품 주소를 붙여넣으세요. 다른 앱에서 공유 버튼으로 보내도 이 화면이 열립니다.</p>
+      <p class="sub">콘텐츠 주소를 붙여넣으세요. 다른 앱에서 공유 버튼으로 보내도 이 화면이 열립니다.</p>
       <div class="field"><label for="in-url">URL</label>
         <textarea id="in-url" spellcheck="false" placeholder="https://…">${esc(url)}</textarea></div>
       <div id="add-preview"></div>`);
@@ -5027,8 +5372,8 @@ function openAdd(prefill, fromShare) {
     const done = had?.state === "watched";
     preview.innerHTML = `
       ${had ? `<div class="note sep">${done
-        ? "보관에 있는 작품입니다 — 아래 값으로 새로 적습니다. 목록으로 되돌리려면 보관에서 「복구」를 누르세요"
-        : "이미 담아 둔 작품입니다 — 아래 값으로 새로 적습니다"}</div>` : ""}
+        ? "보관에 있는 콘텐츠입니다 — 아래 값으로 새로 적습니다. 목록으로 되돌리려면 보관에서 「복구」를 누르세요"
+        : "이미 담아 둔 콘텐츠입니다 — 아래 값으로 새로 적습니다"}</div>` : ""}
       ${resolved.note ? `<div class="note sep">${esc(resolved.note)}</div>` : ""}
       <div class="sep">
       <dl class="kv"><dt>플랫폼</dt><dd>${esc(resolved.platform.name)} · ${MEDIA[resolved.mediaType] ?? "링크"}</dd></dl>
@@ -5036,17 +5381,32 @@ function openAdd(prefill, fromShare) {
         <label for="in-title">제목
           <span style="text-transform:none;letter-spacing:0">— <span style="color:var(--${auto ? "good" : "warn"})">${auto ? "자동" : "직접 입력"}</span> · ${esc(resolved.originLabel)}</span>
         </label>
-        <input id="in-title" value="${esc(title)}" placeholder="작품 제목을 입력하세요"></div>
-      ${/* **읽기만 한다.** 여기서 고칠 칸을 두면 담기 전에 손보게 되는데, 이 값은
-           공용 줄(url)에 들어가는 것이라 나 하나 고친 것이 남의 화면까지 바꾼다.
-           고치는 자리는 작품 설정이고, 거기서 고친 것은 내 덮어쓰기로만 남는다. */""}
-      ${resolved.description ? `<div class="ov-desc">${esc(resolved.description)}</div>` : ""}
+        <input id="in-title" value="${esc(title)}" placeholder="콘텐츠 제목을 입력하세요"></div>
+      ${/* **여기서도 고친다.** 한때 읽기만 하는 칸이었다 — 이 값이 공용 줄(url)에
+           들어가는 것이라 나 하나 고친 것이 남의 화면까지 바꿀까 봐서였다. 막을 자리를
+           **화면**으로 잡은 것이 잘못이었다: 서버가 담을 때든 고칠 때든 내 줄에만 적으면
+           (setOwnDescription) 남의 화면은 처음부터 안 바뀐다. 규칙을 지키는 자리를
+           서버로 옮기고 나니, 담기 전에 손보는 길을 막을 이유가 없어졌다.
+
+           **안 고치면 안 보낸다.** 받아온 그대로면 값을 아예 안 실어 보내 덮어쓰기가
+           생기지 않는다 — 그래야 나중에 사이트가 소개글을 고쳤을 때 그것이 따라온다.
+           (서버도 같은 것을 한 번 더 본다. 여기서 새는 것을 거기서 막는다.) */""}
+      <div class="field" style="margin:9px 0 0">
+        <label for="in-desc">설명
+          <span style="text-transform:none;letter-spacing:0">— ${
+            resolved.description ? "사이트가 준 소개글입니다. 고치거나 비울 수 있어요"
+                                 : "받아온 소개글이 없습니다. 직접 적어도 됩니다"}</span>
+        </label>
+        <textarea id="in-desc" rows="4" maxlength="400"
+          placeholder="어떤 것인지">${esc(draft.description ?? resolved.description ?? "")}</textarea>
+      </div>
       </div>
       ${schedHtml(draft.schedule, "어느 플랫폼도 공개하지 않아 직접 고릅니다. 한 번만 정하면 됩니다",
         { value: draft.color, fallback: resolved.platform.color })}
       ${pickerHtml(draft.folders)}
       ${actionRow("do-add", had ? "설정 새로 적기" : "목록에 등록")}`;
     preview.querySelector("#in-title").addEventListener("input", e => { draft.title = e.target.value; });
+    preview.querySelector("#in-desc").addEventListener("input", e => { draft.description = e.target.value; });
     wireSched(preview, draft.schedule, redraw => { if (redraw) paint(); });
     wireColorPicker(preview, draft, resolved.platform.color);
     /* 새 폴더를 만들고 돌아오면 이 시트가 덮여 있다 — 통째로 다시 그린 뒤 미리보기를 채운다.
@@ -5057,9 +5417,14 @@ function openAdd(prefill, fromShare) {
       const title = titleEl.value.trim();
       if (!title) { titleEl.focus(); return; }
       const filed = !fromShare || draft.folders.length > 0;
+      /* 받아온 그대로면 안 보낸다 — 값을 실어 보내는 것 자체가 「내가 정했다」는 뜻이고,
+         그러면 나중에 사이트가 고친 소개글이 안 따라온다(위 칸의 규칙). */
+      const desc = draft.description ?? resolved.description ?? "";
+      const touched = desc.trim() !== (resolved.description ?? "").trim();
       const r = await api("POST", "/api/works", {
         url: input.value, title, schedule: draft.schedule,
         folders: draft.folders, color: draft.color, filed,
+        ...(touched ? { description: desc } : {}),
       });
       await reload(); tab = "home"; openFolderId = null; render(); closeSheet();
       fillSiteNames();          // 새 도메인이면 이름을 곧바로 받아 온다
@@ -5076,10 +5441,10 @@ function openAdd(prefill, fromShare) {
     const mine = ++seq;
     preview.innerHTML = `<div class="note">확인 중…</div>`;
     api("POST", "/api/resolve", { url: value })
-      // 새 주소를 확인했으면 들고 있던 제목은 버린다 — 다른 작품의 제목이다
+      // 새 주소를 확인했으면 들고 있던 제목과 설명은 버린다 — 다른 것의 제목과 설명이다
       .then(r => {
         if (mine !== seq) return;
-        resolved = r; draft.title = null;
+        resolved = r; draft.title = null; draft.description = null;
         Object.assign(draft.schedule, r.schedule);
         /* **이미 담아 둔 작품이면 지금 값을 띄운다.**
 
@@ -5090,6 +5455,7 @@ function openAdd(prefill, fromShare) {
            찾아보는데, 그때 골라 둔 것까지 비우면 사람이 한 일이 사라진다. */
         if (r.mine) {
           draft.title = r.mine.title;
+          draft.description = r.mine.description;
           Object.assign(draft.schedule, r.mine.schedule);
           draft.color = r.mine.color;
           draft.folders.length = 0;
@@ -5189,7 +5555,7 @@ function openPlatformEdit(platformId) {
   };
   openSheet(`
     ${headHtml("표시 설정", { back: false, sub: p.isDomain
-      ? `${esc(p.host)}의 작품을 한 묶음으로 보여줍니다.`
+      ? `${esc(p.host)}의 콘텐츠를 한 묶음으로 보여줍니다.`
       : `기본값은 ${esc(p.baseName)} · ${esc(p.baseInitial)} 입니다.` })}
     <div class="dom-preview">
       ${/* 미리보기는 **목록에 설 모양 그대로**여야 한다 — 여기서만 글자가 서면 저장한 뒤에야
@@ -5223,7 +5589,7 @@ function openPlatformEdit(platformId) {
           : `<button class="mini-btn" data-split="${esc(h)}">떼어내기</button>`}
       </div>`).join("")}</div>
       <div class="rest" style="text-align:left;padding:6px 2px 0">
-        떼어내면 그 주소의 작품만 따로 나가고, 앞으로도 합쳐지지 않습니다.</div></div>` : ""}
+        떼어내면 그 주소의 콘텐츠만 따로 나가고, 앞으로도 합쳐지지 않습니다.</div></div>` : ""}
     ${p.overridden ? `<div class="link-row"><button class="btn" data-reset>기본값으로</button></div>` : ""}
     <div class="link-row wide-only" style="margin-top:4px">
       <button class="btn" data-cancel>취소</button>
@@ -5660,7 +6026,7 @@ async function openFriends() {
       title: `${ids.length}명을 삭제할까요?`,
       ok: "삭제", back: openFriends,
       body: `${esc(names.slice(0, 3).join(", "))}${names.length > 3 ? ` 외 ${names.length - 3}명` : ""}과
-        서로의 공개 폴더가 보이지 않게 됩니다. 담아 둔 작품은 그대로 남습니다.`,
+        서로의 공개 폴더가 보이지 않게 됩니다. 담아 둔 콘텐츠는 그대로 남습니다.`,
     });
     if (!yes) return;
     for (const id of ids) await api("DELETE", `/api/friends/${id}`);
@@ -5806,7 +6172,7 @@ function openFriendDetail(friendId) {
   sheet.querySelector("[data-unfriend]").onclick = guard(async () => {
     const yes = await askSure({
       title: "친구를 끊을까요?", ok: "친구 끊기", back: () => openFriendDetail(friendId),
-      body: `${esc(f.displayName)}님과 서로의 공개 폴더가 보이지 않게 됩니다. 담아 둔 작품은 그대로 남습니다.`,
+      body: `${esc(f.displayName)}님과 서로의 공개 폴더가 보이지 않게 됩니다. 담아 둔 콘텐츠는 그대로 남습니다.`,
     });
     if (!yes) return;
     await api("DELETE", `/api/friends/${friendId}`);
@@ -5837,8 +6203,8 @@ function doneTabsHtml() {
     </div>
     <div class="opt-why">${on.size
       ? DONE_TABS.filter(([v]) => on.has(v)).map(([, t]) => t).join(" · ")
-        + "에서 보관한 작품도 함께 보입니다 — 표지에 「보관」이 붙습니다."
-      : "보관한 작품은 목록에 서지 않습니다. 왼쪽 메뉴의 「보관」에서 봅니다."}</div>`;
+        + "에서 보관한 콘텐츠도 함께 보입니다 — 표지에 「보관」이 붙습니다."
+      : "보관한 콘텐츠는 목록에 서지 않습니다. 왼쪽 메뉴의 「보관」에서 봅니다."}</div>`;
 }
 
 function openAppSettings() {
@@ -5880,7 +6246,7 @@ function openAppSettings() {
         다른 사람과 겹칠 수 없습니다.
       </div>`}
 </div>` : ""}
-    <div class="field sep"><label>작품을 여는 방식</label>
+    <div class="field sep"><label>콘텐츠를 여는 방식</label>
       ${optsHtml(OPEN_MODES, settings.openMode, "openmode", 2)}</div>
     ${/* **보관을 어디에 세울지.** 다 본 작품이 목록에서 통째로 사라지는 것이
          늘 맞지는 않다 — 다시 볼 것도 있고, 완결까지 본 목록 자체가 보고 싶을 때도 있다.
@@ -5897,7 +6263,7 @@ function openAppSettings() {
         <button class="btn bad" data-quit>${guestMode() ? "담아둔 것 모두 지우기" : "회원 탈퇴"}</button>
       </div>
       <div class="rest" style="text-align:left;padding:7px 2px 0">
-        탈퇴하면 담아둔 작품·폴더·설정이 모두 지워지고 되돌릴 수 없습니다.</div>
+        탈퇴하면 담아둔 콘텐츠·폴더·설정이 모두 지워지고 되돌릴 수 없습니다.</div>
     </div>` : ""}`);
   /* **이 칸만 갈아 끼운다.** 여는 방식(openmode)처럼 시트를 통째로 다시 열면 설정 화면이
      길어서 보던 자리를 잃는다 — 이 칸은 화면 아래쪽에 있어 매번 위로 튀어 오른다. */
@@ -6012,7 +6378,7 @@ document.addEventListener("click", e => {
 }, true);
 document.getElementById("btn-menu").onclick = () => {
   document.getElementById("drawer-stat").textContent =
-    `작품 ${activeWorks().length} · 폴더 ${folders.length}`;
+    `콘텐츠 ${activeWorks().length} · 폴더 ${folders.length}`;
   for (const st of ["watched", "dropped"])
     document.querySelector(`[data-count="${st}"]`).textContent = worksInState(st).length;
   document.querySelector('[data-count="friends"]').textContent = friendCount;
@@ -6314,6 +6680,19 @@ const takeInvite = () => {
   if (loginError) history.replaceState(null, "", location.pathname);
   // 로그인 화면으로 빠지기 **전에** 적어 둔다 — 그 뒤로는 주소에 남지 않는다
   if (q0.get("invite")) keepInvite(q0.get("invite"));
+  /* **공유로 들어온 값도 여기서 챙긴다.** 아래에서 render() 가 주소를 고쳐 쓰는데,
+     writeHash 는 `pathname + hash` 만 남기고 **search 를 버린다** — 그 뒤에 읽으면
+     이미 없다. 초대를 여기서 챙기는 것과 같은 까닭이고, 같은 함정이었다.
+
+     이 구멍은 **로그인한 사람에게만** 열렸다. 로그인이 필요하면 reload 가 던져서
+     showLogin 뒤 곧바로 return 하므로 render() 에 닿지 않고, 주소가 살아남는다.
+     브라우저로 열 때는 공유로 들어올 일이 없어 드러나지도 않았다 — 설치형 앱이
+     되고 나서야 보였다. */
+  const shared = q0.get("url") || q0.get("text") || "";
+  /* 서비스 워커가 이미 담고 넘긴 경우 — 무엇을 담았는지 여기서 말해 준다.
+     담는 일은 워커가 끝냈으므로 화면은 알리기만 하면 된다. */
+  const saved = q0.get("saved");
+  const savedAgain = q0.get("again") === "1";
 
   try {
     await reload(true);          // 앱을 새로 여는 길 — 읽어 둔 소식을 걷고 시작한다
@@ -6364,13 +6743,22 @@ const takeInvite = () => {
     return;
   }
 
-  // 공유 대상으로 들어온 경우 — 주소를 들고 바로 추가 화면을 연다
-  const q = new URLSearchParams(location.search);
-  const shared = q.get("url") || q.get("text") || "";
+  /* 공유 대상으로 들어온 경우 — 주소를 들고 바로 추가 화면을 연다.
+     값은 맨 위에서 챙겨 두었다(shared). 주소에서 지우는 일은 writeHash 가 이미 했지만,
+     render() 를 지나지 않는 길로 여기 닿을 수도 있으니 한 번 더 지운다 — 새로 고쳤을 때
+     같은 것이 또 열리지 않게. */
   if (shared) {
-    history.replaceState(null, "", location.pathname + location.hash);
+    if (location.search) history.replaceState(null, "", location.pathname + location.hash);
     const m = shared.match(/https?:\/\/\S+/);
     openAdd(m ? m[0] : shared.trim(), true);
+  }
+
+  /* 워커가 담아 준 것 — **어디로 갔는지까지 말한다.** 「담았습니다」로 끝내면 목록에
+     안 보여서 어디 갔나 찾게 된다: 공유로 온 것은 폴더가 없어 「새 콘텐츠」에 모인다. */
+  if (saved) {
+    if (location.search) history.replaceState(null, "", location.pathname + location.hash);
+    toast(savedAgain ? `«${saved}» 설정을 새로 적었습니다`
+      : `«${saved}» 담았습니다 · 새 콘텐츠에서 정리할 수 있어요`);
   }
 
   if ("serviceWorker" in navigator)

@@ -207,6 +207,25 @@ CREATE TABLE IF NOT EXISTS folder (
   ord     INTEGER NOT NULL DEFAULT 0
 );
 
+/* **보관 폴더는 folder 와 다른 표다.** 이름이 비슷하다고 한 표에 담으면 안 된다 —
+   folder 에는 공유(folder_share) · 초대(invite) · 미러링 · 소식(folder_notice) 이
+   줄줄이 걸려 있어서, 보관 폴더를 그 표에 끼워 넣는 순간 「공유하지 않는다」를 그
+   경로마다 **하나하나 막아야** 한다. 하나라도 빠뜨리면 밖으로 새어 나간다.
+
+   표를 가르면 막을 것이 없다: 걸린 것이 없으니 셀 것도 없다. 폴더 탭이 읽는 것은
+   folder 뿐이라 여기 있는 것은 거기 서지도 않는다.
+
+   **한 콘텐츠는 한 곳에만 든다.** 그래서 이음표(work_folder 같은)를 두지 않고
+   work.arch_folder_id 한 칸으로 잡는다 — 표의 모양이 곧 그 규칙이라, 둘에 넣는 일이
+   애초에 적히지 않는다. */
+CREATE TABLE IF NOT EXISTS arch_folder (
+  id      TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  name    TEXT NOT NULL,
+  emoji   TEXT NOT NULL DEFAULT '📦',
+  ord     INTEGER NOT NULL DEFAULT 0
+);
+
 /* 남의 작품을 **내가** 언제 봤는지. 비추는 폴더와 함께 고치는 폴더에서 쓴다.
 
    visits·last_at 은 그 작품 주인의 칸이라 내 기록을 적을 수 없다. 적었다면 친구가 열 때마다
@@ -337,6 +356,10 @@ try { db.exec("ALTER TABLE work ADD COLUMN description TEXT"); } catch { /* 이�
 try { db.exec("ALTER TABLE work ADD COLUMN rating INTEGER"); } catch { }
 try { db.exec("ALTER TABLE work ADD COLUMN state_at INTEGER"); } catch { }
 try { db.exec("ALTER TABLE work ADD COLUMN color TEXT"); } catch { }
+/* 보관 폴더 한 칸. **NULL 이면 「폴더 없음」**이고, 지워진 폴더의 id 가 남아 있어도
+   읽을 때 LEFT JOIN 이 NULL 로 돌려주므로 같은 뜻이 된다 — 지울 때 비워 주기도 하지만,
+   그 한 번을 놓쳐도 화면이 틀리지 않게 두 겹으로 둔다. */
+try { db.exec("ALTER TABLE work ADD COLUMN arch_folder_id TEXT"); } catch { }
 /* 자주 보는 친구에 별을 켠다. 친구 관계는 양쪽에 한 줄씩 담기므로 **내 줄에만** 켜면
    상대는 모르는 나만의 표시가 된다 — 서로 동의할 일이 아니라서 그래야 맞다. */
 try { db.exec("ALTER TABLE friend ADD COLUMN starred INTEGER NOT NULL DEFAULT 0"); } catch { }
@@ -899,6 +922,8 @@ export type Work = {
   state: "active" | "watched" | "dropped"; filed: boolean; visits: number;
   rating: number | null; stateAt: number | null; color: string | null;
   lastAt: number; addedAt: number; folders: string[];
+  /** 보관 폴더 — **하나뿐이고**, 안 넣었으면 null. 폴더 탭의 folders 와 별개다. */
+  archFolder: string | null;
   schedule: { mode: string; days: number[]; next: number | null; source: string; from: number };
 };
 
@@ -919,9 +944,14 @@ const WORK_COLS = `
   COALESCE(w.cover_url, u.cover_url)       AS cover_url,
   COALESCE(w.cover_aspect, u.cover_aspect) AS cover_aspect,
   COALESCE(w.episode, u.episode)           AS episode,
-  u.series_id, u.list_url, u.app_url, u.media_type`;
+  u.series_id, u.list_url, u.app_url, u.media_type,
+  af.id AS arch_folder_id`;
 
-const WORK_FROM = "FROM work w JOIN url u ON u.id = w.url_id";
+/* 보관 폴더는 **LEFT JOIN** 이다 — 안 넣은 것도, 지워진 폴더를 가리키던 것도 함께 와야
+   한다. INNER 였다면 폴더 없는 콘텐츠가 목록에서 통째로 사라졌을 것이다.
+   user_id 까지 맞춰 잇는다: 남의 폴더 id 가 어쩌다 적혀 있어도 내 것으로 읽히지 않게. */
+const WORK_FROM = `FROM work w JOIN url u ON u.id = w.url_id
+  LEFT JOIN arch_folder af ON af.id = w.arch_folder_id AND af.user_id = w.user_id`;
 
 function toWork(r: any, folders: string[]): Work {
   return {
@@ -932,6 +962,7 @@ function toWork(r: any, folders: string[]): Work {
     state: r.state, filed: !!r.filed, visits: r.visits, rating: r.rating ?? null,
     stateAt: r.state_at ?? null, color: r.color ?? null,
     lastAt: r.last_at, addedAt: r.added_at, folders,
+    archFolder: r.arch_folder_id ?? null,
     schedule: {
       mode: r.sched_mode, days: JSON.parse(r.sched_days) as number[],
       next: r.sched_next, source: r.sched_source,
@@ -1212,6 +1243,59 @@ function folderRows(where: string, ...args: unknown[]): Folder[] {
         ? { owner: r.mirror_owner, folder: r.mirror_folder } : null,
     };
   });
+}
+
+/* ── 보관 폴더 ─────────────────────────────────
+
+   폴더 탭의 것과 이름만 같고 섞이지 않는다. 여기에는 공유도, 미러링도, 초대도 없다 —
+   넣고 빼고 이름 고치는 것이 전부다. 그래서 함수도 이만큼뿐이다. */
+export type ArchFolder = { id: string; name: string; emoji: string };
+
+const archRow = (r: any): ArchFolder => ({ id: r.id, name: r.name, emoji: r.emoji });
+
+/** 만든 차례대로. 보관함은 되짚어 보는 자리라 늘어난 차례가 기억과 가장 가깝다. */
+export const listArchFolders = (userId: string): ArchFolder[] =>
+  (db.prepare("SELECT id, name, emoji FROM arch_folder WHERE user_id = ? ORDER BY ord, rowid")
+    .all(userId) as any[]).map(archRow);
+
+export const getArchFolder = (userId: string, id: string): ArchFolder | null => {
+  const r = db.prepare("SELECT id, name, emoji FROM arch_folder WHERE user_id = ? AND id = ?")
+    .get(userId, id) as any;
+  return r ? archRow(r) : null;
+};
+
+export function createArchFolder(userId: string, name: string, emoji: string): ArchFolder {
+  const id = newId("af");
+  db.prepare("INSERT INTO arch_folder (id, user_id, name, emoji, ord) VALUES (?,?,?,?,?)")
+    .run(id, userId, name, emoji, Date.now());
+  return { id, name, emoji };
+}
+
+export function renameArchFolder(userId: string, id: string, name: string, emoji: string):
+  ArchFolder | null {
+  const n = db.prepare("UPDATE arch_folder SET name = ?, emoji = ? WHERE id = ? AND user_id = ?")
+    .run(name, emoji, id, userId).changes;
+  return n ? { id, name, emoji } : null;
+}
+
+/** 지우면 **들어 있던 것은 「폴더 없음」으로** 나온다 — 묶음만 사라지고
+    보관해 둔 것은 그대로 남는다. 폴더 탭의 「묶음만 사라지고 콘텐츠는 목록에
+    남습니다」와 같은 규칙이다. */
+export function deleteArchFolder(userId: string, id: string): boolean {
+  const n = db.prepare("DELETE FROM arch_folder WHERE id = ? AND user_id = ?")
+    .run(id, userId).changes;
+  if (n) db.prepare("UPDATE work SET arch_folder_id = NULL WHERE user_id = ? AND arch_folder_id = ?")
+    .run(userId, id);
+  return !!n;
+}
+
+/** 보관 폴더를 정한다. **하나거나 없거나** — 여럿을 받는 길이 없다.
+    내 폴더가 아니면 안 적는다: 모르는 id 를 받아 적어 두면 어느 묶음에도 안 서는
+    유령이 된다. */
+export function setArchFolder(userId: string, workId: string, id: string | null): void {
+  const ok = id === null || !!getArchFolder(userId, id);
+  db.prepare("UPDATE work SET arch_folder_id = ? WHERE id = ? AND user_id = ?")
+    .run(ok ? id : null, workId, userId);
 }
 
 export const listFolders = (userId: string): Folder[] => folderRows("user_id = ?", userId);

@@ -53,13 +53,12 @@ public class ShareActivity extends Activity {
       } else if (r.code >= 400) {
         msg = "담지 못했습니다 (" + r.code + ")";
       } else {
+        /* **일어난 일의 이름은 서버가 짓는다**(text). 여기서 saved·made 를 보고 문장을
+           지으면 같은 말이 두 곳에 살고, 한쪽만 고치게 된다. 이쪽이 짓는 것은 서버가 알 수
+           없는 것들뿐이다 — 못 닿았다, 열쇠가 틀렸다. */
         JSONObject j = json(r.body);
-        if (j != null && j.optBoolean("saved")) {
-          msg = j.optString("title", "") + (j.optBoolean("made") ? " — 담았습니다" : " — 이미 있습니다");
-        } else {
-          msg = "제목을 못 읽어 앱에서 확인합니다";
-          open = j == null ? null : j.optString("open", "");
-        }
+        msg = j == null ? "답을 읽지 못했습니다" : j.optString("text", "담았습니다");
+        if (j != null && !j.optBoolean("saved")) open = j.optString("open", "");
       }
 
       final String m = msg, o = open;

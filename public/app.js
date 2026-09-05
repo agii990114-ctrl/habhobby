@@ -6619,14 +6619,18 @@ async function openShareKeys() {
          묻는데, 그 답이 다른 창에 있으면 열쇠를 손에 든 채 찾아다니게 된다. */""}
     <div class="field sep sep-end"><label>아이폰에서 쓰는 법</label>
       <div class="rest" style="text-align:left;padding:2px 2px 0;line-height:1.7">
-        <b>①</b> 「단축어」 앱 → 새 단축어 → ⓘ → <b>공유 시트에 표시</b> 켜기<br>
-        <b>②</b> 동작 <b>「URL의 콘텐츠 가져오기」</b> 를 넣고 이렇게 채웁니다<br>
+        「단축어」 앱 → 새 단축어 → ⓘ → <b>공유 시트에 표시</b> 를 켜고, 동작 셋을 넣습니다.<br>
+        <b>①</b> <b>URL의 콘텐츠 가져오기</b><br>
         &nbsp;&nbsp;· URL — <code>${esc(location.origin)}/share</code><br>
         &nbsp;&nbsp;· 방법 — <code>POST</code><br>
         &nbsp;&nbsp;· 헤더 — <code>Authorization</code> : <code>Bearer 열쇠</code><br>
         &nbsp;&nbsp;· 본문 — <b>양식</b>, <code>url</code> 에 「단축어 입력」<br>
-        <b>③</b> 제목을 못 읽은 주소는 <code>saved</code> 가 <code>false</code> 로 옵니다.
-        그때만 <code>open</code> 주소를 열도록 「만약」 을 붙이면, 앱이 뜨면서 등록 화면이 섭니다.<br>
+        <b>②</b> <b>사전 값 가져오기</b> — 키 <code>text</code><br>
+        <b>③</b> <b>알림 표시</b> — 그 값<br>
+        ${/* 조건문을 넣지 않는다. 서버가 무슨 일이 있었는지 한 줄로 지어 주므로 그것만
+             띄우면 된다 — 단축어에서 참·거짓을 다루는 자리가 가장 잘 틀린다. */""}
+        담기지 않은 주소를 앱에서 바로 열고 싶으면 <code>open</code> 값을 「URL 열기」에
+        이어 붙이면 됩니다. 없어도 알림이 무슨 일인지 말해 줍니다.<br>
         ${/* 안드로이드는 지금도 앱 자체가 공유 목록에 서므로 열쇠가 없어도 된다.
              열쇠가 필요해지는 것은 창 없이 담는 TWA 를 만들 때다. */""}
         <span style="color:var(--ink-3)">안드로이드는 앱이 이미 공유 목록에 서므로

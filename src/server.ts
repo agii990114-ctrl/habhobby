@@ -1988,9 +1988,19 @@ const server = createServer(async (req, res) => {
 
       const r = await intakeShared(user, raw);
       if (byKey) {
+        /* **그대로 띄울 한 줄을 함께 준다**(text). 받는 쪽에는 화면이 없어서, 참·거짓을
+           보고 문장을 짓게 하면 그 자리가 곧 틀리는 자리가 된다 — iOS 「단축어」의 조건문이
+           특히 그렇다(참을 1 로도 true 로도 다룬다). 이 한 줄이면 조건 없이 알림만 내면 된다.
+
+           일어난 일의 이름은 여기서 짓는다. 가는 길에 생긴 일(못 닿았다·열쇠가 틀렸다)은
+           받는 쪽이 짓는다 — 그건 서버가 알 수 없는 것들이다. */
+        const text = r.kind === "saved"
+          ? `${r.title} — ${r.made ? "담았습니다" : "이미 있습니다"}`
+          : r.kind === "ask" ? "제목을 읽지 못했습니다 — 앱에서 확인하세요"
+            : "보낼 주소가 없습니다";
         json(res, 200, r.kind === "saved"
-          ? { ok: true, saved: true, title: r.title, made: r.made }
-          : { ok: true, saved: false, open: BASE_URL + (r.kind === "ask" ? ask : "/") });
+          ? { ok: true, saved: true, title: r.title, made: r.made, text }
+          : { ok: true, saved: false, open: BASE_URL + (r.kind === "ask" ? ask : "/"), text });
         return;
       }
       /* 만든 것과 고친 것은 다른 일이다 — 화면이 다른 말을 하도록 함께 넘긴다

@@ -19,9 +19,12 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: habhobby-tunnel
-    command: tunnel --no-autoupdate run
+    # 길은 cloudflared/config.yml 이 정한다 — 그 파일에 왜인지 적어 두었다.
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:?TUNNEL_TOKEN 이 .env 에 없습니다}
+    volumes:
+      - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
     depends_on:
       - habhobby
     restart: unless-stopped

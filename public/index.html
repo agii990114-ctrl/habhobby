@@ -16,6 +16,21 @@
 <title>HabHobby</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
+<!-- iOS 는 홈 화면 아이콘을 **매니페스트에서 고르지 않는다** — 이 줄만 본다. 없으면
+     화면을 찍어 아이콘으로 삼아서, 글자만 잔뜩 든 사각형이 홈 화면에 놓인다.
+     그림은 모서리를 안 깎고 꽉 채워 굽는다(tools/make-icons.mjs 의 apple 갈래) —
+     iOS 가 제 손으로 둥글리는데 미리 깎아 두면 잘린 자리에 흰 귀퉁이가 남는다.
+     마스커블처럼 안전 영역까지 줄이지도 않는다 — iOS 는 여백을 덧대지 않으므로
+     줄이면 그림만 혼자 작아 보인다. -->
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<!-- 홈 화면에서 열 때 사파리 껍데기 없이 뜨게 한다. 요즘 iOS 는 매니페스트의
+     display:standalone 을 보지만 옛 기기는 이 줄만 본다 — 한 줄로 둘 다 덮는다. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="HabHobby">
+<!-- 상태줄 **밑으로는 내용을 넣지 않는다**(black-translucent 를 쓰지 않는다).
+     아래쪽 안전 영역은 env(safe-area-inset-bottom) 으로 피해 두었지만 위쪽은 아직
+     아무 데서도 안 본다 — 지금 넣으면 제목줄이 노치에 물린다. -->
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hahmlet:wght@500;600;700&family=IBM+Plex+Sans+KR:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="/styles.css">

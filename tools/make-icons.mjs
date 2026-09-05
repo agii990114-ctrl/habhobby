@@ -37,6 +37,18 @@ const SHAPES = [
    그림 한가운데(256,263)를 아이콘 한가운데(256,256)에 맞춘 뒤 그 점을 축으로 줄인다. */
 const MASK_SCALE = 0.82, ART_CX = 256, ART_CY = 263;
 
+/* **바탕을 깎는지와 그림을 줄이는지는 따로 정해진다.** 한 낱말(maskable)로 둘을 묶어
+   두었더니 iOS 용을 만들 자리가 없었다 — iOS 는 마스커블처럼 제 모양으로 깎지만
+   덧대는 여백은 없다. 안전 영역까지 줄이면 아이콘 속 그림만 혼자 작아 보인다.
+     round … 웹 아이콘. 바탕 모서리를 깎아 두고 그림은 그대로.
+     mask  … 마스커블. 바탕은 꽉 채우고(OS 가 깎는다) 그림은 안전 영역으로 줄인다.
+     apple … iOS 홈 화면. 바탕은 꽉 채우고(iOS 가 깎는다) 그림은 그대로. */
+const KINDS = {
+  round: { bleed: false, shrink: false },
+  mask: { bleed: true, shrink: true },
+  apple: { bleed: true, shrink: false },
+};
+
 /** 둥근 사각의 부호거리. 음수면 안쪽, 0 이 테두리 — 이 값으로 가장자리를 부드럽게 한다. */
 function sdRoundRect(px, py, s) {
   const hx = s.w / 2, hy = s.h / 2;
@@ -45,11 +57,12 @@ function sdRoundRect(px, py, s) {
   return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - s.r;
 }
 
-/** size×size RGBA 픽셀을 만든다. @param maskable 마스커블 규칙으로 그릴지 */
-function render(size, maskable) {
+/** size×size RGBA 픽셀을 만든다. @param kind KINDS 의 갈래 이름 */
+function render(size, kind) {
+  const { bleed, shrink } = KINDS[kind];
   const SS = 4;                       // 한 픽셀을 4×4 로 잘게 재서 계단을 없앤다
   const px = new Uint8ClampedArray(size * size * 4);
-  const bg = maskable ? { ...BG, r: 0 } : BG;
+  const bg = bleed ? { ...BG, r: 0 } : BG;
   const k = 512 / size;               // 화면 좌표 → 그림 좌표
 
   for (let y = 0; y < size; y++) {
@@ -69,9 +82,9 @@ function render(size, maskable) {
             ca = al + ca * (1 - al);
           };
           put(bg, sdRoundRect(dx, dy, bg) <= 0);
-          // 마스커블은 그림만 줄인다 — 바탕은 그대로 꽉 찬다. 줄인 만큼 되돌려 재면 된다.
-          const ax = maskable ? (dx - 256) / MASK_SCALE + ART_CX : dx;
-          const ay = maskable ? (dy - 256) / MASK_SCALE + ART_CY : dy;
+          // 줄일 때도 바탕은 그대로 꽉 찬다 — 그림만 줄인 만큼 되돌려 재면 된다.
+          const ax = shrink ? (dx - 256) / MASK_SCALE + ART_CX : dx;
+          const ay = shrink ? (dy - 256) / MASK_SCALE + ART_CY : dy;
           for (const s of SHAPES) put(s, sdRoundRect(ax, ay, s) <= 0);
           r += cr; g += cg; b += cb; a += ca;
         }
@@ -123,13 +136,16 @@ function png(size, px) {
 }
 
 mkdirSync(OUT, { recursive: true });
-for (const [name, size, maskable] of [
-  ["icon-192.png", 192, false],
-  ["icon-512.png", 512, false],
-  ["icon-maskable-192.png", 192, true],
-  ["icon-maskable-512.png", 512, true],
+for (const [name, size, kind] of [
+  ["icon-192.png", 192, "round"],
+  ["icon-512.png", 512, "round"],
+  ["icon-maskable-192.png", 192, "mask"],
+  ["icon-maskable-512.png", 512, "mask"],
+  // iOS 는 매니페스트의 아이콘을 홈 화면에 쓰지 않는다 — apple-touch-icon 만 본다.
+  // 애플이 말하는 크기가 180 이라 그대로 굽는다.
+  ["apple-touch-icon.png", 180, "apple"],
 ]) {
-  const buf = png(size, render(size, maskable));
+  const buf = png(size, render(size, kind));
   writeFileSync(join(OUT, name), buf);
   console.log(`  ${name.padEnd(24)} ${String(buf.length).padStart(7)} bytes`);
 }

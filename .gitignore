@@ -14,3 +14,6 @@ android/*.keystore
 android/.gradle/
 android/build/
 android/app/build/
+
+# 빌드해서 나오는 것 — 소스에서 다시 만들면 된다
+habhobby.apk

@@ -2,9 +2,16 @@
 <resources>
   <style name="Theme.App" parent="android:Theme.DeviceDefault.Light.NoActionBar"/>
 
-  <!-- 공유 액티비티는 **화면을 만들지 않는다.** 창이 뜨면 그 순간 앱으로 넘어간 것처럼
-       보이는데, 창을 없애려고 이 앱을 만드는 것이다. 알림은 토스트로만 낸다. -->
+  <!-- 공유 액티비티는 **보이지 않는다.** 창이 뜨면 그 순간 앱으로 넘어간 것처럼 보이는데,
+       그 창을 없애려고 이 앱을 만드는 것이다. 알림은 토스트로만 낸다.
+
+       **windowNoDisplay 는 쓰지 않는다.** 그건 「창을 아예 만들지 않겠다」라 onResume 안에서
+       끝나는 액티비티를 위한 것인데, 우리 것은 서버가 남의 사이트를 다녀오는 1~3초를
+       기다린다. 그동안 시스템이 이 액티비티를 없는 셈 치고 끝내 버려서 요청이 나가다 말았다.
+       투명한 창을 하나 두면 눈에는 똑같이 안 보이면서 답을 받을 때까지 살아 있다. -->
   <style name="Theme.Invisible" parent="android:Theme.Translucent.NoTitleBar">
-    <item name="android:windowNoDisplay">true</item>
+    <item name="android:windowBackground">@android:color/transparent</item>
+    <item name="android:windowIsTranslucent">true</item>
+    <item name="android:windowAnimationStyle">@null</item>
   </style>
 </resources>

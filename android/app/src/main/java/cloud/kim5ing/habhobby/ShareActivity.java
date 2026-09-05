@@ -6,27 +6,19 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.widget.Toast;
 
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-
 import org.json.JSONObject;
 
 /** 다른 앱에서 「공유」로 넘어온 주소를 담는다.
  *
- *  <p><b>창을 띄우지 않는다.</b> 웹앱(PWA)의 공유 대상은 규격상 반드시 앱이 떠야 해서,
- *  누르면 화면이 한 번 번쩍였다. 이 앱을 만든 까닭이 그것 하나다 — 여기서는 보내고 끝낸다.
+ *  <p><b>보이는 창을 띄우지 않는다.</b> 웹앱(PWA)의 공유 대상은 규격상 반드시 앱이 떠야
+ *  해서, 누르면 화면이 한 번 번쩍였다. 이 앱을 만든 까닭이 그것 하나다.
  *
  *  <p><b>쿠키를 쓸 수 없다.</b> 이 요청은 크롬 밖에서 나가므로 웹에서 한 로그인이 따라오지
  *  않는다(그건 TWA 로 띄운 화면에서만 그렇다). 그래서 공유 열쇠를 머리글에 얹는다.
  *
- *  <p><b>담기지 않았으면 앱을 연다.</b> 제목을 못 읽은 주소는 서버가 담지 않고
- *  {@code saved:false} 와 열 주소를 함께 준다. 조용히 아무 일도 없는 것보다, 사람이 보고
- *  정하도록 화면을 띄우는 편이 낫다 — 화면 없이 실패하면 물어볼 데가 없다. */
+ *  <p><b>답을 받을 때까지 살아 있는다.</b> 처음에는 창을 아예 안 만들고(windowNoDisplay)
+ *  화면에서 사라지면 끝나게(noHistory) 두었는데, 그 둘은 「곧바로 끝나는 액티비티」를 위한
+ *  것이라 서버를 기다리는 동안 시스템이 이쪽을 끝내 버렸다 — 요청이 나가다 말았다. */
 public class ShareActivity extends Activity {
 
   @Override
@@ -46,7 +38,37 @@ public class ShareActivity extends Activity {
       return;
     }
 
-    new Thread(() -> send(key, text)).start();
+    new Thread(() -> {
+      Api.Result r = Api.share(getString(R.string.share_endpoint), key, text);
+      String msg, open = null;
+      boolean setup = false;
+
+      if (!r.reached()) {
+        msg = "서버에 닿지 못했습니다 — " + r.error;
+      } else if (r.code == 401) {
+        /* **틀린 열쇠는 고칠 자리로 데려간다.** 넣는 화면은 열쇠가 비었을 때만 열리도록
+           두었더니, 한 번 잘못 넣고 나면 다시 들어갈 길이 없었다 — 토스트만 뜨고 끝이다. */
+        msg = "공유 열쇠가 맞지 않습니다";
+        setup = true;
+      } else if (r.code >= 400) {
+        msg = "담지 못했습니다 (" + r.code + ")";
+      } else {
+        JSONObject j = json(r.body);
+        if (j != null && j.optBoolean("saved")) {
+          msg = j.optString("title", "") + (j.optBoolean("made") ? " — 담았습니다" : " — 이미 있습니다");
+        } else {
+          msg = "제목을 못 읽어 앱에서 확인합니다";
+          open = j == null ? null : j.optString("open", "");
+        }
+      }
+
+      final String m = msg, o = open;
+      final boolean fix = setup;
+      runOnUiThread(() -> {
+        if (fix) startActivity(new Intent(this, SetupActivity.class));
+        done(m, o);
+      });
+    }).start();
   }
 
   /** 「제목 https://…」처럼 글이 섞여 와도 그대로 보낸다 — 주소만 골라내는 일은 서버가 한다. */
@@ -57,62 +79,8 @@ public class ShareActivity extends Activity {
     return s == null ? "" : s.trim();
   }
 
-  private void send(String key, String text) {
-    String msg;
-    String open = null;
-    HttpURLConnection c = null;
-    try {
-      c = (HttpURLConnection) new URL(getString(R.string.share_endpoint)).openConnection();
-      c.setRequestMethod("POST");
-      c.setDoOutput(true);
-      c.setConnectTimeout(10_000);
-      /* 서버가 남의 사이트에 다녀와 제목을 읽는다 — 그 왕복이 있으므로 넉넉히 기다린다.
-         짧게 잡으면 느린 사이트마다 「담지 못했습니다」가 뜨는데, 정작 서버에는 담겨 있다. */
-      c.setReadTimeout(45_000);
-      c.setRequestProperty("Authorization", "Bearer " + key);
-      c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=utf-8");
-
-      byte[] body = ("url=" + URLEncoder.encode(text, "UTF-8")).getBytes(StandardCharsets.UTF_8);
-      c.setFixedLengthStreamingMode(body.length);
-      try (OutputStream os = c.getOutputStream()) { os.write(body); }
-
-      int code = c.getResponseCode();
-      String raw = read(code >= 400 ? c.getErrorStream() : c.getInputStream());
-
-      if (code == 401) {
-        msg = "공유 열쇠가 맞지 않습니다";
-      } else if (code >= 400) {
-        msg = "담지 못했습니다 (" + code + ")";
-      } else {
-        JSONObject j = new JSONObject(raw);
-        if (j.optBoolean("saved")) {
-          String title = j.optString("title", "");
-          msg = title + (j.optBoolean("made") ? " — 담았습니다" : " — 이미 있습니다");
-        } else {
-          msg = "제목을 못 읽어 앱에서 확인합니다";
-          open = j.optString("open", "");
-        }
-      }
-    } catch (Exception e) {
-      /* 무엇이 잘못됐는지 한 낱말이라도 남긴다. 화면이 없는 쪽에서 「조용히 아무 일도
-         안 일어남」이 가장 고치기 어려운 고장이다. */
-      msg = "담지 못했습니다 — " + e.getClass().getSimpleName();
-    } finally {
-      if (c != null) c.disconnect();
-    }
-
-    final String m = msg;
-    final String o = open;
-    runOnUiThread(() -> done(m, o));
-  }
-
-  private static String read(InputStream in) throws Exception {
-    if (in == null) return "{}";
-    try (InputStream is = in; ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-      byte[] buf = new byte[4096];
-      for (int n; (n = is.read(buf)) > 0; ) out.write(buf, 0, n);
-      return out.toString(StandardCharsets.UTF_8.name());
-    }
+  static JSONObject json(String s) {
+    try { return new JSONObject(s); } catch (Exception e) { return null; }
   }
 
   private void done(String msg, String open) {

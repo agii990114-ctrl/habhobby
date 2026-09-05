@@ -13,9 +13,15 @@ import android.widget.Toast;
 
 /** 열쇠를 붙여 넣는 화면.
  *
+ *  <p><b>저장하면서 곧바로 물어본다.</b> 열쇠가 맞는지는 공유해 봐야 알 수 있었는데, 그때는
+ *  화면이 없어서 토스트 한 줄이 전부다 — 틀린 줄 모르고 「공유가 안 되네」로 끝난다.
+ *  빈 주소로 한 번 보내 보면 서버가 담지 않고 답만 주므로, 그것으로 여기서 가릴 수 있다.
+ *
  *  <p>화면 하나에 칸 하나뿐이라 레이아웃 xml 을 따로 두지 않았다 — 파일을 오갈수록
  *  「어디에 뭐가 있나」만 늘어난다. 여기서 다 보인다. */
 public class SetupActivity extends Activity {
+
+  private TextView state;
 
   @Override
   protected void onCreate(Bundle saved) {
@@ -38,21 +44,42 @@ public class SetupActivity extends Activity {
     help.setText(R.string.setup_help);
     help.setPadding(0, dp(12), 0, dp(16));
 
-    Button save = new Button(this);
+    final Button save = new Button(this);
     save.setText(R.string.setup_save);
+
+    state = new TextView(this);
+    state.setPadding(0, dp(16), 0, 0);
+
     save.setOnClickListener(v -> {
-      String key = input.getText().toString().trim();
+      final String key = input.getText().toString().trim();
       Keys.set(this, key);
-      Toast.makeText(this,
-          key.isEmpty() ? "열쇠를 지웠습니다" : "저장했습니다. 이제 공유로 담을 수 있습니다",
-          Toast.LENGTH_LONG).show();
-      finish();
+      if (key.isEmpty()) { say("열쇠를 지웠습니다"); return; }
+
+      save.setEnabled(false);
+      say("서버에 물어보는 중…");
+      new Thread(() -> {
+        // 빈 주소 — 담지 않고 「열쇠가 통하는지」만 답한다
+        Api.Result r = Api.share(getString(R.string.share_endpoint), key, "");
+        final String msg =
+            !r.reached() ? "서버에 닿지 못했습니다 — " + r.error
+            : r.code == 401 ? "이 열쇠는 통하지 않습니다. 다시 복사해 보세요."
+            : r.code >= 400 ? "서버가 거절했습니다 (" + r.code + ")"
+            : "열쇠가 통합니다. 이제 공유로 담을 수 있습니다.";
+        runOnUiThread(() -> { save.setEnabled(true); say(msg); });
+      }).start();
     });
 
     box.addView(input);
     box.addView(help);
     box.addView(save);
+    box.addView(state);
     setContentView(box);
+  }
+
+  /** 화면에도 적고 토스트로도 낸다 — 이 창을 닫고 나서도 결과가 기억에 남아야 한다. */
+  private void say(String msg) {
+    state.setText(msg);
+    Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
   }
 
   private int dp(int v) {

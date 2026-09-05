@@ -45,16 +45,19 @@
       </intent-filter>
     </activity>
 
-    <!-- 공유 시트에 서는 자리. **창을 띄우지 않는다**(Theme.Invisible) — 이 앱을 만드는
-         까닭이 그것이다. noHistory·excludeFromRecents 로 최근 목록에도 남기지 않는다:
-         화면이 없는 것을 뒤로가기로 되돌릴 수는 없다. -->
+    <!-- 공유 시트에 서는 자리. **보이는 창을 만들지 않는다**(Theme.Invisible) — 이 앱을
+         만드는 까닭이 그것이다. 최근 목록에도 남기지 않는다: 화면이 없는 것을 뒤로가기로
+         되돌릴 수는 없다.
+
+         **noHistory 는 쓰지 않는다.** 그건 「화면에서 안 보이게 되면 끝내라」인데, 이
+         액티비티는 처음부터 안 보인다 — 답을 기다리는 중에 끝나 버려서 요청이 나가다 말았다.
+         끝내는 것은 우리가 정한다(done 에서 finish). -->
     <activity
         android:name=".ShareActivity"
         android:exported="true"
         android:label="@string/share_label"
         android:theme="@style/Theme.Invisible"
         android:excludeFromRecents="true"
-        android:noHistory="true"
         android:taskAffinity="">
       <intent-filter>
         <action android:name="android.intent.action.SEND"/>

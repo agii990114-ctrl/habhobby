@@ -8,14 +8,51 @@
    몸통이 그림 같은 파일(Blob)이면 그대로 보내고, 아니면 JSON 으로 바꿔 보낸다. */
 async function api(method, path, body) {
   const raw = body instanceof Blob;
-  const res = await fetch(path, {
-    method,
-    headers: body ? { "Content-Type": raw ? body.type : "application/json" } : undefined,
-    body: body ? (raw ? body : JSON.stringify(body)) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.reason || `요청 실패 (${res.status})`);
-  return data;
+  busy(true);
+  try {
+    const res = await fetch(path, {
+      method,
+      headers: body ? { "Content-Type": raw ? body.type : "application/json" } : undefined,
+      body: body ? (raw ? body : JSON.stringify(body)) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.reason || `요청 실패 (${res.status})`);
+    return data;
+  } finally { busy(false); }
+}
+
+/* ── 기다리는 중 ──────────────────────────────────────────
+
+   **한 자리에서 알린다.** 서버로 가는 길은 위 api() 하나뿐이라(fetch 는 그 안 한 줄),
+   여기에 매달면 모든 기다림이 저절로 말을 한다 — 화면마다 따로 달면 새 화면을 만들 때
+   빠뜨리고, 빠뜨린 자리에서는 눌렀는데 아무 일도 안 일어나는 것처럼 보인다.
+
+   **빠른 것에는 띄우지 않는다.** 대부분의 요청은 눈 깜빡할 새에 끝나는데 거기에도
+   띄우면 화면이 껌뻑인다. 250ms 를 넘겨야 나타나므로, 빠를 때는 아무 일도 없던 것처럼
+   지나간다. 정작 오래 걸리는 것(주소 읽어 오기 — 남의 사이트를 다녀온다)에서만 선다.
+
+   **줄줄이 이어지는 것을 한 덩어리로 본다.** 여럿 옮기기는 api() 를 하나씩 부르는데
+   (for … await), 끝날 때마다 지우면 그 사이에서 껌뻑인다. 세어 두었다가 다 끝나고도
+   잠깐 기다린 뒤에 지운다.
+
+   버튼이 그동안 눌리지 않는 것은 guard() 가 이미 한다 — 그건 「두 번 눌리지 않게」이고
+   이것은 「기다리는 중임을 알리기」다. 둘은 다른 일이라 따로 둔다. */
+let busyN = 0, busyShow = null, busyHide = null;
+
+function busy(on) {
+  const el = document.getElementById("busy");
+  if (!el) return;                      // 첫 그림보다 먼저 부를 수도 있다
+  if (on) {
+    busyN++;
+    clearTimeout(busyHide); busyHide = null;
+    if (!busyShow && !el.classList.contains("on"))
+      busyShow = setTimeout(() => { busyShow = null; el.classList.add("on"); }, 250);
+    return;
+  }
+  if (busyN > 0) busyN--;
+  if (busyN) return;
+  clearTimeout(busyShow); busyShow = null;
+  busyHide = setTimeout(() => { busyHide = null; el.classList.remove("on"); }, 180);
 }
 
 /* ── 상태 ────────────────────────────────────────────────── */

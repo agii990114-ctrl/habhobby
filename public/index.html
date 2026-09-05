@@ -36,6 +36,9 @@
 <body>
 <div class="page">
     <div class="app">
+      <!-- 기다리는 중임을 알리는 가는 줄. 서버로 가는 길(api)이 켜고 끈다 —
+           250ms 를 넘겨야 나타나므로 빠른 요청에는 보이지 않는다. -->
+      <div class="busy" id="busy" aria-hidden="true"></div>
       <div class="app-bar">
         <div class="bar-left">
           <!-- 좁은 화면에서는 알림 종이 사이드 메뉴 안으로 들어간다. 메뉴를 열지 않으면

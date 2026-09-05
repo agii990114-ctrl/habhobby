@@ -1337,15 +1337,26 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       const want: string[] = Array.isArray(b.works)
         ? b.works.filter((x: any) => typeof x === "string") : [];
       const into = mine.mirror ? mine.mirror.folder : id;
-      let n = 0;
+      /* **옮기기도 여기서 한다.** from 을 주면 그 폴더에서 빼면서 넣는다 — 넣기와 빼기를
+         두 요청으로 나누면 그 사이에 한쪽만 끝난 상태가 남는다(넣었는데 안 빠졌거나
+         그 반대). 한 작품에 대해 한 번에 적으면 그런 자리가 없다. */
+      const from = typeof b.from === "string" && b.from !== into ? b.from : null;
+      let n = 0, moved = 0;
       for (const wid of new Set(want)) {
         const w = getWork(user.id, wid);          // 내 작품만 — 남의 것은 여기서 걸린다
-        if (!w || w.folders.includes(into)) continue;
-        setWorkFolders(user.id, wid, [...w.folders, into]);
+        if (!w) continue;
+        const had = w.folders.includes(into);
+        const next = (from ? w.folders.filter(x => x !== from) : [...w.folders]);
+        if (!had) next.push(into);
+        // 바뀌는 것이 없으면 건드리지 않는다 — 쓰지 않아야 last_at 도 안 흔들린다
+        if (had && next.length === w.folders.length) continue;
+        setWorkFolders(user.id, wid, next);
+        const now = getWork(user.id, wid)!.folders;
         // mayFile 이 막았으면 늘지 않는다 — 넣었다고 답하지 않으려고 다시 센다
-        if (getWork(user.id, wid)!.folders.includes(into)) n++;
+        if (!had && now.includes(into)) n++;
+        if (from && !now.includes(from)) moved++;
       }
-      json(res, 200, { ok: true, added: n });
+      json(res, 200, { ok: true, added: n, moved });
       return true;
     }
 

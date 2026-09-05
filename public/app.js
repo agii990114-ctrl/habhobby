@@ -898,6 +898,24 @@ const pickCardHtml = (w, attr, picked) => `<button class="work pick-work${picked
 
 const workPickCard = w => pickCardHtml(w, "data-wpick", workSel);
 
+/** 지금 **어느 폴더 안**에서 고르고 있는가. 폴더 밖(전체·페이지)에서는 null 이다.
+
+    이것이 「넣기」와 「옮기기」를 가른다 — 옮기려면 빼 올 자리가 있어야 하는데, 폴더 밖
+    에서는 그 자리가 없다. 🗂 전체와 🫙 미분류도 진짜 폴더가 아니라 빼 올 것이 없다.
+
+    고르는 범위 이름(workSelKey)이 이미 그 사실을 들고 있다 — 폴더 창이 "folder:<id>" 로
+    적어 두므로 따로 기억해 둘 것이 없다. */
+function pickingInFolder() {
+  const key = workSelKey ?? "";
+  if (!key.startsWith("folder:")) return null;
+  const id = key.slice("folder:".length);
+  if (id === "_all" || id === "_none") return null;
+  const f = folders.find(x => x.id === id);
+  if (!f) return null;
+  // 함께 쓰는 폴더는 작품이 **원본 폴더**에 걸려 있다 — 뺄 것도 그 id 다(pickerHtml 과 같다)
+  return { id: f.mirror ? f.mirror.folder : f.id, name: f.name, emoji: f.emoji };
+}
+
 /** 고르는 중이면 고르는 격자로, 아니면 여느 격자로 */
 const workGridHtml = (list, emptyMsg) => workSel
   ? (list.length ? `<div class="grid">${list.map(workPickCard).join("")}</div>`
@@ -937,7 +955,7 @@ const workBarHtml = any => {
       ${canTake.length ? `<button class="mini-btn on" data-wtake
         >${icon("plus")} 담아가기</button>` : ""}
       ${mine.length ? `<button class="mini-btn" data-wfolder
-        >${icon("inbox")} 폴더에 추가</button>
+        >${icon("inbox")} ${pickingInFolder() ? "폴더 이동" : "폴더에 추가"}</button>
       <button class="mini-btn" data-wbulk="watched"
         >${icon("check")} 보관</button>
       <button class="mini-btn danger" data-wbulk="dropped"
@@ -1022,23 +1040,39 @@ function wireWorkPick(box, redraw) {
     const list = [...workSel].map(id => works.find(w => w.id === id)).filter(w => w && !w.mirror);
     if (!list.length) return;
 
+    /* 폴더 안에서 고르는 중이면 **옮기는 것**이다 — 고른 폴더에 넣으면서 지금 폴더에서
+       뺀다. 폴더 밖(전체·페이지)에서는 뺄 자리가 없으니 그냥 넣는다. */
+    const src = pickingInFolder();
+
     const put = guard(async (fid, fname) => {
-      const { added } = await api("POST", `/api/folders/${fid}/works`, { works: list.map(w => w.id) });
+      const r = await api("POST", `/api/folders/${fid}/works`,
+        { works: list.map(w => w.id), ...(src ? { from: src.id } : {}) });
       workSel = null;
       await reload(); render(); redraw();
       /* 몇 편이 들었는지 그대로 말한다 — 이미 들어 있던 것이 섞여 있으면 고른 수와
          들어간 수가 다르다. "넣었습니다" 만 말하면 없는 편을 찾아 헤매게 된다. */
-      toast(added === list.length ? `${added}편을 «${fname}» 에 넣었습니다`
-        : added ? `${list.length}편 중 ${added}편만 들어갔습니다 — 나머지는 이미 있었습니다`
+      if (src) {
+        toast(r.moved === list.length ? `${r.moved}편을 «${fname}» 로 옮겼습니다`
+          : r.moved ? `${list.length}편 중 ${r.moved}편만 옮겼습니다`
+          : `옮길 것이 없습니다`);
+        return;
+      }
+      toast(r.added === list.length ? `${r.added}편을 «${fname}» 에 넣었습니다`
+        : r.added ? `${list.length}편 중 ${r.added}편만 들어갔습니다 — 나머지는 이미 있었습니다`
         : `이미 «${fname}» 에 다 들어 있습니다`);
     });
 
     const draw = () => {
-      const able = folders.filter(f => !f.mirror || f.canEdit);
+      /* 지금 보고 있는 폴더는 고를 것에서 뺀다 — 제자리로 옮기는 것은 아무 일도 아니고,
+         목록에 서 있으면 눌러 보고 나서야 그것을 안다. */
+      const able = folders.filter(f => (!f.mirror || f.canEdit)
+        && (!src || (f.mirror ? f.mirror.folder : f.id) !== src.id));
       openSheet(`
-        ${headHtml(`${list.length}편을 폴더에`, { back: true, actions: false,
-          sub: "넣을 폴더를 고르세요" })}
+        ${headHtml(src ? `${list.length}편을 옮기기` : `${list.length}편을 폴더에`,
+          { back: true, actions: false,
+            sub: src ? `«${esc(src.name)}» 에서 옮길 폴더를 고르세요` : "넣을 폴더를 고르세요" })}
         <div class="folders">
+          ${able.length ? "" : `<div class="empty">옮길 다른 폴더가 없습니다.<br>아래에서 새로 만들 수 있어요.</div>`}
           ${able.map(f => `<button class="folder" data-put="${esc(f.id)}">
             <div class="mini solo">${f.emoji || icon("inbox")}</div>
             <span class="txt"><b>${esc(f.name)}${f.mirror
@@ -1046,7 +1080,8 @@ function wireWorkPick(box, redraw) {
               worksIn(f.id).length}개</span></span></button>`).join("")}
           <button class="folder" data-put-new>
             <div class="mini solo">${icon("plus")}</div>
-            <span class="txt"><b>새 폴더에 넣기</b><span>만들면서 바로 넣습니다</span></span></button>
+            <span class="txt"><b>${src ? "새 폴더로 옮기기" : "새 폴더에 넣기"}</b><span>${
+              src ? "만들면서 바로 옮깁니다" : "만들면서 바로 넣습니다"}</span></span></button>
         </div>`, { over: redraw });
 
       wireHead({ save: () => {}, cancel: redraw });

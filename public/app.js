@@ -5191,18 +5191,16 @@ function openUnfiled() {
     pick.onclick = () => { ufSel = new Set(); openUnfiled(); };
     sheetAct(pick);
 
-    const wipe = actBtn(null, "전체 확인", "mini-btn");
+    /* **테마색으로 세운다.** 이 화면에 와서 가장 자주 하는 일이 「다 봤으니 비운다」이고,
+       위험한 일이 아니라 빨강도 아니다 — 「담아가기」와 같은 갈래의 단추다. */
+    const wipe = actBtn(null, "전체 확인", "mini-btn on");
     wipe.textContent = "전체 확인";
     wipe.onclick = guard(async () => {
-      /* **지우는 것이 아니라 이 목록에서만 빼는 것이다.** 여기는 「받아 두고 아직 안 본
-         것」을 모아 두는 자리라, 확인은 「봤다」는 표시다 — 콘텐츠는 목록에 그대로 있다.
-         한꺼번에 비우는 일이라 한 번 묻되, 되돌릴 수 없는 일이 아니므로 빨강이 아니다. */
-      const yes = await askSure({
-        danger: false,
-        title: "모두 확인할까요?", ok: "전체 확인", back: openUnfiled,
-        body: `${list.length}편을 이 목록에서 뺍니다. 콘텐츠는 지워지지 않고 목록에 그대로 남습니다.`,
-      });
-      if (!yes) return;
+      /* **되묻지 않는다.** 지우는 것이 아니라 이 목록에서만 빼는 것이라(filed) 콘텐츠는
+         목록에 그대로 있다 — 잘못 눌러도 잃는 것이 없다. 이 저장소는 되돌리기 어려운
+         일에만 묻는다(휴지통·영구 삭제는 묻고, 보관함의 복구는 안 묻는 것과 같은 잣대).
+         한 번 더 묻는 창은 「봤다」를 두 번 말하게 할 뿐이다. */
+      if (!list.length) return;
       for (const w of list) await api("PATCH", `/api/works/${w.id}`, { filed: true });
       ufSel = null;
       await reload(); render(); openUnfiled();
@@ -5212,6 +5210,16 @@ function openUnfiled() {
   }
 
   const box = sheet.querySelector(".uf-list");
+
+  /* **꾹 누르면 고르기로 들어간다** — 콘텐츠 격자·폴더 줄·보관함과 같은 손짓이다.
+     머리줄의 「선택」까지 손을 옮기지 않고 그 자리에서 시작할 수 있고, 누른 줄은
+     곧바로 골라진 채로 선다: 고르려고 누른 것이니 그것부터 켜 두는 것이 맞다. */
+  holdToPick(box, ".uf-item[data-uf]", row => {
+    if (!ufSel) ufSel = new Set();
+    ufSel.add(row.dataset.uf);
+    openUnfiled();
+  });
+
   box.addEventListener("click", e => {
     /* **그 줄만 뒤집는다.** 통째로 다시 그리면 짚고 있던 자리가 사라졌다 새로 생겨,
        훑으며 톡톡 짚을 때 두 번째부터 헛손질이 된다(보관함 카드와 같은 이야기). */

@@ -1979,7 +1979,18 @@ const server = createServer(async (req, res) => {
 
          안 통하면 안 통한다고 말해 준다. 브라우저 밖에서는 「조용히 아무 일도 안 일어남」이
          가장 고치기 어려운 고장이다 — 화면이 없으니 물어볼 데가 없다. */
+      /* **글로만 답하기.** 받는 쪽에 화면이 없으면 동작 하나가 곧 틀릴 자리 하나다 —
+         iOS 「단축어」에서 답을 받아 사전에서 값을 꺼내는 그 한 동작이 그렇다. fmt=text 면
+         띄울 한 줄만 글로 보낸다. 그러면 「보내고 → 알림」 두 동작으로 끝난다.
+         안드로이드 앱은 이 칸을 안 보내므로 지금처럼 JSON 을 받는다(open 이 필요하다). */
+      const asText = f.get("fmt") === "text";
+      const line = (code: number, msg: string) => {
+        res.writeHead(code, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end(msg);
+      };
+
       if (bearer && !byKey) {
+        if (asText) { line(401, "공유 열쇠가 맞지 않습니다"); return; }
         json(res, 401, { ok: false, reason: "공유 열쇠가 맞지 않습니다." });
         return;
       }
@@ -1998,6 +2009,7 @@ const server = createServer(async (req, res) => {
           ? `${r.title} — ${r.made ? "담았습니다" : "이미 있습니다"}`
           : r.kind === "ask" ? "제목을 읽지 못했습니다 — 앱에서 확인하세요"
             : "보낼 주소가 없습니다";
+        if (asText) { line(200, text); return; }
         json(res, 200, r.kind === "saved"
           ? { ok: true, saved: true, title: r.title, made: r.made, text }
           : { ok: true, saved: false, open: BASE_URL + (r.kind === "ask" ? ask : "/"), text });

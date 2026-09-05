@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="app_name">HabHobby</string>
+  <string name="share_label">HabHobby에 담기</string>
+
+  <string name="host" translatable="false">kim5ing.cloud</string>
+  <string name="launch_url" translatable="false">https://kim5ing.cloud/</string>
+  <string name="share_endpoint" translatable="false">https://kim5ing.cloud/share</string>
+
+  <!-- 주소창을 지워도 되는지 크롬이 이 값과 서버의 /.well-known/assetlinks.json 을
+       맞춰 본다. 한쪽만 고치면 앱이 「주소창 있는 브라우저」로 열린다. -->
+  <string name="asset_statements" translatable="false">
+    [{
+      \"relation\": [\"delegate_permission/common.handle_all_urls\"],
+      \"target\": { \"namespace\": \"web\", \"site\": \"https://kim5ing.cloud\" }
+    }]
+  </string>
+
+  <string name="setup_title">공유 열쇠</string>
+  <string name="setup_hint">hhk_ 로 시작하는 열쇠를 붙여 넣으세요</string>
+  <string name="setup_help">HabHobby 웹에서 설정 → 다른 앱에서 공유 → 공유 열쇠 에서 만든 값입니다. 이 기기에만 저장됩니다.</string>
+  <string name="setup_save">저장</string>
+</resources>

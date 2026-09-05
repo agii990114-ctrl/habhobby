@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "cloud.kim5ing.habhobby",
+      "sha256_cert_fingerprints": ["42:EF:62:5F:EC:AC:F6:0F:33:3E:89:DA:A9:C5:B6:DE:BE:0A:ED:21:70:42:3E:0F:9A:17:09:8B:F6:B6:55:90"]
+    }
+  }
+]

@@ -1,0 +1,4 @@
+// 뿌리에는 판 번호만 둔다 — 실제 설정은 app/build.gradle 에 있다.
+plugins {
+  id "com.android.application" version "8.3.2" apply false
+}

@@ -1,0 +1,9 @@
+# 이 파일을 keys.properties 로 복사해서 채운다. keys.properties 는 커밋하지 않는다.
+#
+# 서명 열쇠 — 없으면 서명하지 않은 apk 만 나온다(기기에 못 깐다).
+# 이 비밀번호를 잃어버리면 **같은 앱을 다시 업데이트할 수 없다.** 새 열쇠로 서명한 apk 는
+# 안드로이드가 다른 앱으로 보기 때문이다. 지우기 전에 옮겨 담을 것.
+storeFile=habhobby.jks
+storePassword=
+keyAlias=habhobby
+keyPassword=

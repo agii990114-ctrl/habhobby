@@ -1,0 +1,51 @@
+plugins { id "com.android.application" }
+
+/* 서명 열쇠와 그 비밀번호는 **저장소에 두지 않는다**(keys.properties, gitignore).
+   없으면 서명 설정을 아예 만들지 않는다 — 빈 비밀번호로 만들어 두면 빌드는 되고
+   서명만 조용히 안 되는데, 그 apk 는 기기에서 「패키지 파싱 오류」로만 보인다. */
+def keys = new Properties()
+def keysFile = rootProject.file("keys.properties")
+if (keysFile.exists()) keysFile.withInputStream { keys.load(it) }
+def hasSigning = keys.getProperty("storePassword") && rootProject.file(keys.getProperty("storeFile", "habhobby.jks")).exists()
+
+android {
+  namespace "cloud.kim5ing.habhobby"
+  compileSdk 34
+
+  defaultConfig {
+    applicationId "cloud.kim5ing.habhobby"
+    minSdk 21
+    targetSdk 34
+    versionCode 1
+    versionName "1.0"
+  }
+
+  if (hasSigning) {
+    signingConfigs {
+      release {
+        storeFile rootProject.file(keys.getProperty("storeFile", "habhobby.jks"))
+        storePassword keys.getProperty("storePassword")
+        keyAlias keys.getProperty("keyAlias", "habhobby")
+        keyPassword keys.getProperty("keyPassword", keys.getProperty("storePassword"))
+      }
+    }
+  }
+
+  buildTypes {
+    release {
+      minifyEnabled false
+      if (hasSigning) signingConfig signingConfigs.release
+    }
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+}
+
+dependencies {
+  /* TWA 의 전부가 이 하나에 들어 있다 — 크롬을 신뢰 모드로 띄우고, 안 되면 보통 탭으로
+     물러서는 일까지 이 라이브러리가 한다. 우리가 쓰는 코드는 공유 액티비티뿐이다. */
+  implementation "com.google.androidbrowserhelper:androidbrowserhelper:2.5.0"
+}

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <uses-permission android:name="android.permission.INTERNET"/>
+
+  <!-- 안드로이드 11+ 는 다른 앱이 보이지 않는다. 크롬을 띄워야 하므로 그것만 물어본다. -->
+  <queries>
+    <intent>
+      <action android:name="android.intent.action.VIEW"/>
+      <category android:name="android.intent.category.BROWSABLE"/>
+      <data android:scheme="https"/>
+    </intent>
+  </queries>
+
+  <application
+      android:allowBackup="false"
+      android:icon="@mipmap/ic_launcher"
+      android:label="@string/app_name"
+      android:supportsRtl="true"
+      android:theme="@style/Theme.App">
+
+    <meta-data android:name="asset_statements" android:resource="@string/asset_statements"/>
+
+    <!-- 앱의 알맹이. 우리가 짠 화면이 아니라 **크롬이 그대로 그린다** — 그래서 웹에서 한
+         로그인이 여기서도 그대로다. 우리가 여기에 보태는 코드는 한 줄도 없다. -->
+    <activity
+        android:name="com.google.androidbrowserhelper.trusted.LauncherActivity"
+        android:exported="true"
+        android:label="@string/app_name">
+      <meta-data android:name="android.support.customtabs.trusted.DEFAULT_URL"
+                 android:value="@string/launch_url"/>
+      <meta-data android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR"
+                 android:resource="@color/colorPrimary"/>
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+      <!-- 이 주소는 이 앱이 연다. autoVerify 가 assetlinks 를 확인하고, 통과해야
+           주소창이 사라진다 — 통과 못 하면 그냥 브라우저 탭이 된다(앱이 죽지는 않는다). -->
+      <intent-filter android:autoVerify="true">
+        <action android:name="android.intent.action.VIEW"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="https" android:host="@string/host"/>
+      </intent-filter>
+    </activity>
+
+    <!-- 공유 시트에 서는 자리. **창을 띄우지 않는다**(Theme.Invisible) — 이 앱을 만드는
+         까닭이 그것이다. noHistory·excludeFromRecents 로 최근 목록에도 남기지 않는다:
+         화면이 없는 것을 뒤로가기로 되돌릴 수는 없다. -->
+    <activity
+        android:name=".ShareActivity"
+        android:exported="true"
+        android:label="@string/share_label"
+        android:theme="@style/Theme.Invisible"
+        android:excludeFromRecents="true"
+        android:noHistory="true"
+        android:taskAffinity="">
+      <intent-filter>
+        <action android:name="android.intent.action.SEND"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <data android:mimeType="text/plain"/>
+      </intent-filter>
+    </activity>
+
+    <!-- 열쇠를 넣는 화면. 공유를 처음 눌렀을 때 열쇠가 없으면 여기로 보낸다. -->
+    <activity
+        android:name=".SetupActivity"
+        android:exported="false"
+        android:label="@string/setup_title"/>
+  </application>
+</manifest>

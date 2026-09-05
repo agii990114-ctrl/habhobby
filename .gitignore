@@ -5,3 +5,12 @@
 data/
 
 node_modules/
+
+# 안드로이드 앱 — 서명 열쇠와 빌드 찌꺼기
+android/local.properties
+android/keys.properties
+android/*.jks
+android/*.keystore
+android/.gradle/
+android/build/
+android/app/build/

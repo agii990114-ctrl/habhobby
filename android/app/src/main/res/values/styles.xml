@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <style name="Theme.App" parent="android:Theme.DeviceDefault.Light.NoActionBar"/>
+
+  <!-- 공유 액티비티는 **화면을 만들지 않는다.** 창이 뜨면 그 순간 앱으로 넘어간 것처럼
+       보이는데, 창을 없애려고 이 앱을 만드는 것이다. 알림은 토스트로만 낸다. -->
+  <style name="Theme.Invisible" parent="android:Theme.Translucent.NoTitleBar">
+    <item name="android:windowNoDisplay">true</item>
+  </style>
+</resources>

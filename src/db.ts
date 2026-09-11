@@ -550,6 +550,91 @@ once(6, () => {
     WHERE display_name IS NOT NULL AND TRIM(display_name) <> ''`);
 });
 
+/* 작품 하나를 url(공용)과 work(내 것)로 가른다.
+
+   **자리는 여기, once(6) 바로 뒤다.** once() 는 「이 판까지 끝났으면 건너뛴다」라서, 번호가
+   파일 안에서 차례대로 서 있어야 한다. 한때 이 블록이 맨 끝(12 뒤)에 있었는데, 그러면
+   판 6 짜리 파일에서 once(8) 이 먼저 돌아 판을 8 로 올려 버리고, 정작 표를 새 모양으로
+   바꾸는 이 이관은 「이미 지난 판」이 되어 영영 건너뛰어졌다. 옛 표 그대로 once(10) 이
+   url_id 를 짚다 터졌다 — 판 7 미만 백업은 되살려도 서버가 안 떴다.
+
+   **옛 줄을 옮긴다.** 한때 이 이관은 줄이 남아 있으면 「손대지 않는다」며 물러났다. 그런데
+   once() 는 물러난 줄을 모르고 판 번호를 7 로 올렸고, 그다음 이관이 옛 표에서 터졌다.
+   멈추려던 빗장이 멈추지 못한 것이다. 이제는 물러나지 않고 옮긴다:
+
+     · url 줄은 (platform_id, series_id) 하나에 하나. 먼저 나온 줄의 값으로 세운다.
+     · work 는 제 아이디를 그대로 지닌다 — work_folder · work_seen 이 그 아이디를 가리킨다.
+     · 제목·표지·회차는 url 과 **다를 때만** 덮어쓰기로 남긴다(takeWork 와 같은 규칙).
+
+   **앱 함수를 부르지 않는다.** findOrMakeUrl · newId 는 이 파일 아래쪽에서 정의되어 여기서는
+   아직 쓸 수 없고(const 는 선언 전에 못 부른다), 무엇보다 이관은 **그때의 모양으로 얼려
+   둬야** 한다. 앱 함수는 앞으로도 바뀌는데, 바뀐 함수가 옛 이관을 조용히 다르게 만들면
+   안 된다. SQL 로 직접 쓴다.
+
+   **옮기는 차례는 SQLite 의 공식 절차를 따른다** — 새 표를 만들어 옮기고, 옛 표를 지우고,
+   새 표의 이름을 바꾼다. 옛 표의 이름을 먼저 바꾸면(RENAME work → work_old) SQLite 3.26
+   부터는 work_folder 의 REFERENCES work 까지 work_old 로 따라 바뀌고, 옛 표를 지운 뒤에는
+   아무것도 안 가리키는 참조가 남는다. */
+once(7, () => {
+  const has = (t: string) =>
+    !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(t);
+  if (!has("work")) return;
+  const cols = (db.prepare("PRAGMA table_info(work)").all() as { name: string }[]).map(c => c.name);
+  if (cols.includes("url_id")) return;                    // 이미 새 모양이다
+
+  const rows = db.prepare("SELECT * FROM work ORDER BY added_at, id").all() as any[];
+  db.exec("PRAGMA foreign_keys = OFF");                   // 트랜잭션 밖에서만 바꿀 수 있다
+  db.exec("BEGIN");
+  try {
+    db.exec(SCHEMA_WORK.replace("EXISTS work (", "EXISTS work_new ("));
+    const findUrl = db.prepare(`SELECT id, title, cover_url, cover_aspect, episode
+      FROM url WHERE platform_id = ? AND series_id = ?`);
+    const insUrl = db.prepare(`INSERT INTO url
+      (id, platform_id, series_id, list_url, app_url, media_type, title, description,
+       cover_url, cover_aspect, episode, fetched_at)
+      VALUES (?,?,?,?,?,?,?,NULL,?,?,?,?)`);
+    const insWork = db.prepare(`INSERT INTO work_new
+      (id, user_id, url_id, platform_id, title, description, cover_url, cover_aspect, episode,
+       state, filed, visits, last_at, added_at, sched_mode, sched_days, sched_next,
+       sched_source, sched_from, rating, state_at, color)
+      VALUES (?,?,?,?,?,NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    // url 과 같으면 NULL(= url 것을 쓴다), 다르면 제 값을 덮어쓰기로 남긴다
+    const own = (mine: any, base: any) => (mine ?? null) === (base ?? null) ? null : (mine ?? null);
+    let made = 0;
+    for (const r of rows) {
+      let u = findUrl.get(r.platform_id, r.series_id) as any;
+      if (!u) {
+        const id = "um" + randomBytes(6).toString("hex");
+        insUrl.run(id, r.platform_id, r.series_id, r.list_url, r.app_url ?? null,
+          r.media_type ?? "link", r.title, r.cover_url ?? null, r.cover_aspect ?? null,
+          r.episode ?? null, r.added_at ?? Date.now());
+        u = { id, title: r.title, cover_url: r.cover_url ?? null,
+              cover_aspect: r.cover_aspect ?? null, episode: r.episode ?? null };
+        made++;
+      }
+      insWork.run(r.id, r.user_id, u.id, r.platform_id,
+        own(r.title, u.title), own(r.cover_url, u.cover_url),
+        own(r.cover_aspect, u.cover_aspect), own(r.episode, u.episode),
+        r.state ?? "active", r.filed ?? 0, r.visits ?? 0, r.last_at, r.added_at,
+        r.sched_mode ?? "unknown", r.sched_days ?? "[]", r.sched_next ?? null,
+        r.sched_source ?? "auto", r.sched_from ?? null, r.rating ?? null,
+        r.state_at ?? null, r.color ?? null);
+    }
+    db.exec("DROP TABLE work");
+    db.exec("ALTER TABLE work_new RENAME TO work");
+    db.exec("COMMIT");
+    console.log(`  url / work 로 갈랐습니다 — 작품 ${rows.length}편 · 공용 url ${made}줄`);
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;                                              // 반쯤 옮긴 채로 판을 올리지 않는다
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
+  // 옮긴 뒤 참조가 온전한지 — 끊긴 줄이 있으면 말해 둔다
+  const broken = (db.prepare("PRAGMA foreign_key_check").all() as any[]).length;
+  if (broken) console.log(`  ⚠ 옮긴 뒤 참조가 끊긴 줄 ${broken}개`);
+});
+
 /* 퍼가기 갈래를 「하나 고르기」에서 「셋을 켜고 끄기」로 옮긴다.
 
    옛 값은 다섯이었고 새 값은 쉼표로 이은 집합이다. 「둘 다」는 둘을 켜면 되고,
@@ -674,34 +759,6 @@ once(12, () => {
     }
   }
   if (n) console.log(`  살아 있는 줄과 보관 줄을 한 줄로: ${n}줄 거둠`);
-});
-
-/* 작품 하나를 url(공용)과 work(내 것)로 가른다.
-
-   **옛 줄은 옮기지 않는다.** 이 이관을 하기 전에 계정을 전부 비웠고(가입 0명), 옮길
-   값이 없다. 옛 표를 그대로 두면 위의 CREATE TABLE IF NOT EXISTS 가 아무 일도 안 해서
-   옛 모양이 살아남는다 — 그래서 버리고 다시 세운다.
-
-   **줄이 남아 있으면 손대지 않는다.** 혹시 데이터가 든 파일에서 이 코드가 돌면 말없이
-   지우는 것보다 멈추는 편이 낫다. */
-once(7, () => {
-  const has = (t: string) =>
-    !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(t);
-  if (!has("work")) return;
-  const cols = (db.prepare("PRAGMA table_info(work)").all() as { name: string }[]).map(c => c.name);
-  if (cols.includes("url_id")) return;                    // 이미 새 모양이다
-
-  const n = (db.prepare("SELECT COUNT(*) c FROM work").get() as { c: number }).c;
-  if (n > 0) {
-    console.log(`  ⚠ work 에 ${n}줄이 남아 있어 url/work 가르기를 건너뜁니다.`);
-    console.log("    비운 뒤 다시 켜거나, 옮기는 코드를 손으로 써 주세요.");
-    return;
-  }
-  db.exec("PRAGMA foreign_keys = OFF");
-  db.exec("DROP TABLE work");
-  db.exec(SCHEMA_WORK);
-  db.exec("PRAGMA foreign_keys = ON");
-  console.log("  url / work 로 갈랐습니다");
 });
 
 /* work 의 색인은 **이관이 끝난 뒤에** 만든다. 켤 때 도는 스키마 블록에서 만들면

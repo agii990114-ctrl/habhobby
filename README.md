@@ -1,6 +1,6 @@
 # HabHobby
 
-**One list for everything you watch and read — webtoons, dramas, films, anime — no matter which platform it lives on.**
+**Save a link from any site with one tap, keep it in one place, and use it together with friends.**
 
 Live at [kim5ing.cloud](https://kim5ing.cloud) · 95 commits · 2026-09-01 → 2026-09-11 · zero runtime dependencies
 
@@ -9,64 +9,91 @@ Live at [kim5ing.cloud](https://kim5ing.cloud) · 95 commits · 2026-09-01 → 2
 ## 1. Topic
 
 ### The problem
-A typical viewer follows series across a dozen services: Naver Webtoon, Kakao Page,
-Netflix, Laftel, TVING, Ridi, blogs… Each app remembers where you left off, but only
-inside itself. There is no single place that answers *"what am I following, and
-what's out today?"*
+The things we want to come back to are scattered. A webtoon on one app, a series on
+Netflix, a blog post, a page a friend dropped in a chat. Browser bookmarks stay on
+one device and one person. Links sent in messages scroll away. Each app remembers
+its own list — only inside itself.
 
 ### The idea
-HabHobby is a **launcher, not a tracker.** It does not record "episode 16" — every
-platform already does that better. It gathers the scattered lists into one screen,
-and a tap sends you **back to the platform**, where its own "continue watching"
-takes over.
+HabHobby is a **launcher for links.** Share a page from any app or site, and it
+becomes a card with that site's own title, cover, name and logo. Cards are grouped by
+site, filed into folders, and — for things that update on a schedule — placed on a
+calendar. A tap sends you **back to the original**, in its app or on the web.
+
+It started with series people follow (webtoons, dramas, anime), and that is still
+where it goes deepest. But nothing about it is limited to media.
+
+### What makes it different
+- **Works with any site.** Eleven platforms are understood at the series level
+  (Naver Webtoon, Kakao Page, Netflix, Laftel, TVING, Ridi, Naver Blog, Tistory, …).
+  **Every other site works too**: it is recognised by its domain automatically, with
+  the site's own name and logo — no setup, no list to maintain.
+- **Built to be shared.** Links become something you use *with* people, not a
+  private bookmark pile. Share a folder so friends can copy it, follow it as you
+  update it, or build it with you.
+- **One tap to add.** From the share sheet on Android, iOS, or the installed web app.
+- **The original stays the source.** Progress, content and images stay on the
+  original site. HabHobby links to them; it never copies them.
+
+### What people can do with it
+- Follow webtoons, dramas and novels across different platforms on one calendar.
+- Keep a reading list of blog posts and articles from anywhere.
+- Build a folder of study links, restaurants or trip ideas **together** with friends.
+- Follow a friend's recommendations as a live folder that updates when they do.
 
 ### Design principles
 | | Principle | What it means in practice |
 | --- | --- | --- |
-| **P1** | **Register with the share button** | No official APIs exist. Adding a title is one tap on "Share → HabHobby". No account linking, no session scraping — only the public link preview (Open Graph). |
-| **P2** | **Link to the series, not the episode** | The series ID is extracted from the shared URL and rebuilt into the series page URL, which is more stable than episode URLs. |
-| **P3** | **Delegate progress to the platform** | Sending the user to the series page lets the platform show its own resume point. |
-| **P4** | **Uneven coverage is a premise, not a bug** | Every feature must work when information is missing: unknown URLs group by domain, titles without a schedule appear as "no schedule". |
+| **P1** | **Add with the share button** | Adding is one tap on "Share → HabHobby". No account linking, no scraping behind logins — only what the page publishes for link previews (Open Graph). |
+| **P2** | **Point at the stable page** | For known platforms, the series ID is pulled from the shared URL and rebuilt into the series page, which outlives episode URLs. Any other page is kept as it is. |
+| **P3** | **The original site is the source of truth** | Progress, content and images stay where they are. Sending you back to the page lets the site show its own "continue" point. |
+| **P4** | **Uneven information is a premise, not a bug** | Sites expose different things, and that changes over time. Every feature works with whatever is available: unknown sites group by domain, items without a schedule still appear. |
 
 ---
 
 ## 2. What was built
 
-### Core experience
-- **Calendar** — weekly and monthly views of what updates when, plus side lists for
-  upcoming releases and titles without a date.
-- **Pages** — one horizontal rail per platform, ordered by what you opened last; a
-  platform index; merge or split domains into your own groupings.
-- **Folders** — organise titles your way, with an icon or a name as the folder's face.
-- **Archive & Trash** — finished and dropped titles. The archive has its own folders
-  and sort tabs; both support long-press multi-select and bulk actions.
-- **Search** across everything; **themes** with contrast-checked accent colours;
-  open titles in the platform app or on the web.
-
-### Adding titles — three entry points, one rule
+### Adding links — any site, three entry points, one rule
 - **Web share target** (installed PWA) → `POST /share`
 - **Android app** — a Trusted Web Activity plus a native share activity
 - **iOS Shortcuts** — calling the same endpoint with a device key
+- Or type an item in by hand, with no link at all.
 
-All three go through one server function (`intakeShared`). A device **share key**
-(`hhk_…`) can only add URLs; it cannot read or change anything else.
+All three share paths go through one server function (`intakeShared`), so a link is
+handled the same way whichever device it came from. A device **share key** (`hhk_…`)
+can only add links; it cannot read or change anything else.
 
-When a URL arrives, the server identifies the platform and series, reads the page
-**once**, and stores it in a shared `url` table. The next person who adds the same
-title reuses that row — no second request to the site. Dead links (404/410, redirected
-to the home page, generic landing pages) are rejected before saving.
+When a link arrives, the server works out which site it belongs to — a known
+platform and series, or simply its domain — reads the page **once**, and stores it in
+a shared `url` table. The next person who saves the same page reuses that row, so the
+site is not asked twice. Dead links (404/410, redirects to the home page, generic
+landing pages, domains that don't exist) are rejected before saving.
 
-### Social
-- **Friends** via invite links.
-- **Folder sharing, decided when the folder is created:**
-  - **Regular folder** — friends can *clone* it (take a copy) and/or *mirror* it
-    (follow your changes live), with a single audience setting.
-  - **Shared folder** — invited friends add and remove titles together.
+### Sharing with friends
+- **Friends** join through invite links.
+- **See a friend's folders** and take individual links, or a whole selection, into
+  your own list.
+- **Folder sharing is decided when the folder is created**, so it can't drift later:
+  - **Regular folder** — friends can **clone** it (take a copy that is theirs) and/or
+    **mirror** it (see your changes as you make them), with one audience setting:
+    all friends or chosen friends.
+  - **Shared folder** — invited friends add and remove links **together**.
 
-  The kind cannot be changed afterwards, so a shared folder can never quietly
-  become a public one.
-- Per-viewer personalisation: rename or re-icon a mirrored folder without affecting
-  the owner.
+  A shared folder can never quietly become a public one.
+- **Personal view of shared things.** Rename or re-icon a folder you mirror without
+  changing it for the owner. Editing a link's title in your list never changes anyone
+  else's.
+
+### Organising
+- **Pages** — one horizontal rail per site, ordered by what you opened last; a site
+  index; merge or split domains into your own groupings.
+- **Folders** — your own groupings, with an icon or a name as the folder's face.
+- **Calendar** — weekly and monthly views for things that update on a schedule, plus
+  lists of upcoming items and items without a date.
+- **Archive & Trash** — finished and dropped items. The archive has its own folders
+  and sort tabs; both support long-press multi-select and bulk actions.
+- **Search** across everything; **themes** with contrast-checked accent colours; open
+  links in the site's app or on the web.
 
 ### Accounts
 - ID/password login and a guest mode. OAuth (Kakao, Naver, Google) is implemented
@@ -74,8 +101,8 @@ to the home page, generic landing pages) are rejected before saving.
 
 ### Operations
 - Self-hosted on a home PC in Docker, published through a Cloudflare Tunnel.
-- A background job refreshes expiring CDN cover URLs (every 6 h, entries older than
-  3 days, 40 per run, 1.5 s apart). Covers are **linked, never copied**.
+- A background job refreshes expiring CDN image URLs (every 6 h, entries older than
+  3 days, 40 per run, 1.5 s apart). Images are **linked, never copied**.
 - 12 numbered schema migrations. All 22 existing backups were restored and booted as a
   test; 21 start cleanly.
 
@@ -118,7 +145,7 @@ flowchart LR
     N[habhobby<br/>Node 24 · node:http]
     D[(SQLite<br/>data/habhobby.db)]
   end
-  P[Platform sites<br/>Open Graph]
+  P[Any website<br/>Open Graph · site name · logo]
 
   B -- HTTPS --> E
   A -- "Bearer hhk_…" --> E
@@ -126,7 +153,7 @@ flowchart LR
   E <--> T
   T -- "http://habhobby:8080" --> N
   N <--> D
-  N -- "read once per title" --> P
+  N -- "read once per link" --> P
 ```
 
 - The tunnel connects **outward** to Cloudflare; the router has no port forwarding.
@@ -145,8 +172,9 @@ request
 ```
 
 ### Data model
-The central decision is separating **what a title is** (shared by everyone) from
-**how a person keeps it** (private to them).
+The central decision is separating **what a link is** (shared by everyone) from
+**how a person keeps it** (private to them). That split is also what makes sharing
+cheap: when friends save or mirror the same page, they all point at one `url` row.
 
 ```mermaid
 erDiagram
@@ -161,7 +189,7 @@ erDiagram
   USER ||--o{ SESSION : "signs in with"
 
   URL {
-    text platform_id
+    text platform_id "known platform, or domain"
     text series_id "unique with platform_id"
     text title
     text cover_url
@@ -177,11 +205,11 @@ erDiagram
   }
 ```
 
-- A title is shown as `COALESCE(work.title, url.title)`: editing your copy never
+- An item is shown as `COALESCE(work.title, url.title)`: editing your copy never
   changes anyone else's.
 - A partial unique index (`WHERE state <> 'dropped'`) allows **one row per person per
-  title** outside the trash: a title is either in your list or in your archive, never
-  both. The trash may hold several, because dropping the same title twice can be two
+  link** outside the trash: an item is either in your list or in your archive, never
+  both. The trash may hold several, because dropping the same thing twice can be two
   separate decisions.
 - Schema changes run as numbered migrations (`once(n)`), written as frozen SQL.
 
@@ -215,4 +243,4 @@ erDiagram
 | Tooling | **Shell heredocs collapsed `\\` into `\`**, producing regexes that matched nothing. | When a result looks too good or too bad, suspect the tool first. |
 
 **Still open:** backups share a disk with the live database; Cloudflare's managed
-`robots.txt` overrides the repository's; uploaded cover URLs are guessable.
+`robots.txt` overrides the repository's; uploaded image URLs are guessable.

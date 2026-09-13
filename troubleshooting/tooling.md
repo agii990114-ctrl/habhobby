@@ -9,7 +9,8 @@ knowing before debugging anything here.
 ## A crashed edit script truncated README.md
 
 - **Date:** 2026-09-02 · **Fix:** `de2d1c7`
-- **Symptom:** A commit deleted 2,157 lines of README.md.
+- **Symptom:** A commit deleted 2,157 lines of README.md — the Korean design log,
+  renamed to `PROJECT.md` on 2026-09-13.
 - **Cause:** An edit script opened the file for writing, then died on an encoding
   error, leaving a half-written file that was committed.
 - **Fix:** Restored from the previous revision.

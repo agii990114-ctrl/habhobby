@@ -69,7 +69,7 @@ second workstation.
 - **Covers from other sites blocked by hotlink protection** — no-referrer
 
 ### [Tooling & testing](tooling.md)
-- **A crashed edit script truncated README.md** — `de2d1c7`
+- **A crashed edit script truncated README.md** (the Korean design log, now `PROJECT.md`) — `de2d1c7`
 - **Shell heredocs collapse `\\` into `\`**
 - **`node -e "…"` inside Bash eats quotes and backticks**
 - **A NUL byte made grep treat a source file as binary** — `c4de7d9`

@@ -2279,7 +2279,21 @@ const server = createServer(async (req, res) => {
 
     if (url.pathname.startsWith("/api/")) {
       const user = currentUser(req);
-      if (!user) { json(res, 401, { ok: false, reason: "로그인이 필요합니다." }); return; }
+      if (!user) {
+        /* 쿠키가 남아 있는데 세션이 없다 — 서버가 지웠거나(비밀번호 변경·계정 정리) 만료된 것이다.
+           **죽은 쿠키도 함께 걷는다.** 안 걷으면 브라우저가 계속 그것을 들고 와 같은 길을 되풀이한다.
+           화면은 이 401 을 보고 로그인 화면으로 넘어간다(app.js 의 api). */
+        const stale = !!readCookie(req.headers.cookie, COOKIE);
+        const payload = JSON.stringify({ ok: false, reason: "로그인이 필요합니다." });
+        res.writeHead(401, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Content-Length": Buffer.byteLength(payload),
+          "Cache-Control": "no-store",
+          ...(stale ? { "Set-Cookie": cookieHeader("", 0) } : {}),
+        });
+        res.end(payload);
+        return;
+      }
 
       if (url.pathname === "/api/account" && req.method === "DELETE") {
         deleteUser(user.id);

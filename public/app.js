@@ -16,9 +16,24 @@ async function api(method, path, body) {
       body: body ? (raw ? body : JSON.stringify(body)) : undefined,
     });
     const data = await res.json().catch(() => ({}));
+    /* **로그인이 풀렸으면 화면도 로그아웃시킨다.** 다른 기기에서 비밀번호를 바꿨거나 계정이 정리되어
+       세션이 죽었는데, 열려 있던 앱은 그것을 모르고 로그인한 모양 그대로 서 있었다 — 무엇을 눌러도
+       「로그인이 필요합니다」만 뜨고 화면은 그대로였다. 로그인·가입 길(/auth/)의 401 은 「비밀번호가
+       틀렸다」이므로 여기서 다루지 않는다. */
+    if (res.status === 401 && !path.startsWith("/auth/")) sessionLost();
     if (!res.ok) throw new Error(data.reason || `요청 실패 (${res.status})`);
     return data;
   } finally { busy(false); }
+}
+
+let lostShown = false;
+async function sessionLost() {
+  if (lostShown) return;                     // 한꺼번에 여러 요청이 401 을 받아도 한 번만
+  lostShown = true;
+  let providers = [];
+  try { providers = (await (await fetch("/api/auth/providers")).json()).providers ?? []; } catch { /* 로그인 화면은 제공자 없이도 선다 */ }
+  try { hideSheet(); closeDrawer(); } catch { /* 열린 것이 없다 */ }
+  showLogin(providers, "로그인이 풀렸습니다. 다시 로그인해 주세요.");
 }
 
 /* ── 기다리는 중 ──────────────────────────────────────────

@@ -1585,6 +1585,22 @@
     .busy::before { animation: none; transform: none; opacity: .55; }
   }
 
+  /* 아래로 당겨 새로고침 (설치한 iOS 웹앱) — app.js 의 #ptr */
+  #ptr {
+    position: fixed; top: calc(env(safe-area-inset-top, 0px) + 6px); left: 50%; z-index: 9;
+    width: 34px; height: 34px; margin-left: -17px; border-radius: 50%;
+    display: grid; place-items: center; pointer-events: none; opacity: 0;
+    background: var(--surface); border: 1px solid var(--line-2); box-shadow: var(--shadow);
+  }
+  #ptr i {
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 2px solid var(--line-2); border-top-color: var(--accent);
+    transition: transform .15s;
+  }
+  #ptr.ready i { transform: scale(1.12); border-color: var(--accent); border-top-color: var(--accent-ink); }
+  #ptr.spin i { animation: ptr-spin .7s linear infinite; }
+  @keyframes ptr-spin { to { transform: rotate(360deg) } }
+
   /* 오류·결과 알림 */
   .toast {
     position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);

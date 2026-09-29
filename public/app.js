@@ -94,7 +94,13 @@ let siteNamesPending = 0;
     첫 화면이 그만큼 늦어지고, 다른 하나는 순서다 — 나중에 걷으면 방금 받아 온 목록에는
     걷힌 것이 그대로 남아, 새로 고쳤는데 안 없어진 것처럼 보인다. */
 async function reload(fresh = false) {
-  const s = await api("GET", "/api/state" + (fresh ? "?fresh=1" : ""));
+  applyState(await api("GET", "/api/state" + (fresh ? "?fresh=1" : "")));
+}
+
+/** 받아 온 상태를 쥐고 있는 값들에 옮긴다. 가져오는 일(reload · syncState)과 갈라 둔 까닭은
+    가져온 것을 **적용하기 전에 견줘 볼 수 있어야** 하기 때문이다 — syncState 가 그렇게 한다. */
+function applyState(s) {
+  syncSig = JSON.stringify(s); syncedAt = Date.now();
   works = s.works; folders = s.folders; settings = s.settings;
   archFolders = s.archFolders ?? [];
   /* **내가 다 본 주소들.** 배지가 이것을 짚는다 — 남의 작품이라도 주소가 같으면
@@ -110,6 +116,93 @@ async function reload(fresh = false) {
   followLists = null;          // 팔로우도 같다
   siteNamesPending = s.siteNamesPending ?? 0;
   applyTheme(settings.themeColor);
+}
+
+/* ── 돌아왔을 때 다시 읽는다 ─────────────────────────────────
+   홈 화면에 설치한 웹앱에는 새로고침 단추가 없다. 게다가 다른 앱으로 갔다 돌아와도 **페이지는
+   떠날 때 그대로 얼려 있다** — 그 사이 공유 시트나 단축어로 담은 것, 친구가 바꾼 폴더가 화면에
+   없다. 앱을 완전히 끄고 다시 켜야 보였다.
+
+   그래서 화면이 다시 보이는 순간(visibilitychange · pageshow · focus)에 상태를 새로 받는다.
+   세 이벤트가 한꺼번에 오므로 3초 안의 되풀이는 무시한다. 받은 것이 지금과 같으면 **다시
+   그리지 않는다** — 돌아올 때마다 가로 목록이 맨 앞으로 튀면 안 된다.
+
+   **하던 일을 끊지 않는다.** 창이 떠 있거나, 고르는 중이거나, 글을 치는 중이면 그 위에
+   화면을 다시 그릴 수 없다 — 「밀려 있음」으로만 적어 두고, 창이 닫힌 뒤에 다시 시도한다. */
+let syncSig = "", syncedAt = 0, syncing = false, syncLater = false;
+
+/** 지금 화면을 다시 그리면 하던 일이 끊기는가 */
+const busyNow = () => !back.hidden || !drawerBack.hidden || !!workSel || !!folderSel
+  || !!document.activeElement?.matches?.("input, textarea, select, [contenteditable]");
+
+/** 창이 닫힌 뒤에 밀려 있던 것을 마저 한다 — 닫는 길이 여럿이라 한 곳에서 부른다 */
+const syncSoon = () => { if (syncLater) setTimeout(() => syncState(), 400); };
+
+/** 서버의 지금 상태로 화면을 맞춘다. `manual` 은 사람이 누른 것 — 조건을 따지지 않고 결과를 알린다. */
+async function syncState({ manual = false } = {}) {
+  if (!me || syncing) return;
+  if (!manual) {
+    if (document.visibilityState !== "visible") return;
+    if (Date.now() - syncedAt < 3000) return;
+    if (busyNow()) { syncLater = true; return; }
+  }
+  syncing = true;
+  try {
+    const s = await api("GET", "/api/state");
+    if (JSON.stringify(s) === syncSig) {
+      syncedAt = Date.now(); syncLater = false;
+      if (manual) toast("이미 최신입니다");
+      return;
+    }
+    // 기다리는 사이 무언가 열렸을 수 있다 — 그 위에는 그리지 않는다
+    if (!manual && busyNow()) { syncLater = true; return; }
+    applyState(s); render(); syncLater = false;
+    if (manual) toast("새로고침했습니다");
+  } catch (e) {
+    // 자동일 때는 조용히 넘어간다 — 지하철에서 돌아왔는데 오류 창이 뜰 일이 아니다
+    if (manual) toast(e.message || "새로고침하지 못했습니다");
+  } finally { syncing = false; }
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) syncState(); });
+addEventListener("pageshow", () => syncState());
+addEventListener("focus", () => syncState());
+addEventListener("online", () => syncState());
+
+/* 아래로 당겨 새로고침 — **설치한 iOS 웹앱에서만** 켠다. 사파리 탭과 안드로이드에는 브라우저의
+   것이 이미 있어서, 여기서 또 달면 두 번 새로고침된다. 맨 위에서 시작한 세로 끌기만 받고,
+   창이 떠 있거나 고르는 중이면 받지 않는다. */
+{
+  const ind = document.createElement("div");
+  ind.id = "ptr"; ind.setAttribute("aria-hidden", "true"); ind.innerHTML = "<i></i>";
+  document.body.append(ind);
+  const AT = 70;
+  let y0 = 0, x0 = 0, dy = 0, live = false;
+  const hide = () => { ind.style.opacity = "0"; ind.style.transform = ""; ind.classList.remove("ready"); };
+  const ready = () => navigator.standalone === true && window.scrollY <= 0 && !!me && !busyNow();
+  addEventListener("touchstart", e => {
+    live = ready() && e.touches.length === 1;
+    if (live) { y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; dy = 0; }
+  }, { passive: true });
+  addEventListener("touchmove", e => {
+    if (!live) return;
+    const t = e.touches[0];
+    dy = t.clientY - y0;
+    // 가로로 훑거나 위로 올리면 이 손짓이 아니다
+    if (dy <= 0 || Math.abs(t.clientX - x0) > Math.abs(dy) || window.scrollY > 0) { live = false; hide(); return; }
+    ind.style.opacity = String(Math.min(1, dy / AT));
+    ind.style.transform = `translateY(${Math.min(dy * 0.5, 56)}px)`;
+    ind.classList.toggle("ready", dy >= AT);
+  }, { passive: true });
+  const end = async () => {
+    if (!live) return;
+    live = false;
+    if (dy < AT) { hide(); return; }
+    ind.classList.add("spin");
+    await syncState({ manual: true });
+    ind.classList.remove("spin"); hide();
+  };
+  addEventListener("touchend", end);
+  addEventListener("touchcancel", () => { live = false; hide(); });
 }
 
 /** 친구 목록을 (아직 없으면) 불러온다. 한 번 부르면 다음 reload() 까지 들고 있는다. */
@@ -2688,6 +2781,7 @@ function hideSheet() {
   sheet.className = "sheet";
   sheet.style.transform = ""; sheet.style.transition = "";
   sheet.innerHTML = "";
+  syncSoon();
 }
 
 const closeSheet = () => {
@@ -6729,6 +6823,7 @@ const drawerBack = document.getElementById("drawer-back");
 const closeDrawer = () => {
   if (!drawerBack.hidden) lockScroll(false);
   drawerBack.hidden = true;
+  syncSoon();
 };
 
 /* 화면이 넓으면 앱 카드 바깥에 여백이 생긴다. 검은 바탕은 카드 안에만 깔리므로
@@ -6846,6 +6941,9 @@ function openGuestWall() {
       || `<div class="empty">이 서버에는 로그인이 설정되어 있지 않습니다.</div>`;
   }).catch(e => toast(e.message));
 }
+/* 새로고침 단추 — 설치한 앱에는 브라우저의 것이 없다. 서랍을 닫고 받는다 (열린 채로는 그 뒤가
+   다시 그려져도 보이지 않는다). */
+document.getElementById("menu-refresh").onclick = () => { closeDrawer(); syncState({ manual: true }); };
 document.getElementById("menu-watched").onclick = () => { closeDrawer(); openArchive("watched"); };
 document.getElementById("menu-dropped").onclick = () => { closeDrawer(); openArchive("dropped"); };
 document.getElementById("menu-settings").onclick = () => { closeDrawer(); openAppSettings(); };

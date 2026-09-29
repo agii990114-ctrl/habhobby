@@ -161,7 +161,7 @@ export const PLATFORMS: Platform[] = [
         seriesId: m[1], episode: null,
         listUrl: `https://page.kakao.com/content/${m[1]}`,
         appUrl: `kakaopage://open?path=content&id=${m[1]}`,
-        note: "카카오페이지는 제목·표지·일정을 자동으로 얻을 수 없습니다. 직접 입력해 주세요.",
+        note: "카카오페이지는 제목, 표지, 일정을 자동으로 가져올 수 없어요. 직접 입력해 주세요.",
       };
     },
   },
@@ -180,7 +180,7 @@ export const PLATFORMS: Platform[] = [
         seriesId: m[1], episode: null,
         listUrl: `https://www.netflix.com/watch/${m[1]}`,
         appUrl: `nflx://www.netflix.com/watch/${m[1]}`,
-        note: "에피소드 주소라 시리즈를 역산할 수 없습니다.",
+        note: "에피소드 주소라서 작품 주소로 바꿀 수 없어요.",
       };
       return null;
     },
@@ -376,19 +376,19 @@ export function extractUrl(raw: string): string {
 
 export function parseShared(raw: string): ParseResult {
   const text = extractUrl(raw);
-  if (!text) return { ok: false, reason: "주소가 비어 있습니다." };
+  if (!text) return { ok: false, reason: "주소가 비어 있어요." };
 
   let u: URL;
   try {
     u = new URL(/^[a-z][a-z0-9+.\-]*:/i.test(text) ? text : "https://" + text);
   } catch {
-    return { ok: false, reason: "URL 형식으로 읽을 수 없습니다." };
+    return { ok: false, reason: "올바른 URL 형식이 아니에요." };
   }
   // javascript:, data: 같은 주소가 링크로 저장되면 여는 순간 문제가 된다
   if (u.protocol !== "http:" && u.protocol !== "https:")
-    return { ok: false, reason: `http 또는 https 주소만 등록할 수 있습니다 (${u.protocol})` };
+    return { ok: false, reason: `http 또는 https 주소만 담을 수 있어요 (${u.protocol})` };
   if (!u.hostname.includes("."))
-    return { ok: false, reason: "도메인이 없는 주소입니다." };
+    return { ok: false, reason: "도메인이 없는 주소예요." };
 
   const host = u.hostname.replace(/^www\./, "").replace(/^m\./, "");
 
@@ -401,7 +401,7 @@ export function parseShared(raw: string): ParseResult {
     return {
       ok: true, platform: p, matched: false,
       seriesId: u.href, listUrl: u.href, appUrl: null,
-      note: `${p.name}의 주소이지만 작품 페이지 형태가 아니라 링크로 저장합니다.`,
+      note: `${p.name}의 주소지만 작품 페이지 형태가 아니라서 링크로 저장해요.`,
     };
   }
 

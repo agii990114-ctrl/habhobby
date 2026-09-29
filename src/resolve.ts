@@ -429,13 +429,13 @@ async function resolveOnce(raw: string, known?: KnownLookup): Promise<Resolved> 
 
 /** 화면에 그대로 쓸 수 있는 한 줄 설명 */
 export function originLabel(r: Extract<Resolved, { ok: true }>): string {
-  if (r.origin === "og") return "페이지가 공개한 정보에서 가져왔습니다";
+  if (r.origin === "og") return "페이지가 공개한 정보에서 가져왔어요";
   /* 막힌 것을 "정보를 공개하지 않는다" 고 하면 사실이 아니다 — CGV처럼 제목도 표지도
      다 내걸어 두었는데 자동 접속만 막아 둔 곳이 있다. 원인을 바로 말해야 다음에 무엇을
      하면 되는지가 이어진다. */
   if (r.origin === "blocked")
-    return `${r.platform.name}이(가) 자동 읽기를 막고 있어 직접 입력합니다`;
-  return `${r.platform.name}이(가) 작품별 정보를 공개하지 않아 직접 입력합니다`;
+    return `${r.platform.name}이(가) 자동 읽기를 막고 있어서 직접 입력해야 해요`;
+  return `${r.platform.name}이(가) 콘텐츠별 정보를 제공하지 않아서 직접 입력해야 해요`;
 }
 
 // 직접 실행: node src/resolve.ts <url>

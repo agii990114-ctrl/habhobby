@@ -143,13 +143,13 @@ export async function completeLogin(
   providerId: string, code: string, state: string,
 ): Promise<{ ok: true; user: User; account: Account } | { ok: false; reason: string }> {
   const p = PROVIDERS[providerId];
-  if (!p) return { ok: false, reason: "알 수 없는 로그인 방식입니다." };
+  if (!p) return { ok: false, reason: "알 수 없는 로그인 방식이에요." };
 
   const row = db.prepare("SELECT provider FROM oauth_state WHERE state = ?").get(state) as
     { provider: string } | undefined;
   db.prepare("DELETE FROM oauth_state WHERE state = ?").run(state);
   if (!row || row.provider !== providerId)
-    return { ok: false, reason: "로그인 요청이 만료되었거나 올바르지 않습니다. 다시 시도해 주세요." };
+    return { ok: false, reason: "로그인 요청이 만료됐거나 올바르지 않아요. 다시 시도해 주세요." };
 
   const body = new URLSearchParams({
     grant_type: "authorization_code",
@@ -169,7 +169,7 @@ export async function completeLogin(
     });
     token = await res.json();
   } catch {
-    return { ok: false, reason: "로그인 서버에 연결하지 못했습니다." };
+    return { ok: false, reason: "로그인 서버에 연결하지 못했어요." };
   }
   if (!token?.access_token) {
     // 제공자가 주는 코드는 짧아서 원인을 알기 어렵다 — 설명과 흔한 원인을 같이 보여준다.
@@ -177,10 +177,10 @@ export async function completeLogin(
     const desc = token?.error_description ? ` — ${token.error_description}` : "";
     const hint = code === "invalid_client" && !clientSecret(providerId)
       ? `
-${p.label.replace("로 계속하기", "")} 콘솔에서 Client Secret이 켜져 있는 것 같습니다. `
-        + `${providerId.toUpperCase()}_CLIENT_SECRET 을 .env에 넣어 주세요.`
+${p.label.replace("로 계속하기", "")} 콘솔에서 Client Secret이 켜져 있는 것 같아요. `
+        + `${providerId.toUpperCase()}_CLIENT_SECRET을 .env에 넣어 주세요.`
       : "";
-    return { ok: false, reason: `토큰을 받지 못했습니다 (${code})${desc}${hint}` };
+    return { ok: false, reason: `토큰을 받지 못했어요 (${code})${desc}${hint}` };
   }
 
   let profile: any;
@@ -191,11 +191,11 @@ ${p.label.replace("로 계속하기", "")} 콘솔에서 Client Secret이 켜져 
     });
     profile = await res.json();
   } catch {
-    return { ok: false, reason: "프로필을 가져오지 못했습니다." };
+    return { ok: false, reason: "프로필을 가져오지 못했어요." };
   }
 
   const info = p.profile(profile);
-  if (!info.uid) return { ok: false, reason: "계정 식별자를 받지 못했습니다." };
+  if (!info.uid) return { ok: false, reason: "계정 정보를 받지 못했어요." };
   /* 게스트가 로그인하는 경우에는 새 계정을 만드는 대신 쓰던 계정에 이어 붙여야 한다.
      그 판단은 세션을 아는 쪽(server.ts)이 하므로, 여기서는 받아온 프로필을 함께 넘긴다. */
   const account = { provider: providerId, providerUid: info.uid, ...info };
@@ -266,18 +266,18 @@ const COMMON = ["password", "passw0rd", "qwerty", "qwer1234", "asdf1234", "abcd1
   "habhobby", "hobby123", "dragon", "monkey", "master"];
 export function passwordProblem(pw: unknown, who: { loginId?: string; email?: string } = {}): string | null {
   if (typeof pw !== "string") return "비밀번호를 입력해 주세요.";
-  if (pw.length < 8) return "비밀번호는 8자 이상이어야 합니다.";
-  if (pw.length > 128) return "비밀번호는 128자를 넘을 수 없습니다.";
-  if (/[\u0000-\u001f\u007f]/.test(pw)) return "비밀번호에 쓸 수 없는 글자가 있습니다.";
+  if (pw.length < 8) return "비밀번호는 8자 이상이어야 해요.";
+  if (pw.length > 128) return "비밀번호는 128자를 넘을 수 없어요.";
+  if (/[\u0000-\u001f\u007f]/.test(pw)) return "비밀번호에 쓸 수 없는 문자가 있어요.";
   if (!/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw) || !/[!-\/:-@\[-`{-~]/.test(pw))
     return "영문, 숫자, 특수기호(!@#$% 등)를 모두 넣어 주세요.";
   const low = pw.toLowerCase();
-  if (COMMON.some(w => low.includes(w))) return "너무 흔한 비밀번호입니다. 다른 것으로 정해 주세요.";
-  if (/(.)\1{3,}/.test(pw)) return "같은 글자를 네 번 이상 이어 쓸 수 없습니다.";
+  if (COMMON.some(w => low.includes(w))) return "너무 흔한 비밀번호예요. 다른 비밀번호로 정해 주세요.";
+  if (/(.)\1{3,}/.test(pw)) return "같은 문자를 4번 이상 연속해서 쓸 수 없어요.";
   const id = (who.loginId ?? "").toLowerCase();
-  if (id.length >= 3 && low.includes(id)) return "비밀번호에 아이디를 넣을 수 없습니다.";
+  if (id.length >= 3 && low.includes(id)) return "비밀번호에 아이디를 넣을 수 없어요.";
   const local = (who.email ?? "").toLowerCase().split("@")[0];
-  if (local.length >= 4 && low.includes(local)) return "비밀번호에 이메일 앞부분을 넣을 수 없습니다.";
+  if (local.length >= 4 && low.includes(local)) return "비밀번호에 이메일 앞부분을 넣을 수 없어요.";
   return null;
 }
 

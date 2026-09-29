@@ -1598,7 +1598,7 @@ export const setFolderTake = (folderId: string, take: TakeMode): void => {
   /* 함께 고치기를 끄면 더는 함께 쓰는 폴더가 아니다 — 남들이 걸어 둔 것을 걷어 낸다 */
   if (was && canEdit(old) && !canEdit(take))
     dropContributions(folderId, contributors(folderId, was.user_id));
-  if (cut.length) noticeBreak(folderId, "함께 쓰기가 끝났습니다", cut);
+  if (cut.length) noticeBreak(folderId, "함께 쓰기가 끝났어요", cut);
 };
 
 /** 그 폴더를 누구에게 보여 줄지 정한다. mode 가 "some" 이 아니면 짝은 지운다. */
@@ -1630,7 +1630,7 @@ export function setFolderShare(folderId: string, mode: ShareMode, viewers: strin
     const ins = db.prepare("INSERT OR IGNORE INTO folder_share(folder_id, viewer_id, state) VALUES(?,?,?)");
     for (const v of new Set(viewers)) ins.run(folderId, v, was.get(v) ?? (needsAccept ? "pending" : "ok"));
   }
-  noticeBreak(folderId, "공개가 끝났습니다", cut);
+  noticeBreak(folderId, "공개가 끝났어요", cut);
 }
 
 /** 명단에 몇 사람을 더 부른다 — 공개 대상을 통째로 다시 쓰지 않고 **더하기만** 한다 */
@@ -1656,7 +1656,7 @@ export function unlinkFromFolder(folderId: string, userId: string): boolean {
      그 폴더에서 끊으려면 공개 대상을 먼저 좁혀야 한다. */
   if (!row && f.share_mode !== "some") return false;
   dropContributions(folderId, [userId]);
-  if (had) noticeBreak(folderId, "연결이 해제되었습니다", [userId]);
+  if (had) noticeBreak(folderId, "폴더에서 내보내졌어요", [userId]);
   return true;
 }
 
@@ -1867,7 +1867,7 @@ export const removeFollow = (me: string, target: string): boolean =>
 export function removeFollower(me: string, follower: string): boolean {
   const lost = mirrorsLostBy(follower, me);
   const gone = removeFollow(follower, me);
-  if (gone) for (const f of lost) noticeBreak(f, "팔로우가 끊겼습니다", [follower]);
+  if (gone) for (const f of lost) noticeBreak(f, "팔로우가 끊겼어요", [follower]);
   return gone;
 }
 

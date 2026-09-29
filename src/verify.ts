@@ -45,17 +45,17 @@ export function allowRequest(purpose: Purpose | "find", email: string, ip: strin
   const now = Date.now();
   db.prepare("DELETE FROM mail_log WHERE at < ?").run(now - DAY);
   if (count("SELECT COUNT(*) n FROM mail_log WHERE purpose <> 'vfail' AND at > ?", now - DAY) >= ALL_PER_DAY)
-    return { ok: false, reason: "지금은 메일을 보낼 수 없습니다. 내일 다시 시도해 주세요.", wait: 3600 };
+    return { ok: false, reason: "지금은 메일을 보낼 수 없어요. 내일 다시 시도해 주세요.", wait: 3600 };
   if (count("SELECT COUNT(*) n FROM mail_log WHERE purpose <> 'vfail' AND ip = ? AND at > ?", ip, now - HOUR) >= PER_IP_HOUR)
-    return { ok: false, reason: "요청이 너무 많습니다. 한 시간 뒤에 다시 해 주세요.", wait: 3600 };
+    return { ok: false, reason: "요청이 너무 많아요. 한 시간 뒤에 다시 시도해 주세요.", wait: 3600 };
   if (count("SELECT COUNT(*) n FROM mail_log WHERE purpose <> 'vfail' AND email = ? AND at > ?", email, now - HOUR) >= PER_EMAIL_HOUR)
-    return { ok: false, reason: "이 메일 주소로는 잠시 더 보낼 수 없습니다. 한 시간 뒤에 다시 해 주세요.", wait: 3600 };
+    return { ok: false, reason: "이 이메일로는 잠시 더 보낼 수 없어요. 한 시간 뒤에 다시 시도해 주세요.", wait: 3600 };
   if (purpose !== "find") {
     const row = db.prepare("SELECT created_at FROM email_code WHERE purpose = ? AND email = ?")
       .get(purpose, email) as { created_at: number } | undefined;
     if (row && now - row.created_at < RESEND_COOLDOWN) {
       const wait = Math.ceil((RESEND_COOLDOWN - (now - row.created_at)) / 1000);
-      return { ok: false, reason: `${wait}초 뒤에 다시 받을 수 있습니다.`, wait };
+      return { ok: false, reason: `${wait}초 뒤에 다시 받을 수 있어요.`, wait };
     }
   }
   db.prepare("INSERT INTO mail_log(at, email, ip, purpose) VALUES(?,?,?,?)").run(now, email, ip, purpose);
@@ -82,12 +82,12 @@ export const tooManyFails = (ip: string): boolean =>
 const recordFail = (ip: string) =>
   db.prepare("INSERT INTO mail_log(at, email, ip, purpose) VALUES(?,?,?,'vfail')").run(Date.now(), "", ip);
 
-const NO_CODE = "코드가 없거나 만료되었습니다. 코드를 다시 받아 주세요.";
+const NO_CODE = "코드가 없거나 만료됐어요. 코드를 다시 받아 주세요.";
 
 /** 코드를 본다. 맞으면 티켓을 내고 코드는 비운다(한 번만). 어떤 실패든 말은 같은 모양이다. */
 export function verifyCode(purpose: Purpose, email: string, code: unknown, ip: string):
   { ok: true; ticket: string } | { ok: false; reason: string; left?: number } {
-  if (tooManyFails(ip)) return { ok: false, reason: "시도가 너무 많습니다. 한 시간 뒤에 다시 해 주세요." };
+  if (tooManyFails(ip)) return { ok: false, reason: "시도가 너무 많아요. 한 시간 뒤에 다시 시도해 주세요." };
   const now = Date.now();
   const row = db.prepare("SELECT * FROM email_code WHERE purpose = ? AND email = ?")
     .get(purpose, email) as any;
@@ -104,10 +104,10 @@ export function verifyCode(purpose: Purpose, email: string, code: unknown, ip: s
     if (tries >= MAX_TRIES) {
       // 다섯 번 틀리면 이 코드는 죽는다 — 맞힐 때까지 두드리는 길을 닫는다
       db.prepare("DELETE FROM email_code WHERE purpose = ? AND email = ?").run(purpose, email);
-      return { ok: false, reason: "코드를 너무 여러 번 틀렸습니다. 코드를 다시 받아 주세요." };
+      return { ok: false, reason: "코드를 너무 여러 번 틀렸어요. 코드를 다시 받아 주세요." };
     }
     db.prepare("UPDATE email_code SET tries = ? WHERE purpose = ? AND email = ?").run(tries, purpose, email);
-    return { ok: false, reason: "코드가 맞지 않습니다.", left: MAX_TRIES - tries };
+    return { ok: false, reason: "코드가 맞지 않아요.", left: MAX_TRIES - tries };
   }
   const ticket = randomBytes(32).toString("base64url");
   db.prepare(`UPDATE email_code SET code_mac = '', ticket_hash = ?, ticket_expires = ?

@@ -68,7 +68,7 @@ async function readJson(req: IncomingMessage): Promise<any> {
   }
   if (!chunks.length) return {};
   try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
-  catch { throw new Error("JSON을 읽을 수 없습니다."); }
+  catch { throw new Error("요청을 읽을 수 없어요."); }
 }
 
 /* ── 설정과 플랫폼 표시 오버라이드 ─────────────────────────── */
@@ -352,8 +352,8 @@ function withMirrors(me: string): { folders: any[]; works: any[] } {
        대신 왜 비어 있는지를 적어 둔다. */
     /* 보이는 폴더는 누구든 비출 수 있다 — 가져가는 방식은 받는 사람이 고른다.
        그래서 막히는 까닭은 둘뿐이다: 사이가 끊겼거나, 더는 나에게 보이지 않거나. */
-    const why = !view ? "연결이 끊겼습니다"
-      : !src ? "공개가 끝났습니다" : null;
+    const why = !view ? "연결이 끊겼어요"
+      : !src ? "공개가 끝났어요" : null;
     if (why) return { ...f, mirrorOf: who, broken: why, mirrorTake: "none" };
 
     const edit = canEdit(src!.take);
@@ -438,9 +438,9 @@ async function readUrl(raw: string): Promise<{ r: Extract<Resolved, { ok: true }
   const r = await resolveUrl(raw, knownUrl);
   if (r.ok && r.dead && r.dead !== "generic")
     return { bad: { ok: false, dead: r.dead, reason:
-      r.dead === "notfound" ? "그 주소에 페이지가 없습니다. 주소를 다시 확인해 주세요."
-        : r.dead === "moved" ? "그 콘텐츠를 찾을 수 없습니다 — 주소가 대문으로 넘어갑니다."
-          : "그런 주소가 없습니다. 도메인을 다시 확인해 주세요." } };
+      r.dead === "notfound" ? "그 주소에 페이지가 없어요. 주소를 다시 확인해 주세요."
+        : r.dead === "moved" ? "그 콘텐츠를 찾을 수 없어요. 주소가 사이트 첫 화면으로 연결돼요."
+          : "없는 도메인이에요. 주소를 다시 확인해 주세요." } };
   if (!r.ok) return { bad: r };
   return { r };
 }
@@ -799,7 +799,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
      막는 자리는 화면이 아니라 서버여야 한다. */
   const guestBlocked = ["friends", "invites", "follows", "followers"].includes(seg[1] ?? "");
   if (guestBlocked && isGuest(user)) {
-    json(res, 403, { ok: false, reason: "게스트는 친구 기능을 쓸 수 없습니다. 로그인하면 쓸 수 있어요." });
+    json(res, 403, { ok: false, reason: "둘러보기 중에는 친구 기능을 쓸 수 없어요. 로그인하면 쓸 수 있어요." });
     return true;
   }
 
@@ -833,7 +833,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
        시리즈 식별자를 새로 만들어 주므로 같은 제목을 여러 번 담아도 서로 덮지 않는다. */
     if (!String(b.url ?? "").trim()) {
       const title = String(b.title ?? "").trim();
-      if (!title) { json(res, 400, { ok: false, reason: "제목이 필요합니다." }); return true; }
+      if (!title) { json(res, 400, { ok: false, reason: "제목을 입력해 주세요." }); return true; }
       const { work } = upsertWork(user.id, {
         platformId: "note", seriesId: newId("n"), title, description: null, mediaType: "link",
         listUrl: "", appUrl: null, coverUrl: null, coverAspect: null, episode: null,
@@ -851,7 +851,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     if ("bad" in got) { json(res, 400, got.bad); return true; }
     const r = got.r;
     const title = String(b.title ?? r.title ?? "").trim();
-    if (!title) { json(res, 400, { ok: false, reason: "제목이 필요합니다." }); return true; }
+    if (!title) { json(res, 400, { ok: false, reason: "제목을 입력해 주세요." }); return true; }
     const platformId = applyMerge(user.id, r.platform.id);
     const hex = (v: unknown) =>
       typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : null;
@@ -903,7 +903,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     const b = await readJson(req);
     const from = String(b.from ?? ""), to = String(b.to ?? "");
     if (!from.startsWith(DOMAIN_PREFIX) || !to.startsWith(DOMAIN_PREFIX) || from === to) {
-      json(res, 400, { ok: false, reason: "도메인 구간끼리만 합칠 수 있습니다." });
+      json(res, 400, { ok: false, reason: "도메인 그룹끼리만 합칠 수 있어요." });
       return true;
     }
     const wide = !!b.wide;   // "이 도메인 아래 전부"
@@ -956,11 +956,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     const b = await readJson(req);
     const pid = String(b.platformId ?? ""), host = String(b.host ?? "");
     if (!pid.startsWith(DOMAIN_PREFIX) || !host) {
-      json(res, 400, { ok: false, reason: "도메인 구간에서만 떼어낼 수 있습니다." });
+      json(res, 400, { ok: false, reason: "도메인 그룹에서만 떼어낼 수 있어요." });
       return true;
     }
     const target = DOMAIN_PREFIX + host;
-    if (target === pid) { json(res, 400, { ok: false, reason: "그 구간의 본래 주소입니다." }); return true; }
+    if (target === pid) { json(res, 400, { ok: false, reason: "이 그룹의 원래 주소예요." }); return true; }
 
     // 그 호스트에서 온 작품만 골라 되돌린다 — 원래 주소가 list_url 에 남아 있다
     const rows = db.prepare(`SELECT w.id, u.list_url
@@ -996,15 +996,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
   /* 한 도메인의 이름을 사이트에 다시 물어본다 — 편집 화면의 "가져오기" */
   if (seg[0] === "api" && seg[1] === "platforms" && seg[2] && seg[3] === "site-name" && m === "POST") {
     const pid = decodeURIComponent(seg[2]);
-    if (!pid.startsWith(DOMAIN_PREFIX)) { json(res, 400, { ok: false, reason: "도메인 묶음이 아닙니다." }); return true; }
+    if (!pid.startsWith(DOMAIN_PREFIX)) { json(res, 400, { ok: false, reason: "도메인 그룹이 아니에요." }); return true; }
     const r = await fetchSiteName(pid.slice(DOMAIN_PREFIX.length))
       .catch(() => ({ read: false, name: null, icon: null }));
-    if (!r.read) { json(res, 200, { ok: false, reason: "사이트를 읽지 못했습니다." }); return true; }
+    if (!r.read) { json(res, 200, { ok: false, reason: "사이트를 읽지 못했어요." }); return true; }
     setSite(pid.slice(DOMAIN_PREFIX.length), r.name, r.icon);
 
     json(res, 200, r.name
       ? { ok: true, name: r.name, platform: platformView(user.id, pid) }
-      : { ok: false, reason: "이 사이트는 이름을 밝히지 않습니다." });
+      : { ok: false, reason: "이 사이트는 이름을 알려 주지 않아요." });
     return true;
   }
 
@@ -1034,7 +1034,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     if (m === "PATCH") {
       const b = await readJson(req);
       const w = getWork(user.id, id);
-      if (!w) { json(res, 404, { ok: false, reason: "없는 콘텐츠입니다." }); return true; }
+      if (!w) { json(res, 404, { ok: false, reason: "콘텐츠를 찾을 수 없어요." }); return true; }
 
       /* **주소를 붙이는 일은 옮겨 다는 일이다.**
 
@@ -1066,7 +1066,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
             .get(user.id, urlId, id) as { state: string } | undefined;
           if (taken) {
             json(res, 409, { ok: false, reason: taken.state === "watched"
-              ? "그 주소는 이미 보관에 있는 콘텐츠입니다." : "그 주소는 이미 목록에 있는 콘텐츠입니다." });
+              ? "그 주소는 이미 보관함에 있는 콘텐츠예요." : "그 주소는 이미 목록에 있는 콘텐츠예요." });
             return true;
           }
           const old = w.urlId;
@@ -1125,7 +1125,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
         // 어디에 있는지까지 말한다 — 「이미 있다」만으로는 어디를 찾아봐야 할지 모른다
         if (taken) {
           json(res, 409, { ok: false, reason: taken.state === "watched"
-            ? "이미 보관에 있는 콘텐츠입니다." : "이미 목록에 있는 콘텐츠입니다." });
+            ? "이미 보관함에 있는 콘텐츠예요." : "이미 목록에 있는 콘텐츠예요." });
           return true;
         }
       }
@@ -1170,7 +1170,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       for (const ext of ["jpg", "png", "webp"])
         await unlink(pathResolve(COVERS, `${id}.${ext}`)).catch(() => {});
       const rw = db.prepare("DELETE FROM work WHERE id = ? AND user_id = ?").run(id, user.id);
-      if (!rw.changes) { json(res, 404, { ok: false, reason: "없는 콘텐츠입니다." }); return true; }
+      if (!rw.changes) { json(res, 404, { ok: false, reason: "콘텐츠를 찾을 수 없어요." }); return true; }
       json(res, 200, { ok: true });
       return true;
     }
@@ -1245,13 +1245,13 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       const v = nameEmoji(await readJson(req));
       if (!v) { json(res, 400, { ok: false, reason: "이름이나 아이콘 중 하나는 정해 주세요." }); return true; }
       const f = renameArchFolder(user.id, id, v.name, v.emoji);
-      if (!f) { json(res, 404, { ok: false, reason: "없는 폴더입니다." }); return true; }
+      if (!f) { json(res, 404, { ok: false, reason: "폴더를 찾을 수 없어요." }); return true; }
       json(res, 200, { ok: true, folder: f });
       return true;
     }
     if (id && m === "DELETE") {
       if (!deleteArchFolder(user.id, id)) {
-        json(res, 404, { ok: false, reason: "없는 폴더입니다." }); return true;
+        json(res, 404, { ok: false, reason: "폴더를 찾을 수 없어요." }); return true;
       }
       json(res, 200, { ok: true });
       return true;
@@ -1270,11 +1270,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       return true;
     }
     if (badTake(b)) {
-      json(res, 400, { ok: false, reason: "폴더는 일반 폴더이거나 공유 폴더입니다 — 섞을 수 없습니다." });
+      json(res, 400, { ok: false, reason: "폴더는 일반 폴더나 공유 폴더 중 하나여야 해요." });
       return true;
     }
     if (badShare(b, b.take)) {
-      json(res, 400, { ok: false, reason: "공유 폴더는 함께 쓰는 친구에게만 보입니다." });
+      json(res, 400, { ok: false, reason: "공유 폴더는 함께 쓰는 친구에게만 보여요." });
       return true;
     }
     const { id } = createFolder(user.id, { name, emoji });
@@ -1288,20 +1288,20 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
   if (seg[1] === "works" && seg[3] === "cover" && m === "PUT") {
     const id = seg[2];
     const w = getWork(user.id, id);
-    if (!w) { json(res, 404, { ok: false, reason: "없는 콘텐츠입니다." }); return true; }
+    if (!w) { json(res, 404, { ok: false, reason: "콘텐츠를 찾을 수 없어요." }); return true; }
 
     const type = String(req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
     const ext = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" }[type];
-    if (!ext) { json(res, 415, { ok: false, reason: "JPEG · PNG · WebP 만 올릴 수 있습니다." }); return true; }
+    if (!ext) { json(res, 415, { ok: false, reason: "JPEG, PNG, WebP 이미지만 올릴 수 있어요." }); return true; }
 
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const c of req) {
       size += c.length;
-      if (size > COVER_MAX) { json(res, 413, { ok: false, reason: "그림이 너무 큽니다 (1MB까지)." }); return true; }
+      if (size > COVER_MAX) { json(res, 413, { ok: false, reason: "이미지가 너무 커요 (최대 1MB)." }); return true; }
       chunks.push(c as Buffer);
     }
-    if (!size) { json(res, 400, { ok: false, reason: "빈 파일입니다." }); return true; }
+    if (!size) { json(res, 400, { ok: false, reason: "빈 파일이에요." }); return true; }
 
     // 옛 파일은 지운다 — 형식이 바뀌면 이름이 달라져 그대로 두면 쌓이기만 한다
     for (const old of ["jpg", "png", "webp"])
@@ -1326,7 +1326,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       const b = await readJson(req);
       const ok = starFolder(user.id, id, !!b.starred);
       json(res, ok ? 200 : 404, ok ? { ok: true, starred: !!b.starred }
-        : { ok: false, reason: "없는 폴더입니다." });
+        : { ok: false, reason: "폴더를 찾을 수 없어요." });
       return true;
     }
 
@@ -1340,7 +1340,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     if (mine?.mirror && m === "PATCH") {
       const b = await readJson(req);
       if (b.share !== undefined || b.take !== undefined) {
-        json(res, 403, { ok: false, reason: "공개 설정은 폴더 주인만 정할 수 있습니다." });
+        json(res, 403, { ok: false, reason: "공개 설정은 폴더 주인만 바꿀 수 있어요." });
         return true;
       }
       const next = field(b, "name", mine.name);
@@ -1354,7 +1354,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       return true;
     }
     if (m === "PATCH") {
-      if (!mine) { json(res, 404, { ok: false, reason: "없는 폴더입니다." }); return true; }
+      if (!mine) { json(res, 404, { ok: false, reason: "폴더를 찾을 수 없어요." }); return true; }
       const b = await readJson(req);
 
       /* **빈 값과 안 보낸 값은 다르다.**
@@ -1373,15 +1373,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
          아무나 담아가는 것이 되는 바로 그 길이다. 화면에는 그 칸이 아예 없으므로,
          여기 닿는 것은 짜맞춘 요청뿐이다. */
       if (badTake(b)) {
-        json(res, 400, { ok: false, reason: "폴더는 일반 폴더이거나 공유 폴더입니다 — 섞을 수 없습니다." });
+        json(res, 400, { ok: false, reason: "폴더는 일반 폴더나 공유 폴더 중 하나여야 해요." });
         return true;
       }
       if (b.take !== undefined && canEdit(mine.take) !== canEdit(b.take as TakeMode)) {
-        json(res, 403, { ok: false, reason: "폴더의 갈래는 만든 뒤에 바꿀 수 없습니다." });
+        json(res, 403, { ok: false, reason: "폴더 종류는 만든 뒤에 바꿀 수 없어요." });
         return true;
       }
       if (badShare(b, mine.take)) {
-        json(res, 400, { ok: false, reason: "공유 폴더는 함께 쓰는 친구에게만 보입니다." });
+        json(res, 400, { ok: false, reason: "공유 폴더는 함께 쓰는 친구에게만 보여요." });
         return true;
       }
       db.prepare("UPDATE folder SET name = ?, emoji = ? WHERE id = ?").run(next, nextEmoji, id);
@@ -1400,7 +1400,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
        아니라 주인의 폴더에 걸려야 주인에게도, 함께 쓰는 다른 사람에게도 보인다.
        mayFile 이 껍데기를 거절하므로 여기서 바꿔 준다. */
     if (seg[3] === "works" && m === "POST") {
-      if (!mine) { json(res, 404, { ok: false, reason: "없는 폴더입니다." }); return true; }
+      if (!mine) { json(res, 404, { ok: false, reason: "폴더를 찾을 수 없어요." }); return true; }
       const b = await readJson(req);
       const want: string[] = Array.isArray(b.works)
         ? b.works.filter((x: any) => typeof x === "string") : [];
@@ -1437,7 +1437,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
        그때는 명단을 손댈 자격이 없다. */
     if (seg[3] === "people") {
       if (!mine || mine.mirror) {
-        json(res, 403, { ok: false, reason: "폴더 주인만 명단을 고칠 수 있습니다." });
+        json(res, 403, { ok: false, reason: "폴더 주인만 참여자를 관리할 수 있어요." });
         return true;
       }
       if (m === "POST") {
@@ -1453,7 +1453,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       if (seg[4] && m === "DELETE") {
         const gone = unlinkFromFolder(id, seg[4]);
         json(res, gone ? 200 : 400, gone ? { ok: true, folders: listFolders(user.id) }
-          : { ok: false, reason: "「모든 친구에게」 연 폴더는 한 사람만 끊을 수 없습니다. 공개 대상을 먼저 좁혀 주세요." });
+          : { ok: false, reason: "‘친구 전체’에게 공개한 폴더는 한 사람만 내보낼 수 없어요. 먼저 공개 범위를 ‘친구 선택’으로 바꿔 주세요." });
         return true;
       }
     }
@@ -1470,9 +1470,9 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       if (mine?.mirror) leaveFolder(user.id, mine.mirror.folder);
       /* 지우기 **전에** 알린다 — 지우고 나면 누가 닿아 있었는지도, 폴더 이름이 무엇이었는지도
          물어볼 데가 없다. 내가 비추던 폴더를 지우는 것은 나 혼자 손 떼는 일이라 알릴 것이 없다. */
-      if (mine && !mine.mirror) noticeBreak(id, "폴더가 사라졌습니다");
+      if (mine && !mine.mirror) noticeBreak(id, "폴더가 사라졌어요");
       const rf = db.prepare("DELETE FROM folder WHERE id = ? AND user_id = ?").run(id, user.id);
-      if (!rf.changes) { json(res, 404, { ok: false, reason: "없는 폴더입니다." }); return true; }
+      if (!rf.changes) { json(res, 404, { ok: false, reason: "폴더를 찾을 수 없어요." }); return true; }
       json(res, 200, { ok: true });
       return true;
     }
@@ -1487,7 +1487,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     const hasName = typeof b.displayName === "string";
     const hasHandle = b.handle !== undefined && b.handle !== null && b.handle !== "";
     if (!hasName && !hasHandle) {
-      json(res, 400, { ok: false, reason: "이름이나 아이디를 알려 주세요." });
+      json(res, 400, { ok: false, reason: "이름이나 아이디를 입력해 주세요." });
       return true;
     }
     const want = hasName ? cleanName(b.displayName) : "";
@@ -1496,15 +1496,15 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
        다시 누르는데, 그때는 이름만 바뀌어 있다. */
     if (hasHandle) {
       if (isGuest(user)) {
-        json(res, 403, { ok: false, reason: "둘러보기에서는 아이디를 정할 수 없습니다." });
+        json(res, 403, { ok: false, reason: "둘러보기 중에는 아이디를 정할 수 없어요." });
         return true;
       }
       const r = setHandle(user.id, b.handle);
       if (r !== "ok") {
         const why = {
-          invalid: "아이디는 영문·숫자·밑줄 3~20자로 지어 주세요.",
-          taken: "이미 쓰이고 있는 아이디입니다.",
-          fixed: "아이디는 한 번 정하면 바꿀 수 없습니다.",
+          invalid: "아이디는 영문, 숫자, 밑줄(_)로 3~20자여야 해요.",
+          taken: "이미 사용 중인 아이디예요.",
+          fixed: "아이디는 한 번 정하면 바꿀 수 없어요.",
         }[r];
         json(res, r === "invalid" ? 400 : 409, { ok: false, reason: why });
         return true;
@@ -1531,7 +1531,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     const code = seg[2];
     const owner = inviteOwner(code);
     if (!owner) {
-      json(res, 404, { ok: false, reason: "만료되었거나 없는 초대입니다." });
+      json(res, 404, { ok: false, reason: "만료됐거나 없는 초대예요." });
       return true;
     }
     if (m === "GET") {
@@ -1543,7 +1543,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     }
     if (seg[3] === "accept" && m === "POST") {
       if (owner.id === user.id) {
-        json(res, 400, { ok: false, reason: "자기 자신은 친구로 추가할 수 없습니다." });
+        json(res, 400, { ok: false, reason: "자기 자신은 친구로 추가할 수 없어요." });
         return true;
       }
       if (!user.displayName || !user.handle) {
@@ -1565,7 +1565,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     const id = seg[2];
     if (seg[3] === "accept") {
       const f = acceptFolder(user.id, id);
-      if (!f) { json(res, 404, { ok: false, reason: "이미 지난 초대입니다." }); return true; }
+      if (!f) { json(res, 404, { ok: false, reason: "이미 만료된 초대예요." }); return true; }
       json(res, 200, { ok: true, folder: f });
       return true;
     }
@@ -1573,7 +1573,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       // 한 번만 부른다 — 두 번 부르면 첫 번째가 이미 지워 놓아 늘 없다고 답한다
       const gone = declineFolder(user.id, id);
       json(res, gone ? 200 : 404,
-        gone ? { ok: true } : { ok: false, reason: "이미 지난 초대입니다." });
+        gone ? { ok: true } : { ok: false, reason: "이미 만료된 초대예요." });
       return true;
     }
   }
@@ -1613,11 +1613,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
        하나씩 더듬는 길이 된다. 게스트는 아이디가 없으니 애초에 걸리지 않는다. */
     const target = who ? getUser(who.id) : null;
     if (!target || isGuest(target)) {
-      json(res, 404, { ok: false, reason: "그 아이디를 쓰는 사람이 없습니다." });
+      json(res, 404, { ok: false, reason: "그 아이디를 쓰는 사람이 없어요." });
       return true;
     }
     if (target.id === user.id) {
-      json(res, 400, { ok: false, reason: "자기 자신은 팔로우할 수 없습니다." });
+      json(res, 400, { ok: false, reason: "자기 자신은 팔로우할 수 없어요." });
       return true;
     }
     const already = follows(user.id, target.id);
@@ -1646,7 +1646,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     const viewOnly = (seg[3] === "shared" && m === "GET") ||
       ((seg[3] === "take" || seg[3] === "mirror") && m === "POST");
     if (!friend && !(viewOnly && follows(user.id, other))) {
-      json(res, 403, { ok: false, reason: "친구가 아닙니다." });
+      json(res, 403, { ok: false, reason: "친구가 아니에요." });
       return true;
     }
     if (seg[3] === "shared" && m === "GET") {
@@ -1698,7 +1698,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
         /* 한 작품이 여러 폴더에 들어 있을 수 있는데, 그중 **하나라도** 담아가기를
            허락하면 담을 수 있다 — 주인이 그 작품을 가져가도 좋다고 한 것이다. */
         const src = takable(user.id, other).get(b.work);
-        if (!src) { json(res, 403, { ok: false, reason: "담아갈 수 없는 콘텐츠입니다." }); return true; }
+        if (!src) { json(res, 403, { ok: false, reason: "다운로드할 수 없는 콘텐츠예요." }); return true; }
         /* 번호를 함께 돌려준다 — 화면이 곧바로 그 작품의 설정 창을 열어, 친구가 정해 둔
            값을 보면서 내 것으로 손볼 수 있게 한다. */
         const { already, id } = await takeWork(user.id, src, []);
@@ -1708,7 +1708,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
 
       if (b.folder) {
         const src = view.folders.find(f => f.id === b.folder);
-        if (!src) { json(res, 404, { ok: false, reason: "볼 수 없는 폴더입니다." }); return true; }
+        if (!src) { json(res, 404, { ok: false, reason: "볼 수 없는 폴더예요." }); return true; }
         const items = view.works.filter(w => w.folders.includes(src.id));
 
         const { id: fid } = createFolder(user.id, { name: src.name, emoji: src.emoji });
@@ -1721,7 +1721,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
         return true;
       }
 
-      json(res, 400, { ok: false, reason: "무엇을 담을지 알려주세요." });
+      json(res, 400, { ok: false, reason: "담을 콘텐츠를 알려 주세요." });
       return true;
     }
 
@@ -1730,7 +1730,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       const b = await readJson(req);
       const view = sharedView(other, user.id);
       const src = view.folders.find(f => f.id === b.folder);
-      if (!src) { json(res, 404, { ok: false, reason: "볼 수 없는 폴더입니다." }); return true; }
+      if (!src) { json(res, 404, { ok: false, reason: "볼 수 없는 폴더예요." }); return true; }
       const had = listFolders(user.id).find(f =>
         f.mirror?.owner === other && f.mirror?.folder === src.id);
       if (had) { json(res, 200, { ok: true, already: true, name: src.name }); return true; }
@@ -1789,7 +1789,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     }
     if (seg[2] && m === "DELETE") {
       if (!deleteShareKey(user.id, decodeURIComponent(seg[2]))) {
-        json(res, 404, { ok: false, reason: "없는 열쇠입니다." });
+        json(res, 404, { ok: false, reason: "열쇠를 찾을 수 없어요." });
         return true;
       }
       json(res, 200, { ok: true, keys: listShareKeys(user.id) });
@@ -1860,7 +1860,7 @@ function tooManyTries(id: string, max = TRY_MAX): string | null {
   if (Date.now() > t.until) { TRIES.delete(id); return null; }
   if (t.n < max) return null;
   const min = Math.ceil((t.until - Date.now()) / 60_000);
-  return `너무 여러 번 틀렸습니다. ${min}분 뒤에 다시 해 주세요.`;
+  return `너무 여러 번 틀렸어요. ${min}분 뒤에 다시 시도해 주세요.`;
 }
 function failed(id: string): void {
   // 주소를 바꿔 가며 두드리는 것이 쌓아 두는 값이 끝없이 늘지 않게 — 만료된 것을 가끔 쓸어 낸다
@@ -1901,7 +1901,7 @@ function authPostOk(req: IncomingMessage, res: ServerResponse): boolean {
   }
   const siteOk = !site || site === "same-origin" || site === "none";
   if (!ct.toLowerCase().startsWith("application/json") || !siteOk || !originOk) {
-    json(res, 403, { ok: false, reason: "허용되지 않은 요청입니다." });
+    json(res, 403, { ok: false, reason: "허용되지 않는 요청이에요." });
     return false;
   }
   return true;
@@ -1911,18 +1911,18 @@ const deliver = (mail: { to: string; subject: string; text: string }): void => {
   // 답을 기다리지 않는다 — 보낸 시간이 다르면 「메일이 나갔다 = 가입된 주소」가 새어 나간다
   sendMail(mail).catch(e => console.error("  ⚠ 메일 발송 실패:", e instanceof Error ? e.message : e));
 };
-const MAIL_TAIL = "\n\n직접 요청하지 않았다면 이 메일을 무시하세요. 이 코드를 다른 사람에게 알려 주지 마세요.";
+const MAIL_TAIL = "\n\n직접 요청하지 않았다면 이 메일을 무시해 주세요. 인증 코드는 다른 사람에게 알려 주지 마세요.";
 const codeText = (title: string, code: string, extra = "") =>
-  `${title}\n\n    ${code}\n\n이 코드는 ${CODE_TTL / 60000}분 동안만 쓸 수 있습니다.${extra}${MAIL_TAIL}\n`;
+  `${title}\n\n    ${code}\n\n이 코드는 ${CODE_TTL / 60000}분 동안만 사용할 수 있어요.${extra}${MAIL_TAIL}\n`;
 
-const MAIL_OFF = "메일 발송이 아직 설정되지 않았습니다. 관리자에게 알려 주세요.";
-const EXPIRED = "인증이 만료되었습니다. 처음부터 다시 해 주세요.";
+const MAIL_OFF = "메일 발송이 아직 설정되지 않았어요. 관리자에게 알려 주세요.";
+const EXPIRED = "인증이 만료됐어요. 처음부터 다시 진행해 주세요.";
 
 async function passwordAuth(req: IncomingMessage, res: ServerResponse, seg: string[]): Promise<boolean> {
   const step = seg[2], sub = seg[3];
   // 예전 화면(직접 가입)이 남아 있는 기기가 부르는 길 — 조용히 실패시키지 않고 이유를 알린다
   if (step === "signup" && seg.length === 3) {
-    json(res, 410, { ok: false, reason: "가입 방식이 바뀌었습니다. 화면을 새로고침한 뒤 이메일 인증으로 가입해 주세요." });
+    json(res, 410, { ok: false, reason: "가입 방식이 바뀌었어요. 화면을 새로고침한 뒤 이메일 인증으로 가입해 주세요." });
     return true;
   }
   const known = (step === "login" && seg.length === 3) || (step === "find-id" && seg.length === 3)
@@ -1937,7 +1937,7 @@ async function passwordAuth(req: IncomingMessage, res: ServerResponse, seg: stri
     const id = typeof b.loginId === "string" ? b.loginId.trim() : "";
     const pw = b.password;
     if (!validLoginId(id) || !validPassword(pw)) {
-      json(res, 400, { ok: false, reason: "아이디나 비밀번호가 맞지 않습니다." });
+      json(res, 400, { ok: false, reason: "아이디나 비밀번호가 맞지 않아요." });
       return true;
     }
     /* 맞춰보기를 막는다. 아이디마다, 그리고 **주소마다** 센다 — 아이디만 세면 아이디를 바꿔 가며
@@ -1952,7 +1952,7 @@ async function passwordAuth(req: IncomingMessage, res: ServerResponse, seg: stri
        가려 말하면 어떤 아이디가 있는지 알아낼 수 있다. */
     if (!ok) {
       failed(id); failed("ip:" + ip);
-      json(res, 401, { ok: false, reason: "아이디나 비밀번호가 맞지 않습니다." });
+      json(res, 401, { ok: false, reason: "아이디나 비밀번호가 맞지 않아요." });
       return true;
     }
     clearTries(id);
@@ -1970,7 +1970,7 @@ async function passwordAuth(req: IncomingMessage, res: ServerResponse, seg: stri
     if (!gate.ok) { json(res, 429, { ok: false, reason: gate.reason, wait: gate.wait }); return true; }
     const u = passwordUserByEmail(email);
     if (u) deliver({ to: email, subject: "[HabHobby] 아이디 안내",
-      text: `HabHobby 에 가입하신 아이디입니다.\n\n    ${u.loginId}\n\n직접 요청하지 않았다면 이 메일을 무시하세요.\n` });
+      text: `HabHobby에 가입한 아이디예요.\n\n    ${u.loginId}\n\n직접 요청하지 않았다면 이 메일을 무시해 주세요.\n` });
     json(res, 200, { ok: true });
     return true;
   }
@@ -1986,14 +1986,14 @@ async function passwordAuth(req: IncomingMessage, res: ServerResponse, seg: stri
     if (purpose === "signup") {
       loginId = typeof b.loginId === "string" ? b.loginId.trim() : "";
       if (!validLoginId(loginId)) {
-        json(res, 400, { ok: false, reason: "아이디는 영문·숫자·밑줄 3~20자로 지어 주세요." });
+        json(res, 400, { ok: false, reason: "아이디는 영문, 숫자, 밑줄(_)로 3~20자여야 해요." });
         return true;
       }
     }
     const gate = allowRequest(purpose, email, ip);
     if (!gate.ok) { json(res, 429, { ok: false, reason: gate.reason, wait: gate.wait }); return true; }
     if (loginId && passwordUser(loginId)) {
-      json(res, 409, { ok: false, reason: "이미 쓰이고 있는 아이디입니다." });
+      json(res, 409, { ok: false, reason: "이미 사용 중인 아이디예요." });
       return true;
     }
     const u = passwordUserByEmail(email);
@@ -2002,13 +2002,13 @@ async function passwordAuth(req: IncomingMessage, res: ServerResponse, seg: stri
     const code = issueCode(purpose, email, loginId);
     if (purpose === "signup") {
       deliver(u
-        ? { to: email, subject: "[HabHobby] 이미 가입된 메일입니다",
-            text: "이 메일 주소로 이미 가입된 계정이 있습니다.\n로그인 화면에서 로그인하거나, 아이디를 잊으셨다면 「아이디 찾기」, "
-              + "비밀번호를 잊으셨다면 「비밀번호 재설정」을 이용해 주세요.\n\n직접 가입하려던 것이 아니라면 이 메일을 무시하세요.\n" }
+        ? { to: email, subject: "[HabHobby] 이미 가입된 이메일이에요",
+            text: "이 이메일로 가입된 계정이 이미 있어요.\n로그인 화면에서 로그인해 주세요. 아이디를 잊었다면 ‘아이디 찾기’, "
+              + "비밀번호를 잊었다면 ‘비밀번호 재설정’을 이용할 수 있어요.\n\n직접 가입하려던 게 아니라면 이 메일을 무시해 주세요.\n" }
         : { to: email, subject: "[HabHobby] 가입 인증 코드", text: codeText("HabHobby 가입 인증 코드", code) });
     } else if (u) {
       deliver({ to: email, subject: "[HabHobby] 비밀번호 재설정 코드",
-        text: codeText("HabHobby 비밀번호 재설정 코드", code, "\n비밀번호를 바꾸면 모든 기기에서 로그아웃됩니다.") });
+        text: codeText("HabHobby 비밀번호 재설정 코드", code, "\n비밀번호를 바꾸면 모든 기기에서 로그아웃돼요.") });
     }
     json(res, 200, { ok: true, ttl: CODE_TTL / 1000, cooldown: RESEND_COOLDOWN / 1000 });
     return true;
@@ -2043,7 +2043,7 @@ async function passwordAuth(req: IncomingMessage, res: ServerResponse, seg: stri
     const user = guestId ? linkGuestPassword(guestId, t.loginId!, hash, t.email)
                          : createPasswordUser(t.loginId!, hash, t.email);
     if (!user) {
-      json(res, 409, { ok: false, reason: "이미 쓰이고 있는 아이디나 이메일입니다. 처음부터 다시 해 주세요." });
+      json(res, 409, { ok: false, reason: "이미 사용 중인 아이디나 이메일이에요. 처음부터 다시 진행해 주세요." });
       return true;
     }
     revokeCodes(t.email);
@@ -2058,9 +2058,9 @@ async function passwordAuth(req: IncomingMessage, res: ServerResponse, seg: stri
   destroyAllLogins(account!.id);          // 세션과 공유 열쇠까지 — 남이 들어와 있었을 수 있다
   revokeCodes(t.email);
   clearTries(account!.loginId);
-  deliver({ to: t.email, subject: "[HabHobby] 비밀번호가 바뀌었습니다",
-    text: "방금 HabHobby 비밀번호가 바뀌었고, 모든 기기에서 로그아웃되었습니다.\n\n"
-      + "직접 한 일이 아니라면 이 메일 계정이 남에게 넘어갔을 수 있습니다 — 메일 계정의 비밀번호부터 바꾸세요.\n" });
+  deliver({ to: t.email, subject: "[HabHobby] 비밀번호가 바뀌었어요",
+    text: "방금 HabHobby 비밀번호가 바뀌었고, 모든 기기에서 로그아웃됐어요.\n\n"
+      + "직접 바꾼 게 아니라면 이메일 계정이 다른 사람에게 넘어갔을 수 있어요. 이메일 계정의 비밀번호부터 바꿔 주세요.\n" });
   json(res, 200, { ok: true });
   return true;
 }
@@ -2126,7 +2126,7 @@ async function auth(req: IncomingMessage, res: ServerResponse, url: URL): Promis
 
   if (seg.length === 2) {
     const to = startLogin(providerId);
-    if (!to) { redirect(res, "/?login_error=" + encodeURIComponent("설정되지 않은 로그인입니다.")); return true; }
+    if (!to) { redirect(res, "/?login_error=" + encodeURIComponent("설정되지 않은 로그인 방식이에요.")); return true; }
     redirect(res, to);
     return true;
   }
@@ -2239,8 +2239,8 @@ const server = createServer(async (req, res) => {
       };
 
       if (bearer && !byKey) {
-        if (asText) { line(401, "공유 열쇠가 맞지 않습니다"); return; }
-        json(res, 401, { ok: false, reason: "공유 열쇠가 맞지 않습니다." });
+        if (asText) { line(401, "공유 열쇠가 맞지 않아요"); return; }
+        json(res, 401, { ok: false, reason: "공유 열쇠가 맞지 않아요." });
         return;
       }
       const user = byKey ?? currentUser(req);
@@ -2255,10 +2255,10 @@ const server = createServer(async (req, res) => {
            일어난 일의 이름은 여기서 짓는다. 가는 길에 생긴 일(못 닿았다·열쇠가 틀렸다)은
            받는 쪽이 짓는다 — 그건 서버가 알 수 없는 것들이다. */
         const text = r.kind === "saved"
-          ? `${r.title} — ${r.made ? "담았습니다" : "이미 있습니다"}${r.fromText
-              ? " (공유한 글의 이름 · 자동 저장된 콘텐츠에서 확인하세요)" : ""}`
-          : r.kind === "ask" ? "제목을 읽지 못했습니다 — 앱에서 확인하세요"
-            : "보낼 주소가 없습니다";
+          ? `${r.title} — ${r.made ? "담았어요" : "이미 있어요"}${r.fromText
+              ? " (공유한 글의 이름 · ‘자동 저장된 콘텐츠’에서 확인하세요)" : ""}`
+          : r.kind === "ask" ? "제목을 읽지 못했어요. 앱에서 확인해 주세요"
+            : "보낼 주소가 없어요";
         if (asText) { line(200, text); return; }
         json(res, 200, r.kind === "saved"
           ? { ok: true, saved: true, title: r.title, made: r.made, text }
@@ -2296,7 +2296,7 @@ const server = createServer(async (req, res) => {
            **죽은 쿠키도 함께 걷는다.** 안 걷으면 브라우저가 계속 그것을 들고 와 같은 길을 되풀이한다.
            화면은 이 401 을 보고 로그인 화면으로 넘어간다(app.js 의 api). */
         const stale = !!readCookie(req.headers.cookie, COOKIE);
-        const payload = JSON.stringify({ ok: false, reason: "로그인이 필요합니다." });
+        const payload = JSON.stringify({ ok: false, reason: "로그인이 필요해요." });
         res.writeHead(401, {
           "Content-Type": "application/json; charset=utf-8",
           "Content-Length": Buffer.byteLength(payload),
@@ -2319,7 +2319,7 @@ const server = createServer(async (req, res) => {
       }
 
       if (await api(req, res, url, user)) return;
-      json(res, 404, { ok: false, reason: "없는 경로입니다." });
+      json(res, 404, { ok: false, reason: "찾을 수 없는 주소예요." });
       return;
     }
     /* 올린 표지. public 이 아니라 data 아래에 있으므로 따로 내준다.
@@ -2346,7 +2346,7 @@ const server = createServer(async (req, res) => {
     // SPA 폴백 — 공유 대상(/?url=...)도 index.html이 받는다
     if (await serveStatic(req, res, "/index.html")) return;
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("찾을 수 없습니다");
+    res.end("페이지를 찾을 수 없어요");
   } catch (err) {
     json(res, 500, { ok: false, reason: (err as Error).message });
   }

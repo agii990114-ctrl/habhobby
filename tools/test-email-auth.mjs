@@ -135,7 +135,7 @@ ok(r.status === 400, "code cannot be used twice");
 /* 2) 비밀번호 규칙 — 어긋나도 티켓은 살아 있다 */
 const bad = [
   ["Short1!", "8자"], ["abcdefgh1", "특수"], ["abcdefgh!", "숫자"], ["12345678!", "영문"], ["Password1!", "흔한"],
-  ["Xy9!aaaaQ", "네 번"], [`Q${idA}9!`, "아이디"], ["Zx9!abcd", "쓸 수 없는"], ["x".repeat(129) + "1!", "128"],
+  ["Xy9!aaaaQ", "4번"], [`Q${idA}9!`, "아이디"], ["Zx9!abcd", "쓸 수 없는"], ["x".repeat(129) + "1!", "128"],
   [`${emailAn.split("@")[0]}9!Z`, "이메일"],
 ];
 for (const [pw, word] of bad) {
@@ -205,7 +205,7 @@ const NEWPW = "Nw7$kLpq9!";
 r = await RB("POST", "/auth/password/reset/complete", { ticket: rv.ticket, password: NEWPW });
 ok(r.status === 200, "reset complete");
 await wait(400);
-ok(/비밀번호가 바뀌었습니다/.test(lastMail(emailAn).subject), "change notification mail sent");
+ok(/비밀번호가 바뀌었어요/.test(lastMail(emailAn).subject), "change notification mail sent");
 const st2 = await A("GET", "/api/state");
 ok(st2.me?.provider !== "password" && st2.me?.id !== uid, "old session is dead everywhere after reset (no longer this user)");
 ok(db.prepare("SELECT COUNT(*) n FROM share_key WHERE user_id = ?").get(uid).n === 0, "share keys revoked too");
@@ -276,7 +276,7 @@ db.prepare("DELETE FROM mail_log WHERE purpose <> 'vfail'").run();
 const V = newIp();
 for (let i = 0; i < 20; i++) await client(V)("POST", "/auth/password/reset/verify", { email: `v${i}_${tag}@example.com`, code: "000000" });
 r = await client(V)("POST", "/auth/password/reset/verify", { email: emailAn, code: "000000" });
-ok(r.status === 400 && /시도가 너무 많습니다/.test(r.reason), "verify attempts capped per IP");
+ok(r.status === 400 && /시도가 너무 많/.test(r.reason), "verify attempts capped per IP");
 
 /* 10) 요청 위조·머리글 주입 */
 r = await client(newIp())("POST", "/auth/password/reset/start", "email=a%40b.co", { headers: { "content-type": "application/x-www-form-urlencoded" } });

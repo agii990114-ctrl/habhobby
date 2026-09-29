@@ -66,7 +66,8 @@ function smtpSend(m: Mail): Promise<void> {
   const port = Number(env.SMTP_PORT ?? 465);
   const plain = env.SMTP_PLAINTEXT_TEST === "1" && isLoopback(host);
   const user = env.SMTP_USER ?? "";
-  const pass = env.SMTP_PASS ?? "";
+  // 구글이 앱 비밀번호를 「abcd efgh …」처럼 띄어 보여 주므로 그대로 붙여 넣은 값도 받는다
+  const pass = (env.SMTP_PASS ?? "").replace(/\s+/g, "");
   const from = (env.MAIL_FROM || user).trim();
   const message = build(from, m);
 

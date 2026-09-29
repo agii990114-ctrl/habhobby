@@ -6941,9 +6941,18 @@ function openGuestWall() {
       || `<div class="empty">이 서버에는 로그인이 설정되어 있지 않습니다.</div>`;
   }).catch(e => toast(e.message));
 }
-/* 새로고침 단추 — 설치한 앱에는 브라우저의 것이 없다. 서랍을 닫고 받는다 (열린 채로는 그 뒤가
-   다시 그려져도 보이지 않는다). */
-document.getElementById("menu-refresh").onclick = () => { closeDrawer(); syncState({ manual: true }); };
+/* 새로고침 단추 — 설치한 앱에는 브라우저의 것이 없다. 상단바 탭 오른쪽에 있고 좁은 화면에서만
+   보인다(styles.css). 받는 동안 돌아서 눌린 것이 보인다. */
+{
+  const btn = document.getElementById("btn-refresh");
+  btn.onclick = async () => {
+    if (btn.classList.contains("spin")) return;
+    btn.classList.add("spin");
+    // 너무 빨리 끝나면 돌았는지 모른다 — 한 바퀴는 보여 준다
+    await Promise.all([syncState({ manual: true }), new Promise(r => setTimeout(r, 700))]);
+    btn.classList.remove("spin");
+  };
+}
 document.getElementById("menu-watched").onclick = () => { closeDrawer(); openArchive("watched"); };
 document.getElementById("menu-dropped").onclick = () => { closeDrawer(); openArchive("dropped"); };
 document.getElementById("menu-settings").onclick = () => { closeDrawer(); openAppSettings(); };

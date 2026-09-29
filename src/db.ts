@@ -374,6 +374,50 @@ try { db.exec("ALTER TABLE user ADD COLUMN display_name TEXT"); } catch { /* 이
 
    바뀌지 않는다는 규칙은 코드가 아니라 **표가 들고 있다** — 트리거가 막는다. 길목(setHandle)만
    지키면 나중에 다른 길이 생겼을 때 무너진다. */
+/* ── 이메일 인증 ─────────────────────────────────────────
+   가입과 비밀번호 재설정은 **메일로 받은 6자리 코드**를 거친다. 코드는 짧게 살고 한 번만 쓰이며,
+   여기에는 **원문이 아니라 HMAC 만** 담는다(비밀 열쇠는 app_secret). DB 가 새도 코드를 되짚을 수
+   없어야 한다 — 6자리는 100만 가지뿐이라 그냥 해시로는 곧바로 풀린다.
+
+   한 이메일·목적에 줄은 하나다(PRIMARY KEY). 다시 받으면 이전 코드는 그 자리에서 죽는다.
+   코드를 맞히면 줄에 **티켓**(인증을 마쳤다는 증표, 해시로만 담는다)이 붙고, 코드는 비운다.
+   티켓도 한 번만 쓰인다 — 새 비밀번호를 받는 자리에서 꺼내 간다.
+
+   Redis 를 쓰지 않은 까닭: 서버가 하나이고 DB 가 이미 있어서, 만료(expires_at)와 원자적 소모
+   (DELETE … RETURNING)를 여기서 그대로 얻는다. 컨테이너와 클라이언트를 더 얹어도 얻는 것이 없다. */
+db.exec(`
+CREATE TABLE IF NOT EXISTS email_code (
+  purpose        TEXT NOT NULL,          -- signup | reset
+  email          TEXT NOT NULL,          -- 소문자로 접은 값
+  login_id       TEXT,                   -- signup 에서만: 인증을 마치면 만들 아이디
+  code_mac       TEXT NOT NULL,          -- HMAC(코드) — 티켓이 붙으면 빈 글자
+  tries          INTEGER NOT NULL DEFAULT 0,
+  created_at     INTEGER NOT NULL,
+  expires_at     INTEGER NOT NULL,
+  ticket_hash    TEXT,
+  ticket_expires INTEGER,
+  PRIMARY KEY (purpose, email)
+);
+/* 메일을 부탁받은 기록 — 한도를 세는 근거다. 이메일 주소·IP·때만 담고 코드는 담지 않는다.
+   **없는 계정이든 있는 계정이든 똑같이 적는다**: 한도가 다르게 걸리면 그것으로 가입 여부를 안다. */
+CREATE TABLE IF NOT EXISTS mail_log (
+  at      INTEGER NOT NULL,
+  email   TEXT NOT NULL,
+  ip      TEXT NOT NULL,
+  purpose TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mail_log_email ON mail_log(email, at);
+CREATE INDEX IF NOT EXISTS idx_mail_log_ip ON mail_log(ip, at);
+CREATE TABLE IF NOT EXISTS app_secret (
+  name  TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+`);
+/* 같은 메일로 아이디·비밀번호 계정을 둘 만들 수 없다. 카카오 같은 다른 제공자의 이메일은 겹쳐도
+   된다(제공자가 인증한 별개의 계정이다) — 그래서 부분 색인이다. */
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_pw_email ON user(LOWER(email))
+  WHERE provider = 'password' AND email IS NOT NULL`);
+
 try { db.exec("ALTER TABLE user ADD COLUMN handle TEXT"); } catch { /* 이미 있음 */ }
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_handle ON user(handle) WHERE handle IS NOT NULL`);
 db.exec(`CREATE TRIGGER IF NOT EXISTS user_handle_fixed BEFORE UPDATE OF handle ON user
@@ -904,21 +948,24 @@ export function linkGuest(guestId: string, p: {
 }
 
 /* ── 아이디·비밀번호 계정 ──────────────────────────────────
-   되찾을 길(메일 인증 같은 것)을 두지 않았으므로, 비밀번호를 잊으면 그 계정에는
-   다시 못 들어간다. 화면에서 그렇게 알린다 — 있는 척하는 것보다 낫다. */
+   **메일을 인증한 사람만 만들 수 있다.** 되찾을 길이 메일뿐이라, 인증하지 않은 주소로 계정을
+   만들면 비밀번호를 잊은 사람은 영영 못 들어온다 — 그래서 이 함수는 이메일을 **필수**로 받고,
+   그것이 인증을 마친 값이라는 보장은 부르는 쪽(가입 티켓)이 진다. */
 const PW_PROVIDER = "password";
 
-/** 그 아이디가 이미 쓰이고 있으면 null */
-export function createPasswordUser(loginId: string, hash: string): User | null {
+/** 그 아이디나 그 이메일이 이미 쓰이고 있으면 null */
+export function createPasswordUser(loginId: string, hash: string, email: string): User | null {
   const taken = db.prepare("SELECT 1 FROM user WHERE provider = ? AND provider_uid = ?")
     .get(PW_PROVIDER, loginId);
-  if (taken) return null;
+  if (taken || passwordUserByEmail(email)) return null;
   const now = Date.now();
   const id = newId("u");
-  db.prepare(`INSERT INTO user
-      (id, provider, provider_uid, email, name, avatar, created_at, last_login_at, password_hash)
-    VALUES (?,?,?,?,?,?,?,?,?)`)
-    .run(id, PW_PROVIDER, loginId, null, null, null, now, now, hash);
+  try {
+    db.prepare(`INSERT INTO user
+        (id, provider, provider_uid, email, name, avatar, created_at, last_login_at, password_hash)
+      VALUES (?,?,?,?,?,?,?,?,?)`)
+      .run(id, PW_PROVIDER, loginId, email, null, null, now, now, hash);
+  } catch { return null; }                     // 색인이 잡았다 — 동시에 같은 값으로 온 요청
   return toUser(db.prepare("SELECT * FROM user WHERE id = ?").get(id));
 }
 
@@ -930,15 +977,29 @@ export function passwordUser(loginId: string): { user: User; hash: string } | nu
   return { user: toUser(r), hash: r.password_hash };
 }
 
+/** 이메일로 찾는다 — 아이디 찾기와 비밀번호 재설정이 쓴다. 소문자로 견준다. */
+export function passwordUserByEmail(email: string): (User & { loginId: string }) | null {
+  const r = db.prepare(`SELECT * FROM user WHERE provider = ? AND LOWER(email) = LOWER(?)
+    AND password_hash IS NOT NULL`).get(PW_PROVIDER, email) as any;
+  return r ? { ...toUser(r), loginId: r.provider_uid } : null;
+}
+
+/** 비밀번호를 바꾼다. 세션과 공유 열쇠를 걷는 것은 부르는 쪽이 함께 한다(auth.ts). */
+export const setPasswordHash = (userId: string, hash: string): boolean =>
+  !!db.prepare("UPDATE user SET password_hash = ? WHERE id = ? AND provider = ?")
+    .run(hash, userId, PW_PROVIDER).changes;
+
 /** 게스트를 아이디·비밀번호 계정으로 잇는다 — 담아 둔 것을 그대로 데려간다 */
-export function linkGuestPassword(guestId: string, loginId: string, hash: string): User | null {
+export function linkGuestPassword(guestId: string, loginId: string, hash: string, email: string): User | null {
   const g = getUser(guestId);
   if (!g || g.provider !== "guest") return null;
   const taken = db.prepare("SELECT 1 FROM user WHERE provider = ? AND provider_uid = ?")
     .get(PW_PROVIDER, loginId);
-  if (taken) return null;
-  db.prepare(`UPDATE user SET provider = ?, provider_uid = ?, password_hash = ?, last_login_at = ?
-    WHERE id = ?`).run(PW_PROVIDER, loginId, hash, Date.now(), guestId);
+  if (taken || passwordUserByEmail(email)) return null;
+  try {
+    db.prepare(`UPDATE user SET provider = ?, provider_uid = ?, email = ?, password_hash = ?, last_login_at = ?
+      WHERE id = ?`).run(PW_PROVIDER, loginId, email, hash, Date.now(), guestId);
+  } catch { return null; }
   return getUser(guestId);
 }
 

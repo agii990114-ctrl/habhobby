@@ -207,32 +207,92 @@ ${p.label.replace("로 계속하기", "")} 콘솔에서 Client Secret이 켜져 
    같은 비밀번호를 쓴 두 사람의 요약이 같아지지 않는다.
 
    scrypt 는 일부러 느리고 메모리를 많이 쓰는 셈법이다 — 빠른 셈법(SHA 같은 것)으로
-   요약하면 훔쳐간 사람이 초당 수십억 번씩 맞춰볼 수 있다. */
-const scryptAsync = promisify(scrypt) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
+   요약하면 훔쳐간 사람이 초당 수십억 번씩 맞춰볼 수 있다.
+
+   **비용을 값에 적어 둔다**(`scrypt2:<logN>:소금:요약`). 예전 값(`scrypt:…`)은 기본 비용(N=2^14)
+   으로 만든 것이라 그 모양도 읽는다. 비용을 올릴 때 옛 요약이 못 읽히는 일이 없어야 하고, 다음에
+   또 올릴 때도 같은 길을 쓴다. 지금은 N=2^16 · r=8 · p=1 — 메모리 64MB 를 쓰고 한 번에 0.1~0.2초다. */
+type ScryptOpts = { N: number; r: number; p: number; maxmem: number };
+const scryptAsync = promisify(scrypt) as
+  (pw: string, salt: Buffer, len: number, opts: ScryptOpts) => Promise<Buffer>;
 const SCRYPT_LEN = 64;
+const SCRYPT_LOGN = 16;
+const scryptOpts = (logN: number): ScryptOpts =>
+  ({ N: 2 ** logN, r: 8, p: 1, maxmem: 256 * 1024 * 1024 });
 
 export async function hashPassword(pw: string): Promise<string> {
   const salt = randomBytes(16);
-  const key = await scryptAsync(pw, salt, SCRYPT_LEN);
-  return `scrypt:${salt.toString("base64url")}:${key.toString("base64url")}`;
+  const key = await scryptAsync(pw, salt, SCRYPT_LEN, scryptOpts(SCRYPT_LOGN));
+  return `scrypt2:${SCRYPT_LOGN}:${salt.toString("base64url")}:${key.toString("base64url")}`;
 }
 
 /** 맞는지 본다. 어떤 값이 와도 같은 시간이 들도록 timingSafeEqual 로 견준다. */
 export async function verifyPassword(pw: string, stored: string): Promise<boolean> {
-  const [kind, saltB64, keyB64] = stored.split(":");
-  if (kind !== "scrypt" || !saltB64 || !keyB64) return false;
+  const parts = stored.split(":");
+  let logN = 14, saltB64: string | undefined, keyB64: string | undefined;
+  if (parts[0] === "scrypt2" && parts.length === 4) {
+    logN = Number(parts[1]); saltB64 = parts[2]; keyB64 = parts[3];
+    if (!Number.isInteger(logN) || logN < 14 || logN > 18) return false;
+  } else if (parts[0] === "scrypt" && parts.length === 3) {
+    saltB64 = parts[1]; keyB64 = parts[2];
+  } else return false;
+  if (!saltB64 || !keyB64) return false;
   const want = Buffer.from(keyB64, "base64url");
-  const got = await scryptAsync(pw, Buffer.from(saltB64, "base64url"), want.length);
+  const got = await scryptAsync(pw, Buffer.from(saltB64, "base64url"), want.length, scryptOpts(logN));
   return want.length === got.length && timingSafeEqual(want, got);
+}
+
+/** **없는 아이디에도 같은 시간을 쓴다.** 아이디가 없을 때 곧바로 돌려주면 「빨리 실패 = 없는
+    아이디」로 가입 여부가 새어 나간다. 진짜 요약과 같은 비용의 가짜 요약을 견줘 본다. */
+let DUMMY: Promise<string> | null = null;
+export async function spendLikeVerify(pw: string): Promise<void> {
+  DUMMY ??= hashPassword(randomBytes(12).toString("base64url"));
+  await verifyPassword(pw, await DUMMY);
 }
 
 /** 아이디로 쓸 수 있는 값인가 — 영문·숫자·밑줄 3~20자 */
 export const validLoginId = (v: unknown): v is string =>
   typeof v === "string" && /^[A-Za-z0-9_]{3,20}$/.test(v);
 
-/** 비밀번호는 8자 이상. 짧은 것을 막는 것만으로도 대부분을 거른다. */
+/** 로그인 때 받는 비밀번호의 모양. **강도는 따지지 않는다** — 옛 규칙으로 만든 비밀번호도
+    들어와야 하고, 여기서 막을 것은 터무니없이 긴 값(요약 셈을 부풀리는 요청)뿐이다. */
 export const validPassword = (v: unknown): v is string =>
-  typeof v === "string" && v.length >= 8 && v.length <= 200;
+  typeof v === "string" && v.length >= 1 && v.length <= 128;
+
+/** 새로 정하는 비밀번호의 규칙 — 가입과 재설정이 함께 쓴다. 어긋나면 이유를, 맞으면 null.
+    영문·숫자·특수기호를 모두 넣고, 흔한 것과 내 아이디·이메일이 든 것은 받지 않는다. */
+const COMMON = ["password", "passw0rd", "qwerty", "qwer1234", "asdf1234", "abcd1234", "abc12345",
+  "12345678", "123456789", "1q2w3e4r", "1qaz2wsx", "iloveyou", "letmein", "welcome", "admin123",
+  "habhobby", "hobby123", "dragon", "monkey", "master"];
+export function passwordProblem(pw: unknown, who: { loginId?: string; email?: string } = {}): string | null {
+  if (typeof pw !== "string") return "비밀번호를 입력해 주세요.";
+  if (pw.length < 8) return "비밀번호는 8자 이상이어야 합니다.";
+  if (pw.length > 128) return "비밀번호는 128자를 넘을 수 없습니다.";
+  if (/[\u0000-\u001f\u007f]/.test(pw)) return "비밀번호에 쓸 수 없는 글자가 있습니다.";
+  if (!/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw) || !/[!-\/:-@\[-`{-~]/.test(pw))
+    return "영문, 숫자, 특수기호(!@#$% 등)를 모두 넣어 주세요.";
+  const low = pw.toLowerCase();
+  if (COMMON.some(w => low.includes(w))) return "너무 흔한 비밀번호입니다. 다른 것으로 정해 주세요.";
+  if (/(.)\1{3,}/.test(pw)) return "같은 글자를 네 번 이상 이어 쓸 수 없습니다.";
+  const id = (who.loginId ?? "").toLowerCase();
+  if (id.length >= 3 && low.includes(id)) return "비밀번호에 아이디를 넣을 수 없습니다.";
+  const local = (who.email ?? "").toLowerCase().split("@")[0];
+  if (local.length >= 4 && low.includes(local)) return "비밀번호에 이메일 앞부분을 넣을 수 없습니다.";
+  return null;
+}
+
+/** 이메일을 소문자로 접는다. 모양이 안 맞으면 null.
+    **줄바꿈·공백·꺾쇠·따옴표를 아예 받지 않는다** — 그 주소가 메일 머리글에 들어가므로, 한 글자라도
+    새면 머리글을 끼워 넣어 딴 사람에게 보내는 길이 된다. */
+export function normEmail(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const e = v.trim().toLowerCase();
+  if (e.length < 6 || e.length > 254) return null;
+  if (!/^[a-z0-9._%+\-]{1,64}@[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?)+$/.test(e))
+    return null;
+  if (e.includes("..")) return null;
+  return e;
+}
 
 /* ── 세션 ────────────────────────────────────────────────── */
 const hash = (t: string) => createHash("sha256").update(t).digest("hex");
@@ -262,6 +322,14 @@ export function userFromToken(token: string | null): User | null {
 export const destroySession = (token: string | null): void => {
   if (token) db.prepare("DELETE FROM session WHERE token_hash = ?").run(hash(token));
 };
+
+/** 이 사람의 로그인 상태를 **모조리** 걷는다 — 세션과 공유 열쇠(단축어·앱)까지.
+    비밀번호를 바꾸거나 되찾는 것은 남이 들어와 있었을 수도 있다는 뜻이다. 세션만 걷으면 그 사람이
+    만들어 둔 공유 열쇠로 계속 담아 넣을 수 있다. */
+export function destroyAllLogins(userId: string): void {
+  db.prepare("DELETE FROM session WHERE user_id = ?").run(userId);
+  db.prepare("DELETE FROM share_key WHERE user_id = ?").run(userId);
+}
 
 /* ── 공유 열쇠 ────────────────────────────────────────────
    브라우저 밖에서 오는 길(iOS 단축어·TWA)의 신분증. 세션과 **나란히** 두되 섞지 않는다 —

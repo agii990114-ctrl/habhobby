@@ -6544,6 +6544,10 @@ function openAppSettings() {
         친구 기능도 쓸 수 없습니다. <b>로그인하면 지금 담아둔 것이 그대로 옮겨집니다.</b></div>
       <div class="login-btns" style="margin-top:10px" data-guest-login></div>`
       : `
+      ${me.provider === "password" ? `<div class="name-row" style="margin-top:10px">
+        <div class="acct-t" style="flex:1"><b>비밀번호</b>
+          <span>메일 인증을 거쳐 바꿉니다${me.email ? "" : " — 이메일이 등록되어 있지 않습니다"}</span></div>
+        <button class="btn" data-change-pw${me.email ? "" : " disabled"}>바꾸기</button></div>` : ""}
       <div class="name-row" style="margin-top:10px">
         <input id="set-dname" value="${esc(me.displayName ?? "")}"
                placeholder="표시 이름 (예: 영수)" maxlength="20">
@@ -6661,6 +6665,9 @@ function openAppSettings() {
       toast("저장되었습니다");
     });
   }
+
+  const chg = sheet.querySelector("[data-change-pw]");
+  if (chg) chg.onclick = () => openPasswordChange();
 
   const setH = sheet.querySelector("[data-set-handle]");
   if (setH) setH.onclick = () => openNameForm(openAppSettings);
@@ -7044,31 +7051,181 @@ screenEl.addEventListener("click", e => {
 });
 
 /* ── 로그인 ──────────────────────────────────────────────── */
-function showLogin(providers, errMsg) {
-  let mode = "login";                      // login | signup
+/* ── 이메일 인증 → 새 비밀번호 ───────────────────────────────
+   가입과 비밀번호 재설정(설정의 「비밀번호 바꾸기」도)이 **같은 두 걸음**을 쓴다:
+     ① 메일로 받은 6자리 코드를 넣는다  ② 인증이 끝나면 새 비밀번호를 정한다
+   비밀번호는 인증을 마친 뒤에야 받는다. 첫 걸음(메일 주소를 알리는 것)은 부르는 쪽이 하고,
+   여기는 코드를 넣는 자리부터 맡는다. 로그인 화면과 설정 창이 함께 쓰므로 그릴 자리(box)를 받는다. */
+const PW_RULES = [
+  ["8자 이상", p => p.length >= 8],
+  ["영문", p => /[A-Za-z]/.test(p)],
+  ["숫자", p => /[0-9]/.test(p)],
+  ["특수기호", p => /[!-\/:-@\[-`{-~]/.test(p)],
+];
+const pwRulesHtml = pw => `<div class="pw-rules" data-pw-rules>${PW_RULES.map(([t, f]) =>
+  `<span class="${f(pw) ? "ok" : ""}">${f(pw) ? "✓" : "·"} ${t}</span>`).join("")}</div>`;
 
-  const draw = (msg) => {
-    const 가입 = mode === "signup";
-    document.querySelector(".app").innerHTML = `
+/** @param o.purpose "signup" | "reset" · o.email · o.cooldown 다시 받기까지 초 ·
+    o.resend 코드를 다시 보내는 함수 · o.onBack 처음으로 · o.onDone 끝났을 때 (가입은 서버가 쿠키를 구워 주므로 다시 연다) */
+function mountVerify(box, o) {
+  let ticket = null, cool = o.cooldown ?? 60, timer = null;
+  const stop = () => { clearInterval(timer); timer = null; };
+  const post = (step, body) => api("POST", `/auth/password/${o.purpose}/${step}`, body);
+
+  const drawCode = msg => {
+    stop();
+    box.innerHTML = `
+      <p class="login-lead" style="margin:0 0 14px"><b>${esc(o.email)}</b> 로 6자리 코드를 보냈습니다.<br>
+        10분 안에 넣어 주세요. 안 보이면 스팸함도 확인해 주세요.</p>
+      ${msg ? `<div class="note">${esc(msg)}</div>` : ""}
+      <form class="login-form" data-vf autocomplete="off">
+        <input class="code-in" data-code inputmode="numeric" pattern="[0-9]*" maxlength="6"
+               autocomplete="one-time-code" placeholder="000000" aria-label="인증 코드">
+        <button class="login-btn solid" type="submit">확인</button>
+      </form>
+      <div class="v-links">
+        <button type="button" class="linkish" data-resend disabled></button>
+        <button type="button" class="linkish" data-back>처음으로</button>
+      </div>`;
+    const resend = box.querySelector("[data-resend]");
+    const paint = () => {
+      resend.disabled = cool > 0;
+      resend.textContent = cool > 0 ? `코드 다시 받기 (${cool}초)` : "코드 다시 받기";
+    };
+    paint();
+    timer = setInterval(() => { if (cool > 0) { cool--; paint(); } else stop(); }, 1000);
+    const codeEl = box.querySelector("[data-code]");
+    codeEl.addEventListener("input", () => { codeEl.value = codeEl.value.replace(/\D/g, "").slice(0, 6); });
+    codeEl.focus();
+    box.querySelector("[data-back]").onclick = () => { stop(); o.onBack(); };
+    resend.onclick = guard(async () => {
+      try { const r = await o.resend(); cool = r?.cooldown ?? 60; drawCode("코드를 다시 보냈습니다."); }
+      catch (e) { drawCode(e.message); }
+    });
+    box.querySelector("[data-vf]").onsubmit = guard(async e => {
+      e.preventDefault();
+      try {
+        const r = await post("verify", { email: o.email, code: codeEl.value.trim() });
+        ticket = r.ticket; stop();
+        drawPassword(r.loginId);
+      } catch (err) { drawCode(err.message); }
+    });
+  };
+
+  const drawPassword = (loginId, msg) => {
+    box.innerHTML = `
+      <p class="login-lead" style="margin:0 0 14px">메일 인증이 끝났습니다.${loginId
+        ? `<br>아이디 <b>${esc(loginId)}</b> 로 가입합니다.` : ""}<br>새 비밀번호를 정해 주세요.</p>
+      ${msg ? `<div class="note">${esc(msg)}</div>` : ""}
+      <form class="login-form" data-pf>
+        <input data-pw type="password" autocomplete="new-password" maxlength="128" placeholder="새 비밀번호">
+        <input data-pw2 type="password" autocomplete="new-password" maxlength="128" placeholder="새 비밀번호 확인">
+        <div data-rules>${pwRulesHtml("")}</div>
+        <button class="login-btn solid" type="submit" disabled>${o.purpose === "signup" ? "가입 완료" : "비밀번호 바꾸기"}</button>
+      </form>`;
+    const pw = box.querySelector("[data-pw]"), pw2 = box.querySelector("[data-pw2]");
+    const btn = box.querySelector("[type=submit]");
+    const check = () => {
+      box.querySelector("[data-rules]").innerHTML = pwRulesHtml(pw.value);
+      const same = pw.value !== "" && pw.value === pw2.value;
+      btn.disabled = !(PW_RULES.every(([, f]) => f(pw.value)) && same);
+    };
+    pw.addEventListener("input", check); pw2.addEventListener("input", check);
+    pw.focus();
+    box.querySelector("[data-pf]").onsubmit = guard(async e => {
+      e.preventDefault();
+      if (btn.disabled) return;
+      try {
+        await post("complete", { ticket, password: pw.value });
+      } catch (err) {
+        // 인증이 만료됐으면 여기서 고칠 수 없다 — 처음부터 다시
+        if (/만료/.test(err.message)) { o.onBack(err.message); return; }
+        drawPassword(loginId, err.message); return;
+      }
+      o.onDone();
+    });
+  };
+
+  drawCode();
+}
+
+/** 설정의 「비밀번호 바꾸기」 — 메일 인증을 거친 뒤 새 비밀번호를 받는다.
+    바꾸면 **모든 기기에서 로그아웃**되고 공유 열쇠(단축어·앱)도 걷힌다 — 남이 들어와 있었을 수 있어서다. */
+function openPasswordChange() {
+  if (!me?.email) { toast("이메일이 등록되어 있지 않아 바꿀 수 없습니다."); return; }
+  openSheet(`
+    ${headHtml("비밀번호 바꾸기", { back: false, actions: false })}
+    <div data-pc></div>`);
+  const box = sheet.querySelector("[data-pc]");
+  const start = () => api("POST", "/auth/password/reset/start", { email: me.email });
+  const intro = msg => {
+    box.innerHTML = `
+      <div class="rest" style="text-align:left;padding:2px 2px 12px">
+        <b>${esc(me.email)}</b> 로 인증 코드를 보냅니다. 코드를 확인하면 새 비밀번호를 정할 수 있습니다.<br><br>
+        바꾸면 <b>모든 기기에서 로그아웃</b>되고, 등록해 둔 공유 열쇠(단축어·앱)도 해제됩니다.</div>
+      ${msg ? `<div class="note">${esc(msg)}</div>` : ""}
+      <button class="btn primary" style="width:100%" data-send>인증 코드 보내기</button>`;
+    box.querySelector("[data-send]").onclick = guard(async () => {
+      let r;
+      try { r = await start(); } catch (e) { intro(e.message); return; }
+      mountVerify(box, { purpose: "reset", email: me.email, cooldown: r.cooldown,
+        resend: start, onBack: intro,
+        onDone: () => {
+          box.innerHTML = `
+            <div class="rest" style="text-align:left;padding:2px 2px 14px">
+              비밀번호를 바꿨습니다. 모든 기기에서 로그아웃되었으니 새 비밀번호로 다시 로그인해 주세요.</div>
+            <button class="btn primary" style="width:100%" data-relogin>로그인 화면으로</button>`;
+          box.querySelector("[data-relogin]").onclick = () => location.replace("/");
+        } });
+    });
+  };
+  intro();
+}
+
+function showLogin(providers, errMsg) {
+  /* 화면 갈래: login · signup · find(아이디 찾기) · reset(비밀번호 재설정).
+     가입과 재설정은 메일 인증이 끼므로 여러 걸음이고, 걸음 안쪽은 mountVerify 가 그린다. */
+  let view = "login";
+
+  const chrome = (inner, msg) => `
     <div class="login">
       <div class="login-brand">Hab<span>Hobby</span></div>
       <p class="login-lead">흩어진 미디어 생활을 하나의 목록으로.<br>
         웹툰·드라마·영화, 어디서 보든 한 곳에서 이어 보세요.</p>
       ${msg ? `<div class="note">${esc(msg)}</div>` : ""}
+      ${inner}
+    </div>`;
+  const setView = (v, msg) => { view = v; draw(msg); };
+  const emailInput = `<input id="lg-email" name="email" type="email" placeholder="이메일" autocomplete="email"
+    spellcheck="false" maxlength="254" autocapitalize="none">`;
 
+  /* 메일 주소를 알리는 첫 걸음 → 코드를 넣는 자리로 넘긴다 */
+  const startFlow = (purpose, body, msgOnBack) => async () => {
+    const r = await api("POST", `/auth/password/${purpose}/start`, body);
+    const box = document.getElementById("flow");
+    mountVerify(box, {
+      purpose, email: body.email, cooldown: r.cooldown,
+      resend: () => api("POST", `/auth/password/${purpose}/start`, body),
+      onBack: m => setView(purpose, m),
+      onDone: () => purpose === "signup" ? location.replace("/")   // 서버가 쿠키를 구워 줬다
+        : setView("login", "비밀번호를 바꿨습니다. 새 비밀번호로 로그인해 주세요."),
+    });
+  };
+
+  const drawLogin = msg => {
+    document.querySelector(".app").innerHTML = chrome(`
       <form class="login-form" id="pw-form" autocomplete="on">
-        <div class="pickers" id="pw-mode">
-          <button class="pick" type="button" data-m="login" aria-pressed="${!가입}">로그인</button>
-          <button class="pick" type="button" data-m="signup" aria-pressed="${가입}">가입하기</button>
-        </div>
-        <input id="pw-id" name="username" placeholder="아이디 (영문·숫자 3~20자)"
-               autocomplete="username" spellcheck="false" maxlength="20">
-        <input id="pw-pw" name="password" type="password" placeholder="비밀번호 (8자 이상)"
-               autocomplete="${가입 ? "new-password" : "current-password"}" maxlength="200">
-        <button class="login-btn solid" type="submit">${가입 ? "가입하고 시작하기" : "로그인"}</button>
-        ${가입 ? `<p class="login-foot" style="margin:6px 0 0">
-          비밀번호를 잊으면 되찾을 길이 없습니다 — 메일 인증을 두지 않았습니다.</p>` : ""}
+        <input id="pw-id" name="username" placeholder="아이디" autocomplete="username"
+               spellcheck="false" maxlength="20" autocapitalize="none">
+        <input id="pw-pw" name="password" type="password" placeholder="비밀번호"
+               autocomplete="current-password" maxlength="128">
+        <button class="login-btn solid" type="submit">로그인</button>
       </form>
+      <div class="v-links">
+        <button type="button" class="linkish" data-v="signup">회원가입</button>
+        <button type="button" class="linkish" data-v="find">아이디 찾기</button>
+        <button type="button" class="linkish" data-v="reset">비밀번호 재설정</button>
+      </div>
 
       ${providers.length ? `<div class="login-or">또는</div>` : ""}
       <div class="login-btns">
@@ -7078,33 +7235,97 @@ function showLogin(providers, errMsg) {
       </div>
       <p class="login-foot">로그인하면 담아둔 목록이 기기와 상관없이 따라옵니다.<br>
         <b>둘러보기</b>는 이 기기에만 남고 친구 기능을 쓸 수 없습니다 —
-        나중에 로그인하면 담아둔 것이 그대로 옮겨집니다.</p>
-    </div>`;
+        나중에 로그인하면 담아둔 것이 그대로 옮겨집니다.</p>`, msg);
 
-    document.getElementById("pw-mode").onclick = e => {
-      const b = e.target.closest("[data-m]"); if (!b) return;
-      mode = b.dataset.m;
-      const id = document.getElementById("pw-id").value;
-      draw();                              // 갈래가 바뀌면 안내 문구도 바뀐다
-      document.getElementById("pw-id").value = id;
+    document.querySelector(".v-links").onclick = e => {
+      const b = e.target.closest("[data-v]"); if (b) setView(b.dataset.v);
     };
-
     document.getElementById("pw-form").onsubmit = guard(async e => {
       e.preventDefault();
       const loginId = document.getElementById("pw-id").value.trim();
       const password = document.getElementById("pw-pw").value;
       try {
-        await api("POST", `/auth/password/${mode}`, { loginId, password });
-      } catch (err) { draw(err.message); return; }
+        await api("POST", "/auth/password/login", { loginId, password });
+      } catch (err) { drawLogin(err.message); return; }
       location.replace("/");               // 쿠키를 들고 처음부터 다시
     });
-
     document.getElementById("go-guest").onclick = guard(async () => {
       await api("POST", "/auth/guest");
       location.replace("/");
     });
   };
 
+  const drawSignup = msg => {
+    document.querySelector(".app").innerHTML = chrome(`
+      <div id="flow">
+        <form class="login-form" id="su-form" autocomplete="on">
+          <input id="su-id" name="username" placeholder="아이디 (영문·숫자·밑줄 3~20자)"
+                 autocomplete="username" spellcheck="false" maxlength="20" autocapitalize="none">
+          ${emailInput}
+          <button class="login-btn solid" type="submit">인증 코드 받기</button>
+        </form>
+        <p class="login-foot" style="margin:14px 0 0;max-width:320px">
+          입력한 메일로 6자리 코드를 보냅니다. 아이디나 비밀번호를 잊었을 때 이 메일로 되찾습니다.</p>
+      </div>
+      <div class="v-links"><button type="button" class="linkish" data-v="login">← 로그인으로</button></div>`, msg);
+    document.querySelector(".v-links").onclick = e => { if (e.target.closest("[data-v]")) setView("login"); };
+    document.getElementById("su-form").onsubmit = guard(async e => {
+      e.preventDefault();
+      const loginId = document.getElementById("su-id").value.trim();
+      const email = document.getElementById("lg-email").value.trim();
+      try { await startFlow("signup", { loginId, email })(); }
+      catch (err) { drawSignup(err.message); const a = document.getElementById("su-id"); a.value = loginId;
+        document.getElementById("lg-email").value = email; }
+    });
+  };
+
+  const drawReset = msg => {
+    document.querySelector(".app").innerHTML = chrome(`
+      <div id="flow">
+        <form class="login-form" id="rs-form">
+          ${emailInput}
+          <button class="login-btn solid" type="submit">인증 코드 받기</button>
+        </form>
+        <p class="login-foot" style="margin:14px 0 0;max-width:320px">
+          가입한 메일로 6자리 코드를 보냅니다. 인증이 끝나면 새 비밀번호를 정합니다.<br>
+          바꾸면 모든 기기에서 로그아웃됩니다.</p>
+      </div>
+      <div class="v-links"><button type="button" class="linkish" data-v="login">← 로그인으로</button></div>`, msg);
+    document.querySelector(".v-links").onclick = e => { if (e.target.closest("[data-v]")) setView("login"); };
+    document.getElementById("rs-form").onsubmit = guard(async e => {
+      e.preventDefault();
+      const email = document.getElementById("lg-email").value.trim();
+      try { await startFlow("reset", { email })(); }
+      catch (err) { drawReset(err.message); document.getElementById("lg-email").value = email; }
+    });
+  };
+
+  const drawFind = msg => {
+    document.querySelector(".app").innerHTML = chrome(`
+      <div id="flow">
+        <form class="login-form" id="fd-form">
+          ${emailInput}
+          <button class="login-btn solid" type="submit">아이디 보내기</button>
+        </form>
+        <p class="login-foot" style="margin:14px 0 0;max-width:320px">
+          가입한 메일 주소를 넣으면 그 메일로 아이디를 보내 드립니다.</p>
+      </div>
+      <div class="v-links"><button type="button" class="linkish" data-v="login">← 로그인으로</button></div>`, msg);
+    document.querySelector(".v-links").onclick = e => { if (e.target.closest("[data-v]")) setView("login"); };
+    document.getElementById("fd-form").onsubmit = guard(async e => {
+      e.preventDefault();
+      const email = document.getElementById("lg-email").value.trim();
+      try { await api("POST", "/auth/password/find-id", { email }); }
+      catch (err) { drawFind(err.message); document.getElementById("lg-email").value = email; return; }
+      // 가입된 메일인지는 알리지 않는다 — 있든 없든 같은 말
+      document.getElementById("flow").innerHTML = `
+        <div class="rest" style="text-align:left;max-width:320px;padding:4px 2px">
+          <b>${esc(email)}</b> 로 가입한 계정이 있다면 아이디를 보냈습니다.<br>
+          메일함(스팸함 포함)을 확인해 주세요.</div>`;
+    });
+  };
+
+  const draw = msg => ({ login: drawLogin, signup: drawSignup, reset: drawReset, find: drawFind })[view](msg);
   draw(errMsg);
 }
 

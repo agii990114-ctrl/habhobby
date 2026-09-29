@@ -1651,6 +1651,18 @@
   }
   .login-btn.ghost:hover { background: var(--surface-2); color: var(--ink); }
   .login-foot { margin: 24px 0 0; font-size: 12px; color: var(--ink-3); }
+  /* 로그인 아래 곁가지 링크 · 코드 단계의 다시 받기 */
+  .v-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 14px;
+    width: min(320px, 100%); margin-top: 12px; font-size: 13px; }
+  .linkish { background: none; border: 0; padding: 4px 2px; color: var(--ink-2); cursor: pointer;
+    font: inherit; text-decoration: underline; text-underline-offset: 3px; }
+  .linkish:disabled { color: var(--ink-3); cursor: default; text-decoration: none; }
+  /* 비밀번호 규칙 — 지킨 것은 초록으로 바뀐다 */
+  .pw-rules { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--ink-3);
+    padding: 0 2px; }
+  .pw-rules .ok { color: var(--good); font-weight: 600; }
+  .login-form .code-in { text-align: center; letter-spacing: .4em; font-size: 20px;
+    font-variant-numeric: tabular-nums; }
 
   /* ── 계정 ─────────────────────────── */
   .acct { display: flex; align-items: center; gap: 11px; }

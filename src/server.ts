@@ -11,7 +11,7 @@ import {
   addFriend, removeFriend, areFriends,
   follows, addFollow, removeFollow, removeFollower, listFollowing, listFollowers, userByHandle, setHandle, countFollows,
   createGuest, linkGuest, isGuest,
-  createPasswordUser, passwordUser, linkGuestPassword, markLogin,
+  createPasswordUser, passwordUser, passwordUserByEmail, setPasswordHash, linkGuestPassword, markLogin,
   sharedView, createInvite, inviteOwner, getUser, setFolderShare, setFolderTake,
   getFolder, createFolder, canEdit, SHARE_MODES, seenByMe, markSeen,
   folderInvites, acceptFolder, declineFolder, leaveFolder,
@@ -26,8 +26,12 @@ import {
   userFromToken, destroySession, cookieHeader, readCookie, COOKIE,
   shareKeyUser, createShareKey, listShareKeys, deleteShareKey,
   localFallbackAllowed, redirectUri, BASE_URL,
-  hashPassword, verifyPassword, validLoginId, validPassword,
+  hashPassword, verifyPassword, spendLikeVerify, validLoginId, validPassword,
+  passwordProblem, normEmail, destroyAllLogins,
 } from "./auth.ts";
+import { sendMail, mailMode } from "./mail.ts";
+import { allowRequest, issueCode, verifyCode, peekTicket, consumeTicket, revokeCodes,
+         CODE_TTL, RESEND_COOLDOWN } from "./verify.ts";
 import { PLATFORMS, platformById, readableOn, DOMAIN_PREFIX, registrableDomain } from "./platforms.ts";
 import { resolveUrl, originLabel, fetchSiteName, type Resolved } from "./resolve.ts";
 
@@ -1839,20 +1843,229 @@ function currentUser(req: IncomingMessage): User | null {
 const TRIES = new Map<string, { n: number; until: number }>();
 const TRY_MAX = 8, TRY_WINDOW = 10 * 60_000;
 
-function tooManyTries(id: string): string | null {
+function tooManyTries(id: string, max = TRY_MAX): string | null {
   const t = TRIES.get(id);
   if (!t) return null;
   if (Date.now() > t.until) { TRIES.delete(id); return null; }
-  if (t.n < TRY_MAX) return null;
+  if (t.n < max) return null;
   const min = Math.ceil((t.until - Date.now()) / 60_000);
   return `너무 여러 번 틀렸습니다. ${min}분 뒤에 다시 해 주세요.`;
 }
 function failed(id: string): void {
+  // 주소를 바꿔 가며 두드리는 것이 쌓아 두는 값이 끝없이 늘지 않게 — 만료된 것을 가끔 쓸어 낸다
+  if (TRIES.size > 5000) for (const [k, v] of TRIES) if (Date.now() > v.until) TRIES.delete(k);
   const t = TRIES.get(id);
   if (t && Date.now() <= t.until) t.n++;
   else TRIES.set(id, { n: 1, until: Date.now() + TRY_WINDOW });
 }
 const clearTries = (id: string): void => { TRIES.delete(id); };
+
+/* ── 아이디·비밀번호 인증 ──────────────────────────────────────
+   가입도 비밀번호 재설정도 **메일로 받은 6자리 코드**를 거친다(verify.ts). 순서는 늘 같다:
+     ① 메일 주소를 알린다 → 코드가 메일로 간다
+     ② 코드를 맞힌다 → 인증을 마쳤다는 티켓을 받는다
+     ③ 티켓을 내고 **새 비밀번호를 정한다** — 비밀번호는 인증이 끝난 뒤에야 받는다
+   되찾을 길이 메일이라, 인증하지 않은 주소로는 계정을 만들지 않는다. */
+
+/** 요청을 보낸 쪽의 주소. cloudflared 가 붙여 주는 머리글을 믿는다 — 8080 은 이 PC 안에서만
+    열려 있어(docker-compose) 바깥에서 그 머리글을 꾸며 보낼 길이 없다. */
+function clientIp(req: IncomingMessage): string {
+  const cf = req.headers["cf-connecting-ip"];
+  if (typeof cf === "string" && cf.length <= 64) return cf;
+  return req.socket.remoteAddress ?? "?";
+}
+
+/** 인증 요청이 **우리 화면에서 온 JSON** 인가. 다른 사이트의 폼이나 이미지 태그가 보낸 것은 막는다.
+    JSON 만 받으면 남의 사이트는 사전 확인(preflight)을 거쳐야 하고, 그것은 우리가 허락하지 않는다. */
+function authPostOk(req: IncomingMessage, res: ServerResponse): boolean {
+  const ct = String(req.headers["content-type"] ?? "");
+  const site = req.headers["sec-fetch-site"];
+  let originOk = true;
+  const origin = req.headers.origin;
+  if (typeof origin === "string") {
+    try {
+      const h = new URL(origin).host;
+      originOk = h === new URL(BASE_URL).host || h === req.headers.host;
+    } catch { originOk = false; }
+  }
+  const siteOk = !site || site === "same-origin" || site === "none";
+  if (!ct.toLowerCase().startsWith("application/json") || !siteOk || !originOk) {
+    json(res, 403, { ok: false, reason: "허용되지 않은 요청입니다." });
+    return false;
+  }
+  return true;
+}
+
+const deliver = (mail: { to: string; subject: string; text: string }): void => {
+  // 답을 기다리지 않는다 — 보낸 시간이 다르면 「메일이 나갔다 = 가입된 주소」가 새어 나간다
+  sendMail(mail).catch(e => console.error("  ⚠ 메일 발송 실패:", e instanceof Error ? e.message : e));
+};
+const MAIL_TAIL = "\n\n직접 요청하지 않았다면 이 메일을 무시하세요. 이 코드를 다른 사람에게 알려 주지 마세요.";
+const codeText = (title: string, code: string, extra = "") =>
+  `${title}\n\n    ${code}\n\n이 코드는 ${CODE_TTL / 60000}분 동안만 쓸 수 있습니다.${extra}${MAIL_TAIL}\n`;
+
+const MAIL_OFF = "메일 발송이 아직 설정되지 않았습니다. 관리자에게 알려 주세요.";
+const EXPIRED = "인증이 만료되었습니다. 처음부터 다시 해 주세요.";
+
+async function passwordAuth(req: IncomingMessage, res: ServerResponse, seg: string[]): Promise<boolean> {
+  const step = seg[2], sub = seg[3];
+  // 예전 화면(직접 가입)이 남아 있는 기기가 부르는 길 — 조용히 실패시키지 않고 이유를 알린다
+  if (step === "signup" && seg.length === 3) {
+    json(res, 410, { ok: false, reason: "가입 방식이 바뀌었습니다. 화면을 새로고침한 뒤 이메일 인증으로 가입해 주세요." });
+    return true;
+  }
+  const known = (step === "login" && seg.length === 3) || (step === "find-id" && seg.length === 3)
+    || ((step === "signup" || step === "reset") && seg.length === 4 && ["start", "verify", "complete"].includes(sub));
+  if (!known) return false;
+  if (!authPostOk(req, res)) return true;
+  const b = await readJson(req);
+  const ip = clientIp(req);
+
+  /* ── 로그인 ── */
+  if (step === "login") {
+    const id = typeof b.loginId === "string" ? b.loginId.trim() : "";
+    const pw = b.password;
+    if (!validLoginId(id) || !validPassword(pw)) {
+      json(res, 400, { ok: false, reason: "아이디나 비밀번호가 맞지 않습니다." });
+      return true;
+    }
+    /* 맞춰보기를 막는다. 아이디마다, 그리고 **주소마다** 센다 — 아이디만 세면 아이디를 바꿔 가며
+       한 주소에서 끝없이 두드릴 수 있다. */
+    const gate = tooManyTries(id) ?? tooManyTries("ip:" + ip, 40);
+    if (gate) { json(res, 429, { ok: false, reason: gate }); return true; }
+
+    const found = passwordUser(id);
+    // 없는 아이디에도 같은 시간을 쓴다 — 빨리 실패하면 그것이 곧 「없는 아이디」다
+    const ok = found ? await verifyPassword(pw, found.hash) : (await spendLikeVerify(pw), false);
+    /* 아이디가 없는 것과 비밀번호가 틀린 것을 **같은 말로** 답한다.
+       가려 말하면 어떤 아이디가 있는지 알아낼 수 있다. */
+    if (!ok) {
+      failed(id); failed("ip:" + ip);
+      json(res, 401, { ok: false, reason: "아이디나 비밀번호가 맞지 않습니다." });
+      return true;
+    }
+    clearTries(id);
+    markLogin(found!.user.id);
+    sendSession(req, res, found!.user.id);
+    return true;
+  }
+
+  /* ── 아이디 찾기 — 그 메일로 아이디를 보낸다. 화면에는 가입 여부를 알리지 않는다 ── */
+  if (step === "find-id") {
+    if (mailMode() === "off") { json(res, 503, { ok: false, reason: MAIL_OFF }); return true; }
+    const email = normEmail(b.email);
+    if (!email) { json(res, 400, { ok: false, reason: "이메일 주소를 확인해 주세요." }); return true; }
+    const gate = allowRequest("find", email, ip);
+    if (!gate.ok) { json(res, 429, { ok: false, reason: gate.reason, wait: gate.wait }); return true; }
+    const u = passwordUserByEmail(email);
+    if (u) deliver({ to: email, subject: "[HabHobby] 아이디 안내",
+      text: `HabHobby 에 가입하신 아이디입니다.\n\n    ${u.loginId}\n\n직접 요청하지 않았다면 이 메일을 무시하세요.\n` });
+    json(res, 200, { ok: true });
+    return true;
+  }
+
+  const purpose = step as "signup" | "reset";
+  const email = normEmail(b.email);
+
+  /* ── ① 코드 보내기 ── */
+  if (sub === "start") {
+    if (mailMode() === "off") { json(res, 503, { ok: false, reason: MAIL_OFF }); return true; }
+    if (!email) { json(res, 400, { ok: false, reason: "이메일 주소를 확인해 주세요." }); return true; }
+    let loginId: string | null = null;
+    if (purpose === "signup") {
+      loginId = typeof b.loginId === "string" ? b.loginId.trim() : "";
+      if (!validLoginId(loginId)) {
+        json(res, 400, { ok: false, reason: "아이디는 영문·숫자·밑줄 3~20자로 지어 주세요." });
+        return true;
+      }
+    }
+    const gate = allowRequest(purpose, email, ip);
+    if (!gate.ok) { json(res, 429, { ok: false, reason: gate.reason, wait: gate.wait }); return true; }
+    if (loginId && passwordUser(loginId)) {
+      json(res, 409, { ok: false, reason: "이미 쓰이고 있는 아이디입니다." });
+      return true;
+    }
+    const u = passwordUserByEmail(email);
+    /* 코드는 **있든 없든** 만들어 둔다. 계정이 없는 주소(재설정)나 이미 가입된 주소(가입)에는 메일을
+       안 보내지만 줄은 남는다 — 그래야 다음 걸음(코드 확인)의 답이 어느 쪽이든 똑같다. */
+    const code = issueCode(purpose, email, loginId);
+    if (purpose === "signup") {
+      deliver(u
+        ? { to: email, subject: "[HabHobby] 이미 가입된 메일입니다",
+            text: "이 메일 주소로 이미 가입된 계정이 있습니다.\n로그인 화면에서 로그인하거나, 아이디를 잊으셨다면 「아이디 찾기」, "
+              + "비밀번호를 잊으셨다면 「비밀번호 재설정」을 이용해 주세요.\n\n직접 가입하려던 것이 아니라면 이 메일을 무시하세요.\n" }
+        : { to: email, subject: "[HabHobby] 가입 인증 코드", text: codeText("HabHobby 가입 인증 코드", code) });
+    } else if (u) {
+      deliver({ to: email, subject: "[HabHobby] 비밀번호 재설정 코드",
+        text: codeText("HabHobby 비밀번호 재설정 코드", code, "\n비밀번호를 바꾸면 모든 기기에서 로그아웃됩니다.") });
+    }
+    json(res, 200, { ok: true, ttl: CODE_TTL / 1000, cooldown: RESEND_COOLDOWN / 1000 });
+    return true;
+  }
+
+  /* ── ② 코드 맞히기 ── */
+  if (sub === "verify") {
+    if (!email) { json(res, 400, { ok: false, reason: "이메일 주소를 확인해 주세요." }); return true; }
+    const r = verifyCode(purpose, email, b.code, ip);
+    if (!r.ok) { json(res, 400, { ok: false, reason: r.left != null ? `${r.reason} (남은 횟수 ${r.left}회)` : r.reason }); return true; }
+    // 가입에서는 어떤 아이디로 가입하게 되는지 되돌려 보여 준다 — 남이 같은 메일로 다른 아이디를 넣었는지 알아보게
+    const t = purpose === "signup" ? peekTicket("signup", r.ticket) : null;
+    json(res, 200, { ok: true, ticket: r.ticket, loginId: t?.loginId ?? undefined });
+    return true;
+  }
+
+  /* ── ③ 새 비밀번호 ── */
+  const t = peekTicket(purpose, b.ticket);
+  if (!t) { json(res, 400, { ok: false, reason: EXPIRED }); return true; }
+  const account = purpose === "reset" ? passwordUserByEmail(t.email) : null;
+  if (purpose === "reset" && !account) { json(res, 400, { ok: false, reason: EXPIRED }); return true; }
+  // **규칙에 안 맞으면 티켓을 쓰지 않는다** — 인증을 잃고 처음부터 하게 만들지 않는다
+  const why = passwordProblem(b.password, { loginId: t.loginId ?? account?.loginId, email: t.email });
+  if (why) { json(res, 400, { ok: false, reason: why }); return true; }
+  if (!consumeTicket(purpose, b.ticket)) { json(res, 400, { ok: false, reason: EXPIRED }); return true; }
+  const hash = await hashPassword(b.password);
+
+  if (purpose === "signup") {
+    const before = userFromToken(readCookie(req.headers.cookie, COOKIE));
+    const guestId = before && isGuest(before) ? before.id : null;
+    // 게스트로 쓰던 중이면 그 계정을 그대로 데려간다 — 담아 둔 것이 갇히지 않게
+    const user = guestId ? linkGuestPassword(guestId, t.loginId!, hash, t.email)
+                         : createPasswordUser(t.loginId!, hash, t.email);
+    if (!user) {
+      json(res, 409, { ok: false, reason: "이미 쓰이고 있는 아이디나 이메일입니다. 처음부터 다시 해 주세요." });
+      return true;
+    }
+    revokeCodes(t.email);
+    /* 게스트였다면 **쓰던 쿠키를 죽이고 새로 굽는다.** 게스트 쿠키는 그 계정의 유일한 열쇠였고 어디
+       새어 있을지 모른다 — 계정이 진짜가 된 지금 그 열쇠가 그대로 통하면 안 된다. */
+    if (guestId) db.prepare("DELETE FROM session WHERE user_id = ?").run(user.id);
+    sendSession(req, res, user.id);
+    return true;
+  }
+
+  setPasswordHash(account!.id, hash);
+  destroyAllLogins(account!.id);          // 세션과 공유 열쇠까지 — 남이 들어와 있었을 수 있다
+  revokeCodes(t.email);
+  clearTries(account!.loginId);
+  deliver({ to: t.email, subject: "[HabHobby] 비밀번호가 바뀌었습니다",
+    text: "방금 HabHobby 비밀번호가 바뀌었고, 모든 기기에서 로그아웃되었습니다.\n\n"
+      + "직접 한 일이 아니라면 이 메일 계정이 남에게 넘어갔을 수 있습니다 — 메일 계정의 비밀번호부터 바꾸세요.\n" });
+  json(res, 200, { ok: true });
+  return true;
+}
+
+/** 쿠키를 굽고 답한다 — 가입과 로그인이 함께 쓴다 */
+function sendSession(req: IncomingMessage, res: ServerResponse, userId: string): void {
+  const token = createSession(userId, req.headers["user-agent"] ?? null);
+  const payload = JSON.stringify({ ok: true });
+  res.writeHead(200, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": Buffer.byteLength(payload),
+    "Cache-Control": "no-store",
+    "Set-Cookie": cookieHeader(token, 30 * 24 * 3600),
+  });
+  res.end(payload);
+}
 
 async function auth(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
   const seg = url.pathname.split("/").filter(Boolean);   // ["auth", provider, "callback"?]
@@ -1882,60 +2095,7 @@ async function auth(req: IncomingMessage, res: ServerResponse, url: URL): Promis
 
      되찾을 길(메일 인증 같은 것)을 두지 않았다 — 잊으면 그 계정에는 다시 못 들어간다.
      화면에서 그렇게 알린다. 있지도 않은 "비밀번호 찾기" 를 흉내내는 것보다 낫다. */
-  if (providerId === "password" && (seg[2] === "signup" || seg[2] === "login") && req.method === "POST") {
-    const b = await readJson(req);
-    const id = typeof b.loginId === "string" ? b.loginId.trim() : "";
-    const pw = b.password;
-
-    if (!validLoginId(id)) {
-      json(res, 400, { ok: false, reason: "아이디는 영문·숫자·밑줄 3~20자로 지어 주세요." });
-      return true;
-    }
-    if (!validPassword(pw)) {
-      json(res, 400, { ok: false, reason: "비밀번호는 8자 이상이어야 합니다." });
-      return true;
-    }
-
-    /* 맞춰보기를 막는다. 아이디마다 세어 두고, 몇 번 틀리면 잠시 쉬게 한다 —
-       비밀번호가 아무리 좋아도 무한정 두드릴 수 있으면 언젠가는 뚫린다. */
-    const gate = tooManyTries(id);
-    if (gate) { json(res, 429, { ok: false, reason: gate }); return true; }
-
-    const before = userFromToken(readCookie(req.headers.cookie, COOKIE));
-    const guestId = before && isGuest(before) ? before.id : null;
-
-    let user;
-    if (seg[2] === "signup") {
-      const hash = await hashPassword(pw);
-      // 게스트로 쓰던 중이면 그 계정을 그대로 데려간다 — 담아 둔 것이 갇히지 않게
-      user = guestId ? linkGuestPassword(guestId, id, hash) : createPasswordUser(id, hash);
-      if (!user) { json(res, 409, { ok: false, reason: "이미 쓰이고 있는 아이디입니다." }); return true; }
-    } else {
-      const found = passwordUser(id);
-      const ok = found ? await verifyPassword(pw, found.hash) : false;
-      /* 아이디가 없는 것과 비밀번호가 틀린 것을 **같은 말로** 답한다.
-         가려 말하면 어떤 아이디가 있는지 알아낼 수 있다. */
-      if (!ok) {
-        failed(id);
-        json(res, 401, { ok: false, reason: "아이디나 비밀번호가 맞지 않습니다." });
-        return true;
-      }
-      user = found!.user;
-      markLogin(user.id);
-    }
-
-    clearTries(id);
-    const token = createSession(user.id, req.headers["user-agent"] ?? null);
-    const payload = JSON.stringify({ ok: true });
-    res.writeHead(200, {
-      "Content-Type": "application/json; charset=utf-8",
-      "Content-Length": Buffer.byteLength(payload),
-      "Cache-Control": "no-store",
-      "Set-Cookie": cookieHeader(token, 30 * 24 * 3600),
-    });
-    res.end(payload);
-    return true;
-  }
+  if (providerId === "password" && req.method === "POST" && await passwordAuth(req, res, seg)) return true;
 
   /* 게스트로 시작하기. 로그인 없이 바로 쓰되, 쿠키가 유일한 열쇠라
      기기를 바꾸거나 쿠키가 지워지면 되찾을 수 없다 — 화면에서 그렇게 알린다. */

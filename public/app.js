@@ -66,6 +66,8 @@ let archFolders = [];
    쓰는 곳은 폴더 탭의 "친구 폴더 보기" 와 사이드 메뉴뿐이라, 캘린더만 보고 나가는
    사람에게는 200명분 17KB가 그냥 버려진다. 사이드 메뉴에 적을 숫자만 미리 받는다. */
 let friends = null, friendCount = 0;
+// 팔로우 두 목록(열 때 부른다)과 사이드 메뉴에 적을 두 숫자
+let followLists = null, followCount = { following: 0, followers: 0 };
 /** 내가 보관한 작품들의 주소 번호 — reload() 가 채운다. */
 let myDone = new Set();
 /** 받은 폴더 초대. 첫 화면에 함께 실려 온다 — 대개 비어 있어 무게가 없다. */
@@ -101,9 +103,11 @@ async function reload(fresh = false) {
   myDone = new Set(s.works.filter(w => w.state === "watched").map(w => w.urlId));
   platforms = s.platforms; me = s.me;
   friendCount = s.friendCount ?? 0;
+  followCount = s.followCount ?? { following: 0, followers: 0 };
   folderInvites = s.folderInvites ?? [];
   folderNotices = s.folderNotices ?? [];
   friends = null;              // 친구가 바뀌었을 수 있다 — 다음에 열 때 새로 부른다
+  followLists = null;          // 팔로우도 같다
   siteNamesPending = s.siteNamesPending ?? 0;
   applyTheme(settings.themeColor);
 }
@@ -114,6 +118,12 @@ async function loadFriends() {
   if (!friends) friends = (await api("GET", "/api/friends")).friends;
   return friends;
 }
+
+/** 찾기에 걸리는가 — 이름이나 아이디 어느 쪽이든. 이름은 겹칠 수 있으므로 아이디로도 찾는다. */
+const nameHit = (f, q) => f.displayName.toLowerCase().includes(q)
+  || (f.handle ?? "").includes(q.replace(/^@/, ""));
+/** 이름 아래 작은 줄 앞에 붙이는 아이디 — 없는 사람(아직 안 정한 옛 계정)은 비운다 */
+const atOf = f => f.handle ? `@${esc(f.handle)} · ` : "";
 
 /* 별 켠 사람이 위, 그다음은 나중에 친구가 된 순. 서버가 주는 순서와 같은 규칙이라
    별을 껐다 켠 뒤에도 다시 부르지 않고 제자리를 찾는다. */
@@ -482,61 +492,34 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
    친구 기능은 열지 않는다 (서버에서도 막는다). */
 const guestMode = () => me?.provider === "guest";
 
-/* 공개한 폴더를 친구가 **가져갈 수 있는가**. 보는 것과 가져가는 것은 다른 일이다.
+/* 폴더 설정은 **하나만 묻는다** — 누구에게 보일지.
 
-   담아가기는 한 벌 떠 가는 것이라 그 뒤로 서로 상관이 없고, 미러링은 비추기만 해서
-   내가 고치면 그쪽에도 바뀐다. 어느 쪽을 허락할지는 폴더마다 다를 수 있다 —
-   "가져가서 네 맘대로 해" 와 "내가 고르는 걸 계속 봐" 는 다른 뜻이다. */
-/* 폴더 설정은 **두 가지만 묻는다** — 누구에게 보일지, 그 사람이 무엇을 할 수 있는지.
-   한때 「고른 친구와 함께 쓰기」를 공개 갈래에 끼워 두었는데, 그건 공개 대상과 퍼가기를
-   한 항목에 뭉쳐 놓은 것이라 갈래가 셋인지 넷인지도 헷갈렸다. 함께 쓰기는 **퍼가기 쪽**
-   이야기다 — 「폴더 공유」로 그리로 옮겼다. */
-/* **「나만 보기」는 범위에 두지 않는다.** 둘을 다 꺼 두는 것이 이미 그 자리다 —
-   같은 뜻이 두 곳에 있으면 어느 쪽을 눌러야 하는지 알 수 없고, 애초에 둘이 다 꺼져
-   있으면 범위 칸이 뜨지도 않는다. 값 자체(none)는 남는다 — 저장될 때 그 모양이 필요하다. */
+   한때 주인이 폴더마다 클로닝(한 벌 떠 가기)과 미러링(비춰 보기)을 켜고 껐다. 그런데
+   보이는 폴더를 어떻게 가져갈지는 **보는 사람의 사정**이다 — 떠 가서 제 맘대로 고칠지,
+   주인이 고르는 것을 계속 따라볼지. 그래서 주인은 공개 범위만 정하고, 폴더를 연
+   사람이 「다운로드」나 「미러링」을 고른다.
+
+   **전체 공개만 팔로워에게 닿는다.** 팔로우는 닉네임만 알면 되묻지 않고 거는 것이라,
+   친구에게 연 폴더가 거기까지 새면 주인이 모르는 사람에게 보이게 된다. */
 const SHARE_MODES = [
-  ["all", "전체 공개", "친구가 늘어나면 그 사람에게도 보입니다."],
-  ["some", "친구 선택", "고른 사람이 볼 수 있습니다."],
+  ["none", "비공개", "나만 봅니다."],
+  ["all", "친구 전체", "친구가 늘어나면 그 사람에게도 보입니다."],
+  ["some", "친구 선택", "고른 친구만 볼 수 있습니다."],
+  ["public", "전체 공개", "친구와 나를 팔로우하는 사람 모두 볼 수 있습니다."],
 ];
-/* **폴더의 갈래는 둘이고, 만들 때 정해져 바뀌지 않는다.**
-
-   ┌ 일반 폴더 — 내 폴더다. 남이 담아가게(클로닝) 하거나 비춰 보게(미러링) 열 수 있고,
-   │             그 범위는 하나로 통일된다. 둘 다 끄면 비공개.
-   └ 공유 폴더 — 부른 사람과 **함께 쓰는** 폴더다(쉐어링). 명단에 오른 사람만 오간다.
-
-   한때 셋을 한 창에서 자유롭게 켜고 껐다. 그러면 갈래마다 범위를 따로 두어야 하고
-   (「함께 쓰자」와 「아무나 담아가라」는 대상이 다르다), 무엇보다 **함께 쓰자고 만든 폴더가
-   나중에 편집 한 번으로 아무나 담아갈 수 있는 것이 되었다.** 만들 때 갈라 두면 그 일이
-   일어날 자리가 없어진다 — 규칙을 지키는 대신 규칙이 깨질 수 없는 모양으로 만든다. */
-const TAKE_FLAGS = [
-  ["copy", "클로닝", "한 벌 떠 갑니다. 그 뒤로는 내가 고쳐도 그쪽엔 안 갑니다."],
-  ["mirror", "미러링", "내 폴더를 그대로 비춥니다. 내가 고치면 그쪽에도 바뀝니다."],
-  ["edit", "쉐어링", "고른 사람에게 초대를 보냅니다. 수락하면 함께 넣고 뺍니다. 콘텐츠 자체는 넣은 사람만 고칩니다."],
-];
-/** 일반 폴더에서 켜고 끄는 둘 — 쉐어링은 여기 없다(그건 폴더의 갈래 자체다) */
-const PLAIN_FLAGS = TAKE_FLAGS.filter(([v]) => v !== "edit");
+/** 공유 폴더(함께 쓰기)의 한 줄 설명. 공유 폴더는 늘 비공개다 — 명단에 오른 친구끼리만 오간다. */
+const SHARE_EDIT_WHY = "고른 친구에게 초대를 보냅니다. 수락하면 함께 넣고 뺍니다. 콘텐츠 자체는 넣은 사람만 고칩니다.";
 /** 만들 때 정해지는 갈래. 값에 edit 가 있으면 공유 폴더다.
     (목록을 거르는 folderKind 와는 다른 물건이다 — 그쪽은 비추는 것까지 넷으로 가른다.) */
 const takeKind = take => canEdit(take) ? "share" : "plain";
-/** 켜진 것들을 값으로 — 차례를 고정해 같은 조합이 늘 같은 글자가 되게 한다 */
-const takeValue = set => TAKE_FLAGS.map(([v]) => v).filter(v => set.has(v)).join(",");
-// 함께 고치는 사이라면 담아가는 것도 된다 — 가장 너그러운 갈래다
-/* **셋은 서로 독립이다.** 클로닝 · 미러링 · 쉐어링을 따로 켜고 끈다. 값은 쉼표로 이은
-   글자("copy,mirror")이고, 셋이 다 꺼져 있으면(빈 글자) 비공개다. */
 const hasTake = (t, f) => String(t ?? "").split(",").includes(f);
-const canCopy = t => hasTake(t, "copy");
-const canMirror = t => hasTake(t, "mirror");
 const canEdit = t => hasTake(t, "edit");
 
-/** 이 **남의 작품**을 담아 올 수 있나.
-
-    한 작품이 여러 폴더에 들어 있을 수 있다 — 친구가 「미러링만」인 폴더와 함께 쓰는
-    폴더에 같은 작품을 넣어 두는 일은 흔하다. 서버는 그중 **하나라도** 담아가기를
-    열어 뒀으면 담게 해 준다(takable). 화면이 줄에 적힌 mirrorTake 하나만 보면 서버보다
-    인색해져, **담을 수 있는데 버튼이 안 뜨는** 자리가 생긴다. 같은 잣대로 가린다. */
+/** 이 **남의 작품**을 다운로드할 수 있나 — 나에게 보이는 폴더에 있으면 된다.
+    가져가는 방식은 주인이 막지 않는다. 끊겨서 빈 폴더(broken)에 남은 줄만 아니면 된다. */
 const mayTakeWork = w => !!w.mirror && !!w.listUrl && w.folders.some(id => {
   const f = folders.find(x => x.id === id);
-  return f && canCopy(f.mirrorTake ?? f.take);
+  return f && !f.broken;
 });
 
 const FALLBACK_PLATFORM = { name: "링크", color: "#655A61", fg: "#fff", initial: "?", isDomain: true };
@@ -935,9 +918,7 @@ const workBarHtml = any => {
      고칠 수 없다), 내 것은 **옮기는 것**뿐이다(담을 것이 없다).
 
      한때 갈라 두지 않아서, 비추는 폴더에서 남의 작품을 골라 휴지통을 누르면 서버가
-     404 를 돌려줬다. 누르는 사람에게는 아무 일도 안 일어나는 것처럼 보였다.
-
-     「미러링만」으로 열어 둔 폴더는 담아갈 수 없다 — canCopy 가 그것을 가른다. */
+     404 를 돌려줬다. 누르는 사람에게는 아무 일도 안 일어나는 것처럼 보였다. */
   /* **셈을 갈라 적지 않는다.** 「담아가기 3 · 보관 2」처럼 적어 두면 고르는 사람이
      제가 무엇을 골랐는지 머릿속으로 갈라 세야 한다. 통째로 골라 누르면 각 버튼이 제
      몫만 집어 간다 — 담아가기는 남의 것만, 보관·휴지통은 내 것만. */
@@ -953,7 +934,7 @@ const workBarHtml = any => {
       allPicked ? "전체 해제" : "전체 선택"}</button>` : ""}
     <span class="bulk-act">
       ${canTake.length ? `<button class="mini-btn on" data-wtake
-        >${icon("plus")} 담아가기</button>` : ""}
+        >${icon("plus")} 다운로드</button>` : ""}
       ${mine.length ? `<button class="mini-btn" data-wfolder
         >${icon("inbox")} ${pickingInFolder() ? "폴더 이동" : "폴더에 추가"}</button>
       <button class="mini-btn" data-wbulk="watched"
@@ -1019,9 +1000,9 @@ function wireWorkPick(box, redraw) {
     workSel = null;
     await reload(); render(); redraw();
     toast(added
-      ? `${added}편 담았습니다${already ? ` · ${already}편은 이미 있었습니다` : ""}`
+      ? `${added}편 다운로드했습니다${already ? ` · ${already}편은 이미 있었습니다` : ""}`
       : already ? `${already}편 모두 이미 담겨 있습니다`
-        : "담아갈 수 있는 콘텐츠가 없습니다");
+        : "다운로드할 수 있는 콘텐츠가 없습니다");
   }));
 
   /* 골라 둔 작품을 한꺼번에 한 폴더에 넣는다.
@@ -2002,19 +1983,19 @@ function worksIn(fid) {
 function whoseBar() {
   // 둘러보기에는 친구가 없다 — 바꿀 것이 없으니 머리줄도 두지 않는다
   if (guestMode()) return "";
-  /* 돌아가는 길(내 폴더)이 왼쪽, 더 나가는 길(다른 친구 폴더)이 오른쪽이다 —
+  /* 돌아가는 길(내 폴더)이 왼쪽, 더 나가는 길(다른 사람 폴더)이 오른쪽이다 —
      읽는 차례와 같다. 둘 다 테마 색을 입는다: 여기서 할 수 있는 일이 이 둘뿐이라
-     하나만 눈에 띌 이유가 없다. */
+     하나만 눈에 띌 이유가 없다. 친구만이 아니라 팔로우하는 사람의 폴더도 이 길로 본다. */
   return viewing
     ? `<div class="whose">
          <span class="wt">현재 폴더: <b>${esc(viewing.name)}</b></span>
          <span class="wa">
            <button class="mini-btn" data-mine>내 폴더</button>
-           <button class="mini-btn on" data-whose>다른 친구 폴더</button>
+           <button class="mini-btn on" data-whose>다른 사람 폴더</button>
          </span></div>`
     : `<div class="whose">
          <span class="wt">내 폴더</span>
-         <span class="wa"><button class="mini-btn on" data-whose>친구 폴더 보기</button></span>
+         <span class="wa"><button class="mini-btn on" data-whose>다른 사람 폴더 보기</button></span>
        </div>`;
 }
 
@@ -2080,31 +2061,35 @@ function openBreakNotices(back) {
 
 /** 누구의 폴더를 볼지 고른다 */
 async function openWhose() {
-  try { await loadFriends(); } catch (e) { toast(e.message); return; }
+  try { await loadFriends(); await loadFollows(); } catch (e) { toast(e.message); return; }
   /* 볼 수 있는 사람만 보여 준다 — 나에게 공개한 폴더가 없는 친구는 눌러도 빈 화면이라
      목록에 둘 이유가 없다. "내 폴더" 도 두지 않는다: 돌아가는 길은 폴더 탭 머리줄의
      "내 폴더" 버튼이고, 같은 일을 하는 자리가 둘이면 어느 쪽을 눌러야 하는지 헷갈린다. */
-  const open = friends.filter(f => f.sharedFolders > 0);
+  /* **팔로우하는 사람도 함께 선다.** 친구이기도 하면 친구 줄 하나로 족하다 — 보이는 폴더는
+     서버가 사이를 합쳐 가르므로(sharedView) 어느 줄로 들어가도 같은 것이 보인다. */
+  const open = [...friends.filter(f => f.sharedFolders > 0),
+    ...followLists.following.filter(f => !f.friend && f.sharedFolders > 0)
+      .map(f => ({ ...f, starred: false, followOnly: true }))];
   let query = "";
 
   const rows = () => {
     const q = query.trim().toLowerCase();
-    const list = q ? open.filter(f => f.displayName.toLowerCase().includes(q)) : open;
+    const list = q ? open.filter(f => nameHit(f, q)) : open;
     if (!list.length) {
       return `<div class="empty">${q ? "찾는 이름이 없습니다."
-        : "폴더를 공개한 친구가 아직 없습니다.<br>왼쪽 메뉴의 친구에서 초대 링크를 보내보세요."}</div>`;
+        : "폴더를 공개한 친구가 아직 없습니다.<br>왼쪽 메뉴의 친구에서 초대 링크를 보내거나, 팔로우에서 닉네임으로 팔로우해 보세요."}</div>`;
     }
     /* 별은 여기서 켜고 끄지 않는다 — 보여 주기만 한다. 같은 스위치가 여러 화면에 있으면
        어디서 켠 것인지 헷갈린다. 순서는 서버가 이미 별 켠 사람을 위로 올려 준다. */
     return list.map(f => `<button class="uf-item" data-go-friend="${esc(f.id)}">
       <span class="ub"><b>${f.starred ? `<i class="star-on">${icon("star", "on")}</i> ` : ""}${esc(f.displayName)}</b>
-        <span>나에게 공개한 폴더 ${f.sharedFolders}개</span></span>
+        <span>${atOf(f)}${f.followOnly ? "팔로우 · " : ""}나에게 공개한 폴더 ${f.sharedFolders}개</span></span>
       ${viewing?.id === f.id ? `<span class="wnow">보는 중</span>` : `<span class="chev">${icon("right")}</span>`}</button>`).join("");
   };
 
   openSheet(`
     ${headHtml("폴더 바꾸기", { back: false, actions: false,
-      sub: "친구가 나에게 공개한 폴더를 폴더 탭에서 볼 수 있습니다." })}
+      sub: "친구와 팔로우하는 사람이 나에게 공개한 폴더를 폴더 탭에서 볼 수 있습니다." })}
     ${open.length > 4 ? searchHtml("이름으로 찾기") : ""}
     <div class="fr-list" data-whose-list>${rows()}</div>`);
 
@@ -2123,29 +2108,25 @@ async function openWhose() {
   }));
 }
 
-/** 친구 폴더 안 — 보기만 하고, 마음에 들면 내 목록으로 담는다 */
+/** 남의 폴더 안 — 구경하고, 마음에 들면 다운로드하거나 미러링한다 */
 function openFriendFolder(fid) {
   const f = viewing?.folders.find(x => x.id === fid); if (!f) return;
   const items = viewing.works.filter(w => w.folders.includes(fid));
   const plat = id => viewing.platforms[id] ?? { name: "링크", color: "#655A61" };
-  /* 주인이 허락한 만큼만 보여 준다. 눌러 봐야 막히는 버튼을 띄우느니 아예 두지 않는다.
-     서버도 같은 잣대로 한 번 더 거른다 — 화면이 유일한 빗장이면 빗장이 아니다. */
-  const mayCopy = canCopy(f.take), mayMirror = canMirror(f.take);
+  /* **어떻게 가져갈지는 내가 고른다.** 보이는 폴더라면 둘 다 된다 — 주인이 정하는 것은
+     누구에게 보일지뿐이다. */
   const already = folders.find(x => x.mirror?.owner === viewing.id && x.mirror?.folder === fid);
 
   openSheet(`
-    ${items.length && (mayCopy || mayMirror) ? `<div class="link-row">
-        ${mayCopy ? `<button class="btn primary" data-take-folder>담아가기</button>` : ""}
-        ${mayMirror ? `<button class="btn${mayCopy ? "" : " primary"}" data-mirror-folder${
-          already ? " disabled" : ""}>${already ? "이미 미러링 중" : "미러링"}</button>` : ""}
+    ${/* **빈 폴더도 미러링할 수 있다** — 비추는 것은 앞으로 채워질 것까지다.
+         다운로드는 떠 올 것이 없으니 잠가 둔다. */""}
+    <div class="link-row">
+        <button class="btn primary" data-take-folder${items.length ? "" : " disabled"}>다운로드</button>
+        <button class="btn" data-mirror-folder${
+          already ? " disabled" : ""}>${already ? "이미 미러링 중" : "미러링"}</button>
       </div>
-      <div class="rest" style="text-align:left;padding:0 2px 10px">${
-        mayCopy && mayMirror ? "담아가면 한 벌 떠 와서 내가 고칠 수 있고, 미러링은 비추기만 해서 "
-          + esc(viewing.name) + "님이 고치면 나에게도 바뀝니다."
-          : mayCopy ? "한 벌 떠 옵니다. 그 뒤로는 " + esc(viewing.name) + "님이 고쳐도 내 것은 그대로입니다."
-            : esc(viewing.name) + "님의 폴더를 그대로 비춥니다. 내가 고칠 수는 없습니다."}</div>`
-      : items.length ? `<div class="rest" style="text-align:left;padding:0 2px 10px">${
-          esc(viewing.name)}님이 이 폴더를 가져가는 것은 막아 두었습니다. 보기만 할 수 있어요.</div>` : ""}
+      <div class="rest" style="text-align:left;padding:0 2px 10px">다운로드하면 한 벌 떠 와서
+        내가 고칠 수 있고, 미러링은 비추기만 해서 ${esc(viewing.name)}님이 고치면 나에게도 바뀝니다.</div>
     ${items.length
       ? items.map(w => {
         /* **내가 다 본 것에는 배지가 붙는다.** 남의 목록이라 내 상태가 없으므로 주소로
@@ -2168,24 +2149,24 @@ function openFriendFolder(fid) {
     sub: `${esc(viewing.name)}님의 폴더 · ${items.length}개`,
   });
 
-  /* 폴더째 담아가기 — 폴더와 그 안의 작품을 **한 벌 떠 온다**. 떠 온 뒤로는 서로 상관이
+  /* 폴더째 다운로드 — 폴더와 그 안의 작품을 **한 벌 떠 온다**. 떠 온 뒤로는 서로 상관이
      없어서, 내가 고쳐도 친구 것은 그대로고 친구가 새로 넣어도 나에게는 오지 않는다.
      지우는 일이 아니라 늘리는 일이므로 되묻는 창도 붉지 않다. */
   const takeF = sheet.querySelector("[data-take-folder]");
   if (takeF) takeF.onclick = guard(async () => {
     const yes = await askSure({
-      title: `이 폴더를 담아갈까요?`,
+      title: `이 폴더를 다운로드할까요?`,
       body: `${esc(f.name)} · 콘텐츠 ${items.length}편이 함께 담깁니다.
-        담아간 뒤로는 ${esc(viewing.name)}님이 폴더를 고쳐도 내 것은 그대로입니다.`,
-      ok: "담아가기", danger: false, back: () => openFriendFolder(fid),
+        다운로드한 뒤로는 ${esc(viewing.name)}님이 폴더를 고쳐도 내 것은 그대로입니다.`,
+      ok: "다운로드", danger: false, back: () => openFriendFolder(fid),
     });
     if (!yes) return;
     const r = await api("POST", `/api/friends/${viewing.id}/take`, { folder: fid });
     await reload(); render();
     closeSheet();
     toast(r.already
-      ? `«${r.name}» 담았습니다 — ${r.added}편 · 이미 있던 ${r.already}편도 이 폴더에 넣었습니다`
-      : `«${r.name}» 담았습니다 — ${r.added}편`);
+      ? `«${r.name}» 다운로드했습니다 — ${r.added}편 · 이미 있던 ${r.already}편도 이 폴더에 넣었습니다`
+      : `«${r.name}» 다운로드했습니다 — ${r.added}편`);
   });
 
   /* 미러링 — 폴더 한 줄만 만든다. 작품은 베끼지 않으므로 "몇 편 담았다" 가 아니라
@@ -2210,7 +2191,7 @@ function openFriendFolder(fid) {
     const t = e.target.closest("[data-fw]"); if (!t) return;
     const w = items.find(x => x.id === t.dataset.fw);
     if (w) openOthersWork(w, {                                // 폴더 위에 겹친다
-      ownerId: viewing.id, ownerName: viewing.name, take: f.take,
+      ownerId: viewing.id, ownerName: viewing.name,
       plats: viewing.platforms, over: () => openFriendFolder(fid),
     });
   });
@@ -2227,10 +2208,12 @@ function openFriendFolder(fid) {
 
     모양은 내 작품 창(openWork)과 같다 — 제목줄, 보러가기, 그리고 할 일 하나. */
 function openOthersWork(w, opts) {
-  const { ownerId, ownerName, take: takeMode, plats, over } = opts;
+  const { ownerId, ownerName, plats, over } = opts;
   const plat = plats?.[w.platformId] ?? platformOf(w.platformId);
   const linked = !!w.listUrl;
-  const mayTake = linked && canCopy(takeMode);
+  /* 나에게 보이는 것이면 다운로드할 수 있다 — 막는 것은 주소가 없는 경우뿐이다.
+     끊긴 폴더에 남은 줄은 부르는 쪽이 애초에 여기로 보내지 않는다(mayTakeWork). */
+  const mayTake = linked && opts.mayTake !== false;
   openSheet(`
     ${headHtml(esc(w.title), { back: false, actions: false,
       sub: `${esc(ownerName)}님의 목록` })}
@@ -2251,10 +2234,10 @@ function openOthersWork(w, opts) {
          매번 다시 읽어야 한다. 어느 창이든 먼저 하는 일은 「보러 가는 것」이다. */""}
     ${linked ? goHtml(w, plat, true) : ""}
     ${mayTake
-      ? `<button class="btn" style="width:100%;margin-top:9px" data-take>내 목록에 담기</button>`
+      ? `<button class="btn" style="width:100%;margin-top:9px" data-take>다운로드</button>`
       : `<div class="rest" style="text-align:left;padding:9px 2px 0">${
-          !linked ? "주소 없이 담은 항목입니다. 가져올 것이 제목뿐이라 담아 갈 수 없습니다."
-            : `${esc(ownerName)}님이 이 폴더를 가져가는 것은 막아 두었습니다. 보기만 할 수 있어요.`}</div>`}
+          !linked ? "주소 없이 담은 항목입니다. 가져올 것이 제목뿐이라 다운로드할 수 없습니다."
+            : "더는 볼 수 없는 폴더에 있던 콘텐츠입니다."}</div>`}
   `, { over });
 
   wireGo(w);
@@ -2278,7 +2261,7 @@ function openOthersWork(w, opts) {
   if (take) take.onclick = guard(async () => {
     const r = await api("POST", `/api/friends/${ownerId}/take`, { work: w.id });
     await reload(); render();
-    toast(r.already ? `«${r.title}» 은(는) 이미 담겨 있습니다` : `«${r.title}» 담았습니다`);
+    toast(r.already ? `«${r.title}» 은(는) 이미 담겨 있습니다` : `«${r.title}» 다운로드했습니다`);
     /* **담긴 뒤의 모습을 보여 준다.** 이미 저장이 끝난 뒤라 곧바로 고치는 창을 여는 것은
        한 걸음 앞서간다 — 무엇이 담겼는지 먼저 보고, 고칠 것이 있으면 거기서 「설정」으로
        들어가면 된다. 남의 작품 창과 같은 모양이라 눈이 옮겨 갈 자리도 그대로다.
@@ -3216,7 +3199,7 @@ function openWork(id, over) {
   }
   // 비추는 폴더 안의 작품은 내 것이 아니다 — 남의 작품 창으로 보낸다
   if (w.mirror) return openOthersWork(w, {
-    ownerId: w.mirror, ownerName: w.mirrorOf, take: w.mirrorTake, over,
+    ownerId: w.mirror, ownerName: w.mirrorOf, mayTake: mayTakeWork(w), over,
   });
   const p = platformOf(w.platformId);
   const linked = !!w.listUrl;    // 직접 입력한 항목에는 열 곳이 없다
@@ -3673,7 +3656,7 @@ function friendPicker(box, { all, already = [], out, onChange }) {
   const paintList = () => {
     const q = query.trim().toLowerCase();
     const left = all.filter(f => !out.includes(f.id))
-      .filter(f => !q || f.displayName.toLowerCase().includes(q));
+      .filter(f => !q || nameHit(f, q));
     const got = out.map(id => all.find(f => f.id === id)).filter(Boolean);
     const none = left.length ? (q ? left[0].displayName : "친구 고르기…")
       : q ? "찾는 이름이 없습니다" : "모두 골랐습니다";
@@ -3681,7 +3664,7 @@ function friendPicker(box, { all, already = [], out, onChange }) {
       <select data-pk-add aria-label="친구 고르기">
         <option value="">${esc(none)}</option>
         ${left.map(f => `<option value="${esc(f.id)}"${done.has(f.id) ? " disabled" : ""}>${
-          f.starred ? icon("star", "on") + " " : ""}${esc(f.displayName)}${done.has(f.id) ? " — 이미 초대됨" : ""}</option>`).join("")}
+          f.starred ? icon("star", "on") + " " : ""}${esc(f.displayName)}${f.handle ? " @" + esc(f.handle) : ""}${done.has(f.id) ? " — 이미 초대됨" : ""}</option>`).join("")}
       </select>
       ${got.length ? `<div class="pickers" style="margin-top:10px">${got.map(f =>
           `<button class="pick on" data-pk-off="${esc(f.id)}" title="빼기"
@@ -4360,7 +4343,7 @@ function openFolderKind(after) {
     ${headHtml("새 폴더", { back: false, actions: false, sub: "어떤 폴더를 만들까요?" })}
     <div class="opts">
       ${card("plain", "inbox", "일반 폴더",
-        "내 폴더입니다. 친구가 담아가거나 비춰 보게 열어 둘 수 있습니다.")}
+        "내 폴더입니다. 친구나 팔로워에게 공개하면 다운로드하거나 미러링할 수 있습니다.")}
       ${card("share", "users", "공유 폴더",
         "부른 친구와 함께 씁니다. 명단에 오른 사람만 넣고 뺄 수 있습니다.")}
     </div>
@@ -4404,7 +4387,7 @@ function openFriendPick({ chosen = [], already = [], title = "친구 선택", on
   /* 지금 화면에 서 있는 사람들 — 찾기로 좁힌 만큼이다. */
   const shown = () => {
     const q = query.trim().toLowerCase();
-    return q ? friends.filter(f => f.displayName.toLowerCase().includes(q)) : friends;
+    return q ? friends.filter(f => nameHit(f, q)) : friends;
   };
 
   /* 고른 사람은 **위에 이름표로** 모아 둔다. 목록을 아래로 훑어 내려가면 방금 무엇을
@@ -4424,7 +4407,7 @@ function openFriendPick({ chosen = [], already = [], title = "친구 선택", on
       return `<button type="button" class="fp-row" data-fp="${esc(f.id)}"
         aria-pressed="${pick.has(f.id)}"${off ? " disabled" : ""}>
         <span class="mark tick"></span>
-        <b>${esc(f.displayName)}</b>
+        <b>${esc(f.displayName)}</b>${f.handle ? ` <small class="rest">@${esc(f.handle)}</small>` : ""}
         ${f.starred ? icon("star", "on") : ""}
         ${off ? `<span class="rest">이미 초대됨</span>` : ""}
       </button>`;
@@ -4480,7 +4463,8 @@ function openFolderForm(existing, after, kind, draft) {
      주인만 정한다 — 여기서는 칸 자체를 세우지 않는다. */
   const mine = !existing?.mirror;
   let emoji = draft?.emoji ?? (existing ? existing.emoji : "📁");
-  // 지금 이 폴더를 누구에게 열어 두었는가. 새 폴더는 늘 나만 본다.
+  /* 지금 이 폴더를 누구에게 열어 두었는가. **새 폴더는 늘 비공개로 선다** — 폴더는 우선
+     내 것이고 여는 것은 그다음의 결정이다. 처음부터 열려 있으면 무심코 만든 폴더가 남에게 보인다. */
   const share = draft?.share
     ? { mode: draft.share.mode, with: [...draft.share.with] }
     : { mode: existing?.share?.mode ?? "none", with: [...(existing?.share?.with ?? [])] };
@@ -4489,16 +4473,9 @@ function openFolderForm(existing, after, kind, draft) {
      앞 창에서 고른 것을 받는다. */
   const sort = existing ? takeKind(existing.take) : (kind ?? "plain");
   const team = sort === "share";
-  /* 켜고 끄는 것은 **일반 폴더에서만** 있는 일이다. 공유 폴더의 값은 늘 edit 하나 —
-     고를 것이 없으므로 칸도 세우지 않는다.
-     **새 일반 폴더는 아무것도 안 켠 채로 선다 — 비공개다.** 한때 클로닝을 켜 둔 채 띄웠는데,
-     폴더는 우선 내 것이고 여는 것은 그다음의 결정이다. 처음부터 켜져 있으면 「열지 않을
-     것인가」를 매번 되묻게 되고, 무심코 만든 폴더가 친구에게 열린다. */
-  const flags = team ? new Set(["edit"])
-    : new Set(draft?.flags ?? String(existing?.take ?? "").split(",").filter(v => v && v !== "edit"));
-  /* 공유 폴더는 **명단이 곧 폴더**라 범위가 늘 「친구 선택」이다. 일반 폴더의 범위는
-     켜는 순간에 채워진다(아래 takeBox 손짓) — 새 폴더는 아무것도 안 켠 채라 여기서
-     채울 것이 없다. */
+  /* 공유 폴더는 **명단이 곧 폴더**라 범위가 늘 「친구 선택」이다. 그리고 늘 비공개다 —
+     명단에 오른 친구 말고는 누구에게도 보이지 않는다. 함께 넣은 남의 콘텐츠까지
+     주인 한 사람의 결정으로 퍼지면 안 되므로, 전체 공개 칸을 아예 세우지 않는다. */
   if (team) share.mode = "some";
 
   /** 「누구에게」 — **고르는 일은 제 창에서 한다.**
@@ -4514,34 +4491,9 @@ function openFolderForm(existing, after, kind, draft) {
           `<span class="pick on">${esc(f.displayName)}</span>`).join("")}</div>` : ""}`;
   };
 
-  /** 켜고 끄는 단추 둘 — 클로닝과 미러링.
-
-      이 창에서 **먼저 정하는 것**이라 큰 칸으로 세운다. 범위(누구에게)는 그다음이라
-      작은 태그로 딸려 붙는다 — 앞선 물음이 눈에 먼저 들어와야 차례가 읽힌다.
-
-      켜고 끄는 것이라 표시가 동그라미가 아니라 **체크**다. 동그라미는 「둘 중 하나」로
-      읽히는데 여기서는 둘 다 켤 수 있다. */
-  /* **「비공개」 단추는 없다.** 그건 고르는 것이 아니라 **둘이 다 꺼진 결과**다.
-
-     단추로 세워 두었을 때는 넷이 나란히 서서 「넷 중 하나 고르기」로 읽혔고, 켜고 끄는
-     것과 결과가 한 줄에 섞여 있었다 — 비공개를 누르면 옆의 둘이 함께 꺼지는데 그 까닭이
-     화면에 없었다. 지금은 아래 설명 줄이 그 자리를 대신한다: 둘 다 끄면 「아무에게도
-     보이지 않습니다」라고 말한다. 상태를 글로 말하는 편이 단추로 말하는 것보다 정확하다. */
-  const takeHtml = () => {
-    const off = flags.size === 0;
-    const card = (v, t, on) => `<button type="button" class="opt${on ? " on" : ""}"
-      data-take="${v}" aria-pressed="${on}">
-      <span class="mark tick"></span><span class="ot"><b>${t}</b></span></button>`;
-    return `<div class="opts across take-flags" style="--opt-cols:2">
-      ${PLAIN_FLAGS.map(([v, t]) => card(v, t, flags.has(v))).join("")}
-    </div>
-    <div class="opt-why">${off
-      ? "아무에게도 보이지 않습니다."
-      : PLAIN_FLAGS.filter(([v]) => flags.has(v)).map(([, , d]) => d).join(" ")}</div>`;
-  };
   openSheet(`
     ${/* 갈래를 머리줄에 적어 둔다 — 만든 뒤에는 못 바꾸는 값이라, 어느 폴더를 보고
-         있는지가 늘 보여야 한다. 편집 창에 켜고 끄는 칸이 없는 까닭도 여기서 읽힌다. */""}
+         있는지가 늘 보여야 한다. */""}
     ${headHtml(existing ? "폴더 편집" : (team ? "새 공유 폴더" : "새 폴더"), { back: false,
       save: existing ? "저장" : "만들기",
       sub: mine ? (team ? "공유 폴더 — 부른 친구와 함께 씁니다" : "일반 폴더") : "" })}
@@ -4550,27 +4502,20 @@ function openFolderForm(existing, after, kind, draft) {
       <input id="fname" value="${esc(name0)}" placeholder="예: 주말에 몰아볼 것" maxlength="24"></div>
     ${/* 여기서부터 **남에게 보이는 이야기**다 — 위(아이콘·이름)는 내 폴더를 꾸미는
          일이고 아래는 남과 나누는 일이라, 선 하나로 갈라 둔다. */""}
-    ${guestMode() ? `<div class="field sep"><label>친구에게 공개</label>
+    ${guestMode() ? `<div class="field sep"><label>공개 범위</label>
       <div class="rest" style="text-align:left;padding:2px">
         둘러보기로는 폴더를 공개할 수 없습니다. 로그인하면 쓸 수 있어요.</div></div>` : ""}
     ${/* **공유 폴더에는 고를 것이 없다.** 갈래가 곧 「함께 쓴다」이고 대상은 명단이라,
-         켜고 끄는 칸도 범위 칸도 물을 것이 없다 — 누구를 부를지만 남는다. */""}
+         범위 칸도 물을 것이 없다 — 누구를 부를지만 남는다. */""}
     ${!guestMode() && mine && team ? `<div class="field sep"><label>함께 쓸 친구</label>
-      <div class="rest" style="text-align:left;padding:0 2px 8px">
-        ${TAKE_FLAGS.find(([v]) => v === "edit")[2]}</div>
+      <div class="rest" style="text-align:left;padding:0 2px 8px">${SHARE_EDIT_WHY}</div>
       <div data-share-who>${whoHtml()}</div>
     </div>` : ""}
-    ${!guestMode() && mine && !team ? `<div class="field sep"><label>공개 설정</label>
-      ${/* **무엇을 열어 둘지가 먼저다.** 「누구에게」는 그다음 물음이고, 아무것도
-           안 열어 두었으면 물을 것도 없다. 그래서 둘이 다 꺼져 있으면 범위 칸이 사라진다. */""}
-      <div data-take-box>${takeHtml()}</div>
-      <div data-scope${flags.size ? "" : " hidden"}>
-      ${/* 범위는 **그다음 물음**이라 작은 태그로 딸려 붙는다. 위에서 무엇을 열지
-           정하고 나면, 여기서는 그 대상을 좁히기만 하면 된다. */""}
-      <div class="scope-lab">공개 범위</div>
+    ${/* 일반 폴더가 묻는 것은 **누구에게 보일지 하나**다. 다운로드할지 미러링할지는
+         폴더를 연 사람이 고른다. */""}
+    ${!guestMode() && mine && !team ? `<div class="field sep"><label>공개 범위</label>
       ${tagOptsHtml(SHARE_MODES, share.mode, "share")}
       <div data-share-who${share.mode === "some" ? "" : " hidden"}>${whoHtml()}</div>
-      </div>
     </div>` : ""}
     ${existing && mine
       ? `<div class="link-row"><button class="btn bad" id="fdel">폴더 삭제</button></div>`
@@ -4602,7 +4547,7 @@ function openFolderForm(existing, after, kind, draft) {
     whoBox.addEventListener("click", guard(async e => {
       if (!e.target.closest("[data-who-pick]")) return;
       await loadFriends();
-      const keep = { emoji, name: nameEl.value, flags: [...flags], share };
+      const keep = { emoji, name: nameEl.value, share };
       const home = picked => {
         if (picked) share.with = picked;
         openFolderForm(existing, after, kind, { ...keep, share });
@@ -4615,110 +4560,61 @@ function openFolderForm(existing, after, kind, draft) {
       });
     }));
 
-    /* 켜고 끄는 칸은 **일반 폴더에만** 있다 — 공유 폴더는 갈래가 곧 답이라 고를 것이 없다.
-       한때 여기서 쉐어링도 함께 켜고 껐고, 그래서 「범위를 넓히면 쉐어링이 저절로 꺼진다」
-       같은 서로 물린 규칙이 필요했다. 갈래를 앞에서 가르니 그 규칙들이 통째로 없어졌다. */
-    const takeBox = sheet.querySelector("[data-take-box]");
-    const scopeBox = sheet.querySelector("[data-scope]");
-    if (takeBox) {
-      const paintTake = () => {
-        takeBox.innerHTML = takeHtml();
-        /* 아무것도 안 열어 두었으면 「누구에게」를 물을 것이 없다. */
-        scopeBox.hidden = flags.size === 0;
-      };
-      paintTake();
-
-      wireOpts(sheet, "share", v => {
-        share.mode = v;
-        whoBox.hidden = v !== "some";
-        if (v === "some") drawWho();
-      }, SHARE_MODES);
-
-      takeBox.addEventListener("click", e => {
-        const b = e.target.closest("[data-take]"); if (!b) return;
-        const v = b.dataset.take;
-        if (flags.has(v)) flags.delete(v);
-        else {
-          /* 비공개에서 처음 켜는 참이면 범위가 「none」이라 아무것도 골라져 있지 않다.
-             고르라고 빈 채로 두면 안 고르고 저장하기 쉬우므로 **전체 공개**로 시작한다 —
-             좁히는 것은 한 번 더 누르면 되고, 친구에게만 보이는 것이라 위험이 크지 않다. */
-          if (share.mode === "none") {
-            share.mode = "all";
-            const opts = sheet.querySelector('[data-opts="share"]');
-            opts?.querySelectorAll("[data-o]").forEach(x =>
-              x.setAttribute("aria-pressed", String(x.dataset.o === "all")));
-            const why = sheet.querySelector('[data-opt-why="share"]');
-            if (why) why.textContent = SHARE_MODES.find(([m]) => m === "all")?.[2] ?? "";
-          }
-          flags.add(v);
-        }
-        if (flags.size === 0) share.mode = "none";     // 손으로 마지막 하나를 꺼도 같다
-        paintTake();
-      });
-    }
+    wireOpts(sheet, "share", v => {
+      share.mode = v;
+      whoBox.hidden = v !== "some";
+      if (v === "some") drawWho();
+    }, SHARE_MODES);
   }
   /* 공개를 거두는 설정은 **남의 화면에서 무언가를 없앤다.** 저장하기 전에 한 번 묻는다 —
-     이름을 고치러 들어왔다가 옆 칸을 잘못 건드려 남의 폴더를 비워 버리면 되돌릴 길이 없다. */
+     이름을 고치러 들어왔다가 옆 칸을 잘못 건드려 남의 폴더를 비워 버리면 되돌릴 길이 없다.
+     다운로드한 사람은 이미 제 것을 한 벌 갖고 있으므로 잃는 것이 없다 — 걱정할 것은
+     **보던 사람과 미러링하던 사람**이다. */
   const revoking = () => {
     if (!existing || !mine) return null;      // 공개 설정을 안 건드리므로 물을 것이 없다
     const was = existing.share;
-    const wasTeam = canEdit(existing.take);
-    const stillTeam = flags.has("edit") && share.mode === "some";
-    /* 명단에서 떨어져 나가는 사람. **이름을 댈 수 있는 것은 「고른 친구에게만」끼리 견줄
-       때뿐이다** — 「모든 친구에게」였다면 애초에 명단이 없어 누가 빠지는지 알 수 없다. */
+    /* 명단에서 떨어져 나가는 사람. **이름을 댈 수 있는 것은 「친구 선택」끼리 견줄
+       때뿐이다** — 「친구 전체」였다면 애초에 명단이 없어 누가 빠지는지 알 수 없다. */
     const gone = was.mode === "some" && share.mode === "some"
       ? was.with.filter(id => !share.with.includes(id)) : [];
-    /* 볼 사람이 좁아지는가. 좁아지면 **비추던 사람이 떨어져 나갈 수 있다** —
-       담아간 사람은 이미 제 것을 한 벌 갖고 있으므로 이 셈에 들지 않는다. */
-    const narrowed = was.mode !== "none" &&
-      (share.mode === "none" || (was.mode === "all" && share.mode !== "all") || gone.length > 0);
     const nameList = ids => ids.map(id => (friends ?? []).find(f => f.id === id)?.displayName)
       .filter(Boolean);
-    if (wasTeam && !stillTeam) {
-      const n = works.filter(w => w.mirror && w.folders.includes(existing.id)).length;
-      return { title: "함께 쓰기를 그만둘까요?",
-        body: `함께 쓰던 사람들이 이 폴더를 더 볼 수 없게 됩니다.${
-          n ? ` 그 사람들이 넣어 둔 ${n}편도 이 폴더에서 빠집니다 — 콘텐츠는 각자 목록에 남습니다.` : ""}`,
-        ok: "그만두기" };
-    }
-    if (wasTeam && gone.length) {
+    if (team) {
+      if (!gone.length) return null;
       const names = nameList(gone);
       return { title: `${gone.length}명을 명단에서 뺄까요?`,
-        body: `${esc(names.join(", ") || "고른 사람")}${names.length ? "님" : ""}이 이 폴더를 더 볼 수 없게 되고,
-          넣어 둔 콘텐츠도 이 폴더에서 빠집니다 — 콘텐츠는 그 사람 목록에 남습니다.`,
+        body: `${esc(names.join(", ") || "고른 사람")}${names.length ? "님" : ""}과의 연결이 끊깁니다.
+          이 폴더를 더 볼 수 없게 되고, 넣어 둔 콘텐츠도 이 폴더에서 빠집니다 — 콘텐츠는 그 사람 목록에 남습니다.`,
         ok: "빼기" };
     }
-    /* 넓은 것부터 묻는다 — 공개를 아예 거두면 보던 사람도 비추던 사람도 한꺼번에 잃는다. */
+    if (was.mode === share.mode && !gone.length) return null;
+    /* 넓은 것부터 묻는다 — 공개를 아예 거두면 보던 사람도 미러링하던 사람도 한꺼번에 잃는다. */
     if (was.mode !== "none" && share.mode === "none") {
       return { title: "공개를 거둘까요?",
-        body: "이 폴더를 보던 친구들이 더 볼 수 없게 됩니다. 비추고 있던 사람의 폴더도 비게 됩니다.",
+        body: "이 폴더를 보던 사람들이 더 볼 수 없게 됩니다. 미러링하던 사람의 폴더도 비게 됩니다.",
         ok: "거두기" };
     }
-    /* 비추던 사람도 마찬가지다. 몇 명이 비추고 있는지는 여기서 알 수 없으므로 세지 않는다 —
-       "있을 수 있다" 는 것만 알려도 손이 멈춘다. */
-    if (canMirror(existing.take) && !flags.has("mirror") && was.mode !== "none") {
-      return { title: "미러링을 끊을까요?",
-        body: `이 폴더를 비추고 있는 친구가 있다면 그 사람의 폴더가 비게 됩니다.
-          폴더 줄은 남고 왜인지가 적힙니다.`,
-        ok: "끊기" };
+    /* 전체 공개에서 친구에게로 좁히면 **팔로워가** 떨어진다 */
+    if (was.mode === "public") {
+      return { title: "팔로워에게서 거둘까요?",
+        body: `나를 팔로우하는 사람${share.mode === "some" ? "과 고르지 않은 친구가" : "이"}
+          이 폴더를 더 볼 수 없게 됩니다. 미러링하고 있었다면 그 폴더가 비게 됩니다.`,
+        ok: "좁히기" };
     }
-    /* **미러링은 그대로인데 볼 사람이 줄어드는 경우.** 여기에 오래 구멍이 있었다 —
-       「둘 다」나 「미러링만」으로 열어 둔 채 공개 대상만 좁히면, 퍼가기 칸은 손대지 않았으니
-       아무 일도 없어 보이는데 명단에서 빠진 사람의 폴더는 그 자리에서 빈다.
-       끊는 것은 퍼가기 설정만이 아니라 **볼 수 있느냐** 이기도 하다. */
-    if (flags.has("mirror") && narrowed) {
+    if (gone.length) {
       const names = nameList(gone);
-      return gone.length
-        ? { title: `${gone.length}명을 명단에서 뺄까요?`,
-            body: `${esc(names.join(", ") || "고른 사람")}${names.length ? "님" : ""}이 이 폴더를
-              더 볼 수 없게 됩니다. 이 폴더를 비추고 있었다면 그 폴더도 비게 됩니다.`,
-            ok: "빼기" }
-        : { title: "볼 사람을 좁힐까요?",
-            body: `이제 고른 사람만 볼 수 있습니다. 명단에 없는 친구가 이 폴더를 비추고
-              있었다면 그 폴더가 비게 됩니다.`,
-            ok: "좁히기" };
+      return { title: `${gone.length}명을 명단에서 뺄까요?`,
+        body: `${esc(names.join(", ") || "고른 사람")}${names.length ? "님" : ""}이 이 폴더를
+          더 볼 수 없게 됩니다. 미러링하고 있었다면 그 폴더도 비게 됩니다.`,
+        ok: "빼기" };
     }
-    return null;
+    if (was.mode === "all" && share.mode === "some") {
+      return { title: "볼 사람을 좁힐까요?",
+        body: `이제 고른 친구만 볼 수 있습니다. 명단에 없는 친구가 이 폴더를 미러링하고
+          있었다면 그 폴더가 비게 됩니다.`,
+        ok: "좁히기" };
+    }
+    return null;                               // 넓히는 쪽은 아무도 잃지 않는다
   };
 
   wireHead({
@@ -4731,10 +4627,10 @@ function openFolderForm(existing, after, kind, draft) {
       let folder;
       if (existing) {
         await api("PATCH", `/api/folders/${existing.id}`,
-          mine ? { name, emoji, share, take: takeValue(flags) } : { name, emoji });
+          mine ? { name, emoji, share } : { name, emoji });
         folder = { ...existing, name, emoji };
       } else {
-        ({ folder } = await api("POST", "/api/folders", { name, emoji, share, take: takeValue(flags) }));
+        ({ folder } = await api("POST", "/api/folders", { name, emoji, share, take: team ? "edit" : "" }));
       }
       await reload(); render(); after(folder);
     }),
@@ -5895,7 +5791,7 @@ function openPlatformEdit(platformId) {
 function openInviteAccept(code, from) {
   openSheet(`
     ${headHtml("친구 요청", { back: false, actions: false,
-      sub: `<b>${esc(from.displayName)}</b>님이 친구로 초대했습니다.` })}
+      sub: `<b>${esc(from.displayName)}</b>${from.handle ? ` <small>@${esc(from.handle)}</small>` : ""}님이 친구로 초대했습니다.` })}
     <div class="rest" style="text-align:left;padding:0 2px 14px">
       친구가 되면 서로 <b>공개로 표시한 폴더</b>를 볼 수 있습니다.
       공개하지 않은 폴더와 나머지 기록은 보이지 않습니다.</div>
@@ -5905,56 +5801,74 @@ function openInviteAccept(code, from) {
     </div>`);
   sheet.querySelector("[data-no]").onclick = closeSheet;
   sheet.querySelector("[data-yes]").onclick = guard(async () => {
-    if (!me.displayName) { openNameForm(() => openInviteAccept(code, from)); return; }
+    if (!me.displayName || !me.handle) { openNameForm(() => openInviteAccept(code, from)); return; }
     await api("POST", `/api/invites/${code}/accept`);
     await reload(); render(); closeSheet();
     toast(`${from.displayName}님과 친구가 되었습니다`);
   });
 }
 
-/* ── 표시 이름 ───────────────────────────────────────────
-   친구에게 보이는 유일한 신원. 카카오 프로필을 받지 않으므로 여기서 직접 정한다. */
+/* ── 이름과 아이디 ───────────────────────────────────────
+   **보이는 이름과 가리키는 이름이 다르다.** 이름(닉네임)은 화면에 적히는 것이라 언제든 바꾸고
+   겹쳐도 된다. 아이디는 사람을 가리키는 것 — 팔로우가 이것으로 걸리므로, 한 번 정하면 바꿀 수
+   없고 다른 사람과 겹칠 수 없다. 카카오 프로필을 받지 않으므로 둘 다 여기서 직접 정한다. */
+const HANDLE_RE = /^[a-z0-9_]{3,20}$/;
 function openNameForm(after) {
+  const needHandle = !me.handle;
   openSheet(`
-    ${headHtml(me.displayName ? "이름 바꾸기" : "이름 정하기", { back: false })}
+    ${headHtml(needHandle ? "이름과 아이디 정하기" : "이름 바꾸기", { back: false })}
+    ${needHandle ? `<div class="field"><label for="dhandle">아이디</label>
+      <input id="dhandle" placeholder="예: young_su" maxlength="21" autocomplete="off"
+        autocapitalize="none" spellcheck="false"></div>
+      ${/* **바꿀 수 없다는 말을 정하기 전에** 한다 — 저장하고 나서 알면 늦다. */""}
+      <div class="rest" style="text-align:left;padding:0 2px 12px" data-hfree>
+        영문·숫자·밑줄 3~20자. <b>한 번 정하면 바꿀 수 없고</b> 다른 사람과 겹칠 수 없습니다.
+        친구 초대와 팔로우에서 나를 가리키는 이름표입니다.</div>` : ""}
     <div class="field"><label for="dname">표시 이름</label>
       <input id="dname" value="${esc(me.displayName ?? "")}" placeholder="예: 영수" maxlength="20"
         autocomplete="off" spellcheck="false"></div>
-    ${/* 이름은 겹칠 수 없다. 그것을 **미리** 적어 두고, 겹쳤는지는 저장할 때 한 번 본다 —
-         치는 동안 물어보면 글자마다 서버를 두드리게 되고, 규칙을 알려 주는 일에 그만한
-         값을 치를 이유가 없다. */""}
-    <div class="rest" style="text-align:left;padding:0 2px" data-nfree>
-      친구에게 보이는 유일한 이름이라 다른 사람과 겹칠 수 없습니다.</div>
+    <div class="rest" style="text-align:left;padding:0 2px">
+      친구에게 보이는 이름입니다. 언제든 바꿀 수 있고, 다른 사람과 같아도 됩니다.</div>
     <div class="link-row wide-only">
       <button class="btn" data-cancel>취소</button>
       <button class="btn primary" data-done>저장</button></div>`);
   const el = sheet.querySelector("#dname");
-  const note = sheet.querySelector("[data-nfree]");
-  // 고치기 시작하면 지난번에 걸렸던 말을 지운다 — 그건 그때 친 이름의 이야기다
-  el.addEventListener("input", () => {
+  const hEl = sheet.querySelector("#dhandle");
+  const note = sheet.querySelector("[data-hfree]");
+  // 고치기 시작하면 지난번에 걸렸던 말을 지운다 — 그건 그때 친 아이디의 이야기다
+  const NOTE = note?.innerHTML;
+  hEl?.addEventListener("input", () => {
     if (!note.style.color) return;
-    note.textContent = "친구에게 보이는 유일한 이름이라 다른 사람과 겹칠 수 없습니다.";
-    note.style.color = "";
+    note.innerHTML = NOTE; note.style.color = "";
   });
 
   wireHead({ save: () => saveName(), cancel: () => closeSheet() });
   const saveName = guard(async () => {
     const v = el.value.trim();
     if (!v) { el.focus(); return; }
+    const body = { displayName: v };
+    if (hEl) {
+      const h = hEl.value.trim().toLowerCase().replace(/^@/, "");
+      if (!HANDLE_RE.test(h)) {
+        note.textContent = "아이디는 영문·숫자·밑줄 3~20자로 지어 주세요.";
+        note.style.color = "var(--bad-ink)";
+        hEl.focus(); return;
+      }
+      body.handle = h;
+    }
     try {
-      await api("PUT", "/api/me", { displayName: v });
+      await api("PUT", "/api/me", body);
     } catch (e) {
-      // 겹치는 이름은 저장되지 않는다 — 창을 닫지 말고 그 자리에서 고치게 한다
-      note.textContent = e.message;
-      note.style.color = "var(--bad-ink)";
-      el.focus(); el.select();
+      // 남이 쓰는 아이디는 저장되지 않는다 — 창을 닫지 말고 그 자리에서 고치게 한다
+      if (note) { note.textContent = e.message; note.style.color = "var(--bad-ink)"; hEl.focus(); hEl.select(); }
+      else toast(e.message);
       return;
     }
     toast("저장되었습니다");
     await reload(); render();
     after ? after() : closeSheet();
   });
-  softFocus(el);
+  softFocus(hEl ?? el);
 }
 
 /* ── 친구 ────────────────────────────────────────────────── */
@@ -5965,7 +5879,7 @@ function openNameForm(after) {
     댓글은 흘려 읽는 강이지만 친구 목록은 한 사람을 짚는 명부라, 화면에 없는 사람은
     찾을 수 없게 되어 찾기 자체가 망가진다. 200명이라도 17KB면 다 온다. */
 async function openFriends() {
-  if (!me.displayName) { openNameForm(openFriends); return; }
+  if (!me.displayName || !me.handle) { openNameForm(openFriends); return; }
   try { await loadFriends(); } catch (e) { toast(e.message); return; }
   let query = "", onlyStar = false;
   // 찾기 칸이 펼쳐져 있는가. 머리줄의 돋보기가 여닫는다.
@@ -5981,7 +5895,7 @@ async function openFriends() {
          보여 줄 뿐이고, 그만큼 줄이 두꺼워져 한 화면에 담기는 사람이 줄어든다. */""}
     <button class="uf-item" data-friend="${esc(f.id)}">
       <span class="ub"><b>${esc(f.displayName)}</b>
-        <span>${f.sharedFolders ? `나에게 공개한 폴더 ${f.sharedFolders}개` : "나에게 공개한 폴더 없음"}</span></span>
+        <span>${atOf(f)}${f.sharedFolders ? `나에게 공개한 폴더 ${f.sharedFolders}개` : "나에게 공개한 폴더 없음"}</span></span>
       ${/* 화살표는 두지 않는다 — 이 목록의 줄은 전부 눌리는 것이라 하나하나에 "눌러도
            된다" 를 붙일 이유가 없고, 그만큼 이름 쓸 자리가 좁아진다. */""}</button>
     ${sel ? "" : starHtml(f)}</div>`;
@@ -5991,7 +5905,7 @@ async function openFriends() {
   const rows = () => {
     const q = query.trim().toLowerCase();
     let list = onlyStar ? friends.filter(f => f.starred) : friends;
-    if (q) list = list.filter(f => f.displayName.toLowerCase().includes(q));
+    if (q) list = list.filter(f => nameHit(f, q));
     if (!list.length)
       return `<div class="empty">${
         q ? "찾는 이름이 없습니다."
@@ -6019,7 +5933,7 @@ async function openFriends() {
   const shown = () => {
     const q = query.trim().toLowerCase();
     let list = onlyStar ? friends.filter(f => f.starred) : friends;
-    return q ? list.filter(f => f.displayName.toLowerCase().includes(q)) : list;
+    return q ? list.filter(f => nameHit(f, q)) : list;
   };
 
   /** 목록 위 줄 — 찾기와 즐겨찾기는 늘 있고, 고르는 중에는 셈과 실행이 아래 붙는다.
@@ -6392,6 +6306,122 @@ function openFriendDetail(friendId) {
   });
 }
 
+/* ── 팔로우 ───────────────────────────────────────────────
+   닉네임이 곧 아이디다. 이름을 알면 되묻지 않고 건다 — 그래서 **친구와는 다른 사이**다:
+   팔로워에게는 주인이 「전체 공개」로 연 폴더만 보이고, 함께 쓰기(공유 폴더)는 친구끼리만 된다.
+   서로 팔로우해도 친구가 되지 않는다. */
+
+/** 팔로우 두 목록을 (아직 없으면) 불러온다. 친구 목록처럼 다음 reload() 까지 들고 있는다. */
+async function loadFollows() {
+  if (guestMode()) return (followLists = { following: [], followers: [] });
+  if (!followLists) {
+    const d = await api("GET", "/api/follows");
+    followLists = { following: d.following, followers: d.followers };
+  }
+  return followLists;
+}
+
+/** @param side 어느 목록을 펼쳐 둘지 — 「팔로잉」(내가 건 것) · 「팔로워」(나에게 건 것) */
+async function openFollows(side = "following") {
+  if (!me.displayName || !me.handle) { openNameForm(() => openFollows(side)); return; }
+  try { await loadFollows(); } catch (e) { toast(e.message); return; }
+  const { following, followers } = followLists;
+  const SIDES = [["following", `팔로잉 ${following.length}`], ["followers", `팔로워 ${followers.length}`]];
+
+  const row = f => side === "following"
+    ? `<div class="uf-row">
+        <button class="uf-item${f.sharedFolders ? "" : " flat"}" data-see="${esc(f.id)}"${f.sharedFolders ? "" : " disabled"}>
+          <span class="ub"><b>${esc(f.displayName)}</b>
+            <span>${atOf(f)}${f.sharedFolders ? `나에게 공개한 폴더 ${f.sharedFolders}개` : "나에게 공개한 폴더 없음"}${
+              f.friend ? " · 친구" : ""}</span></span></button>
+        <button class="mini-btn" data-unfollow="${esc(f.id)}">팔로우 끊기</button></div>`
+    : `<div class="uf-row">
+        <div class="uf-item flat"><span class="ub"><b>${esc(f.displayName)}</b>
+          <span>${atOf(f)}${ago(f.since)}부터${f.friend ? " · 친구" : ""}</span></span></div>
+        <button class="mini-btn" data-drop="${esc(f.id)}">삭제</button></div>`;
+
+  const list = side === "following" ? following : followers;
+  openSheet(`
+    ${headHtml("팔로우", { back: false, actions: false })}
+    ${/* **알려 줄 것은 아이디다.** 닉네임은 바뀌고 겹칠 수 있어 사람을 가리키지 못한다. */""}
+    <p class="sub">내 아이디 <b>@${esc(me.handle)}</b> — 이 아이디를 아는 사람은 누구나 나를
+      팔로우할 수 있습니다. 팔로워에게는 <b>전체 공개</b>로 연 폴더만 보입니다.</p>
+    <div class="field" style="margin-top:14px"><label for="fl-name">아이디로 팔로우</label>
+      <div style="display:flex;gap:8px">
+        <input id="fl-name" placeholder="@아이디" maxlength="21" autocomplete="off" spellcheck="false"
+          autocapitalize="none" style="flex:1;min-width:0">
+        <button class="btn primary" data-follow style="flex:none;width:auto;padding:0 20px">팔로우</button></div></div>
+    <div class="pickers tag-opts" style="margin:6px 0 4px">${SIDES.map(([v, t]) =>
+      `<button type="button" class="pick" data-side="${v}" aria-pressed="${side === v}">${t}</button>`).join("")}</div>
+    <div class="fr-list">${list.length ? list.map(row).join("")
+      : `<div class="empty">${side === "following"
+          ? "아직 팔로우하는 사람이 없습니다.<br>아이디를 알면 위에서 바로 팔로우할 수 있어요."
+          : "아직 나를 팔로우하는 사람이 없습니다."}</div>`}</div>`);
+
+  const nameEl = sheet.querySelector("#fl-name");
+  const follow = guard(async () => {
+    const name = nameEl.value.trim();
+    if (!name) { nameEl.focus(); return; }
+    const r = await api("POST", "/api/follows", { handle: name });
+    followLists = null;
+    await reload(); render();
+    toast(r.already ? `${r.user.displayName}님은 이미 팔로우하고 있습니다`
+      : `${r.user.displayName}님을 팔로우합니다`);
+    openFollows("following");
+  });
+  sheet.querySelector("[data-follow]").onclick = follow;
+  nameEl.addEventListener("keydown", e => { if (e.key === "Enter" && !e.isComposing) follow(e); });
+
+  sheet.querySelector(".sheet-body").addEventListener("click", guard(async e => {
+    const tabBtn = e.target.closest("[data-side]");
+    if (tabBtn) { if (tabBtn.dataset.side !== side) openFollows(tabBtn.dataset.side); return; }
+
+    const see = e.target.closest("[data-see]");
+    if (see && !see.disabled) {
+      /* 친구 폴더를 보는 길과 같은 길이다 — 무엇이 보이는지만 서버가 사이에 따라 가른다 */
+      const d = await api("GET", `/api/friends/${see.dataset.see}/shared`);
+      viewing = { id: d.friend.id, name: d.friend.displayName,
+                  folders: d.folders, works: d.works, platforms: d.platforms };
+      closeSheet(); closeDrawer(); tab = "lib"; render();
+      return;
+    }
+
+    const un = e.target.closest("[data-unfollow]");
+    if (un) {
+      const f = following.find(x => x.id === un.dataset.unfollow);
+      const yes = await askSure({
+        title: "팔로우를 끊을까요?", ok: "끊기", back: () => openFollows(side),
+        body: `${esc(f?.displayName ?? "")}님의 ${f?.friend ? "" : "전체 공개 "}폴더를
+          ${f?.friend ? "팔로우로는 " : ""}더 볼 수 없게 됩니다.${f?.friend ? " 친구에게 연 폴더는 그대로 보입니다."
+          : " 미러링하던 폴더는 비게 되고, 다운로드한 것은 그대로 남습니다."}`,
+      });
+      if (!yes) return;
+      await api("DELETE", `/api/follows/${un.dataset.unfollow}`);
+      if (viewing?.id === un.dataset.unfollow && !f?.friend) viewing = null;
+      followLists = null;
+      await reload(); render(); openFollows(side);
+      return;
+    }
+
+    const drop = e.target.closest("[data-drop]");
+    if (drop) {
+      const f = followers.find(x => x.id === drop.dataset.drop);
+      /* 다시 거는 것은 막지 않는다 — 닉네임만 알면 되는 사이라서다. 그 말을 숨기지 않고
+         적어 두면, 정말 막고 싶은 사람은 공개 범위를 좁히는 길을 안다. */
+      const yes = await askSure({
+        title: "팔로워를 삭제할까요?", ok: "삭제", back: () => openFollows(side),
+        body: `${esc(f?.displayName ?? "")}님이 내 전체 공개 폴더를 더 볼 수 없게 되고,
+          미러링하고 있었다면 그 폴더가 비게 됩니다. 닉네임을 알면 다시 팔로우할 수 있어요 —
+          막으려면 폴더를 친구에게만 공개하세요.`,
+      });
+      if (!yes) return;
+      await api("DELETE", `/api/followers/${drop.dataset.drop}`);
+      followLists = null;
+      await reload(); render(); openFollows(side);
+    }
+  }));
+}
+
 /* ── 앱 설정 ─────────────────────────────────────────────── */
 const OPEN_MODES = [
   ["app", "기본 설정", "플랫폼 앱으로 엽니다. 앱이 설치돼 있지 않으면 웹으로 넘어갑니다."],
@@ -6449,12 +6479,16 @@ function openAppSettings() {
       </div>
       <div class="rest" style="text-align:left;padding:6px 2px 0">
         ${me.displayName
-          ? "친구에게 이 이름으로 보입니다. 본명일 필요는 없습니다."
+          ? "친구에게 이 이름으로 보입니다. 본명일 필요는 없고, 다른 사람과 같아도 됩니다."
           : `<span style="color:var(--warn);font-weight:600">아직 정하지 않았습니다</span>` +
             " — 친구를 추가하려면 필요합니다."}
-        ${/* 겹치는지는 저장할 때 서버가 본다. 규칙만 미리 적어 둔다 — 치는 동안 물어보면
-             글자마다 서버를 두드리게 되고, 안내 한 줄에 그만한 값을 치를 이유가 없다. */""}
-        다른 사람과 겹칠 수 없습니다.
+      </div>
+      ${/* 아이디는 한 번 정하면 바꿀 수 없다 — 정한 뒤에는 보여 주기만 한다. */""}
+      <div class="name-row" style="margin-top:10px">
+        <div class="acct-t" style="flex:1"><b>${me.handle ? "@" + esc(me.handle) : "아이디"}</b>
+          <span>${me.handle ? "바꿀 수 없습니다 — 팔로우할 때 쓰는 이름표입니다"
+            : `<span style="color:var(--warn);font-weight:600">아직 정하지 않았습니다</span> — 친구·팔로우에 필요합니다`}</span></div>
+        ${me.handle ? "" : `<button class="btn" data-set-handle>정하기</button>`}
       </div>`}
 </div>` : ""}
     <div class="field sep"><label>콘텐츠를 여는 방식</label>
@@ -6555,6 +6589,9 @@ function openAppSettings() {
       toast("저장되었습니다");
     });
   }
+
+  const setH = sheet.querySelector("[data-set-handle]");
+  if (setH) setH.onclick = () => openNameForm(openAppSettings);
 
   const keys = sheet.querySelector("[data-share-keys]");
   if (keys) keys.onclick = () => openShareKeys();
@@ -6715,6 +6752,8 @@ document.getElementById("btn-menu").onclick = () => {
   for (const st of ["watched", "dropped"])
     document.querySelector(`[data-count="${st}"]`).textContent = worksInState(st).length;
   document.querySelector('[data-count="friends"]').textContent = friendCount;
+  document.querySelector('[data-count="following"]').textContent = followCount.following;
+  document.querySelector('[data-count="followers"]').textContent = followCount.followers;
   if (drawerBack.hidden) lockScroll(true);
   const dEl = drawerBack.querySelector(".drawer");
   dEl.style.transform = ""; dEl.style.transition = "";   // 지난번 드래그 자국이 남지 않게
@@ -6781,6 +6820,10 @@ document.getElementById("menu-close").onclick = closeDrawer;   // 마우스가 �
 document.getElementById("menu-friends").onclick = () => {
   if (guestMode()) { closeDrawer(); return openGuestWall(); }
   closeDrawer(); openFriends();
+};
+document.getElementById("menu-follows").onclick = () => {
+  if (guestMode()) { closeDrawer(); return openGuestWall(); }
+  closeDrawer(); openFollows();
 };
 
 /* 게스트가 친구 자리를 눌렀을 때 — 막는 이유와 여는 길을 같이 알린다.

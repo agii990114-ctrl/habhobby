@@ -292,6 +292,17 @@ CREATE TABLE IF NOT EXISTS friend (
   PRIMARY KEY (user_id, friend_id)
 );
 
+/* 팔로우는 **한쪽으로만** 맺는다. 닉네임을 알면 누구든 되묻지 않고 건다 — 친구와
+   달리 초대도 수락도 없다. 그래서 팔로워에게 보이는 것은 주인이 「전체 공개」로 연
+   폴더뿐이고, 함께 쓰기(쉐어링)는 친구끼리만 된다. 서로 팔로우해도 친구가 아니다. */
+CREATE TABLE IF NOT EXISTS follow (
+  user_id    TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,   -- 따르는 사람
+  target_id  TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,   -- 따름을 받는 사람
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, target_id)
+);
+CREATE INDEX IF NOT EXISTS idx_follow_target ON follow(target_id);
+
 -- 초대 링크. 아이디를 검색해 아무나 추가하는 방식을 쓰지 않으므로
 -- 링크를 받은 사람만 친구가 될 수 있다.
 CREATE TABLE IF NOT EXISTS invite (
@@ -356,6 +367,18 @@ db.exec("DROP TABLE IF EXISTS catalog; DROP TABLE IF EXISTS catalog_run;");
 // 앱 안에서 쓰는 표시 이름. 로그인 제공자에게서 받아오지 않고 사용자가 직접 정한다 —
 // 본명이 노출되지 않고, 제공자에게 프로필 권한을 요구하지 않아도 된다.
 try { db.exec("ALTER TABLE user ADD COLUMN display_name TEXT"); } catch { /* 이미 있음 */ }
+/* **아이디(handle)** — 사람을 가리키는 이름표. 닉네임(display_name)은 보이는 이름이라 바뀌고
+   겹쳐도 되지만, 아이디는 **한 번 정하면 바뀌지 않고 겹치지 않는다.** 팔로우는 이것으로 건다.
+   닉네임으로 걸면 이름을 바꾼 사람의 옛 이름을 다른 사람이 가져가, 옛 이름으로 건 사람이
+   엉뚱한 사람을 따르게 된다. 소문자로 담으므로 색인은 그대로 견준다.
+
+   바뀌지 않는다는 규칙은 코드가 아니라 **표가 들고 있다** — 트리거가 막는다. 길목(setHandle)만
+   지키면 나중에 다른 길이 생겼을 때 무너진다. */
+try { db.exec("ALTER TABLE user ADD COLUMN handle TEXT"); } catch { /* 이미 있음 */ }
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_user_handle ON user(handle) WHERE handle IS NOT NULL`);
+db.exec(`CREATE TRIGGER IF NOT EXISTS user_handle_fixed BEFORE UPDATE OF handle ON user
+  WHEN OLD.handle IS NOT NULL AND NEW.handle IS NOT OLD.handle
+  BEGIN SELECT RAISE(ABORT, 'handle is fixed'); END`);
 /* 아이디·비밀번호로 만든 계정. 카카오 같은 제공자를 거치지 않는 길이다.
    provider = 'password', provider_uid = 아이디. 비밀번호는 그대로 담지 않고 요약만 담는다. */
 try { db.exec("ALTER TABLE user ADD COLUMN password_hash TEXT"); } catch { /* 이미 있음 */ }
@@ -427,7 +450,7 @@ const schemaV = (): number =>
 /* **마지막 이관 번호와 맞춰 둔다.** 뒤에 once() 를 더하면 이 숫자도 함께 올린다 —
    안 올려도 빈 표에 돌아 탈은 없지만, 새 파일이 「끝난 것」인데 끝나지 않은 번호를
    달고 있으면 다음 사람이 그 어긋남부터 풀어야 한다. */
-const LATEST_V = 12;
+const LATEST_V = 14;
 if (schemaV() === 0) {
   const empty = !db.prepare("SELECT 1 FROM user LIMIT 1").get();
   if (empty) db.exec("PRAGMA user_version = " + LATEST_V);
@@ -526,6 +549,7 @@ once(5, restoreHostGrouping);
 
    비교는 **접어서** 한다(foldName) — 대소문자와 군더더기 공백만 다른 이름은 사람 눈에
    같은 이름이고, 눈에 보이지 않는 글자로 다르게 만든 이름은 더 나쁘다. */
+/* (once(14) 가 이 색인을 걷었다 — 이제 닉네임은 겹쳐도 되고 사람은 아이디로 가리킨다.) */
 once(6, () => {
   /* 이미 겹쳐 있는 것부터 푼다. 늦게 만든 계정에 번호를 붙인다 — 먼저 쓰던 사람의
      이름을 빼앗지 않는다. */
@@ -676,6 +700,29 @@ once(12, () => {
   if (n) console.log(`  살아 있는 줄과 보관 줄을 한 줄로: ${n}줄 거둠`);
 });
 
+/* **가져가는 방식은 주인이 아니라 가져가는 사람이 고른다.**
+
+   한때 주인이 폴더마다 클로닝·미러링을 켜고 껐다. 그런데 주인이 정할 것은 「누구에게
+   보이나」 하나뿐이다 — 보이는 폴더라면 한 벌 떠 가든(다운로드) 비춰 보든(미러링)
+   그건 보는 사람의 사정이다. 그래서 take_mode 는 이제 **폴더의 갈래만** 적는다:
+   빈 글자(일반)와 edit(공유).
+
+   켜 둔 것을 비우는 것이지 닫는 것이 아니다. 공개 범위(share_mode)는 그대로라
+   보이던 폴더는 계속 보이고, 오히려 둘 중 하나만 켜 두었던 폴더가 둘 다 열린다. */
+once(13, () => {
+  const n = db.prepare("UPDATE folder SET take_mode = '' WHERE take_mode <> 'edit' AND take_mode <> ''")
+    .run().changes;
+  if (n) console.log(`  퍼가기 갈래를 비움 — 이제 받는 쪽이 고른다: ${n}개`);
+});
+
+/* **닉네임은 더 이상 유일하지 않다.** 사람을 가리키는 일은 아이디(handle)가 맡는다.
+   once(6) 이 세운 색인을 걷는다 — 겹치는 이름을 막던 것이라, 남겨 두면 같은 이름을 쓰려는
+   사람이 이유도 모른 채 저장에 실패한다. 이미 붙여 둔 「영수 2」 같은 번호는 그대로 둔다:
+   그 이름으로 불려 온 사람이 있고, 고치는 것은 본인의 몫이다. */
+once(14, () => {
+  db.exec("DROP INDEX IF EXISTS idx_user_name");
+});
+
 /* 작품 하나를 url(공용)과 work(내 것)로 가른다.
 
    **옛 줄은 옮기지 않는다.** 이 이관을 하기 전에 계정을 전부 비웠고(가입 0명), 옮길
@@ -732,12 +779,14 @@ db.exec(SCHEMA_WORK_INDEX);
 export type User = {
   id: string; provider: string; providerUid: string;
   email: string | null; name: string | null; avatar: string | null;
-  displayName: string | null;   // 친구에게 보이는 이름 (앱 안에서 직접 정함)
+  displayName: string | null;   // 친구에게 보이는 이름 (앱 안에서 직접 정함 · 겹쳐도 되고 바뀐다)
+  handle: string | null;        // 사람을 가리키는 아이디 (한 번 정하면 바뀌지 않고 겹치지 않는다)
 };
 
 const toUser = (r: any): User => ({
   id: r.id, provider: r.provider, providerUid: r.provider_uid,
   email: r.email, name: r.name, avatar: r.avatar, displayName: r.display_name ?? null,
+  handle: r.handle ?? null,
 });
 
 export function upsertUser(p: {
@@ -849,9 +898,11 @@ export const deleteUser = (id: string): void => {
   db.prepare("DELETE FROM user WHERE id = ?").run(id);   // 나머지는 CASCADE
 };
 
-/* ── 표시 이름 ────────────────────────────────────────────
-   친구에게 보이는 유일한 신원이다. 그래서 **겹치면 안 된다** — 초대 명단에 「김지훈」이
-   둘 있으면 어느 쪽인지 가릴 것이 없고, 골라 놓고 엉뚱한 사람에게 폴더를 열어 준다. */
+/* ── 표시 이름과 아이디 ────────────────────────────────────
+   **보이는 이름과 가리키는 이름을 가른다.** 표시 이름(닉네임)은 화면에 적히는 이름이라
+   자유롭게 바꾸고 겹쳐도 된다. 사람을 가리키는 일 — 팔로우 — 은 아이디(handle)가 한다.
+   한때 닉네임이 둘을 겸했는데, 이름을 바꾸면 옛 이름을 다른 사람이 가져갈 수 있어
+   그 이름으로 건 팔로우가 엉뚱한 사람에게 걸렸다. */
 
 /** 담기 전에 다듬는다 — 눈에 보이지 않는 글자를 걷고 공백을 한 칸으로 모은다. */
 export function cleanName(s: string): string {
@@ -871,28 +922,34 @@ export function cleanName(s: string): string {
     화살표 함수를 담은 const 는 그 자리에서 아직 만들어지지 않아 켜자마자 죽는다. */
 function foldName(s: string): string { return cleanName(s).toLowerCase(); }
 
-/** 그 이름을 이미 쓰는 사람이 있는가. `except` 는 자기 자신(이름을 그대로 두는 경우). */
-function nameTaken(name: string, except?: string): boolean {
-  const k = foldName(name);
-  if (!k) return false;
-  const r = db.prepare(`SELECT id FROM user
-    WHERE LOWER(TRIM(display_name)) = ? AND id <> ?`).get(k, except ?? "") as any;
-  return !!r;
-}
-
-/** 이름을 정한다. 겹치면 담지 않고 `null` 을 돌려준다 — 부르는 쪽이 사람에게 알린다. */
+/** 이름을 정한다. 겹쳐도 되므로 비어 있는지만 본다 — 비면 `null`. */
 export function setDisplayName(userId: string, name: string): string | null {
   const want = cleanName(name);
   if (!want) return null;
-  if (nameTaken(want, userId)) return null;
-  try {
-    db.prepare("UPDATE user SET display_name = ? WHERE id = ?").run(want, userId);
-  } catch {
-    /* 위에서 봤는데도 여기서 걸렸다면 색인이 잡은 것이다 — 같은 이름을 동시에 정하려는
-       두 요청이 있었다는 뜻. 사람에게는 "이미 쓰는 이름" 으로 똑같이 보인다. */
-    return null;
-  }
+  db.prepare("UPDATE user SET display_name = ? WHERE id = ?").run(want, userId);
   return want;
+}
+
+/** 아이디로 쓸 수 있는 글자인가 — 영문·숫자·밑줄 3~20자. 소문자로 접어서 견준다. */
+export const HANDLE_RE = /^[a-z0-9_]{3,20}$/;
+export const cleanHandle = (s: unknown): string => String(s ?? "").trim().toLowerCase().replace(/^@/, "");
+
+/** 아이디를 정한다. **처음 한 번뿐이다** — 이미 있으면 바꾸지 않는다(표의 트리거도 막는다).
+    결과: 담았거나 이미 같은 값이면 `ok`, 글자가 틀리면 `invalid`, 남이 쓰면 `taken`,
+    이미 다른 아이디가 있으면 `fixed`. */
+export function setHandle(userId: string, raw: unknown): "ok" | "invalid" | "taken" | "fixed" {
+  const want = cleanHandle(raw);
+  if (!HANDLE_RE.test(want)) return "invalid";
+  const cur = (db.prepare("SELECT handle FROM user WHERE id = ?").get(userId) as any)?.handle ?? null;
+  if (cur) return cur === want ? "ok" : "fixed";
+  try {
+    db.prepare("UPDATE user SET handle = ? WHERE id = ? AND handle IS NULL").run(want, userId);
+  } catch {
+    /* 색인이 잡았다 — 같은 아이디를 동시에 정하려던 두 요청이다. 사람에게는 「이미 쓰는 아이디」로
+       똑같이 보인다. */
+    return "taken";
+  }
+  return "ok";
 }
 
 /* ── kv (사용자별 설정·플랫폼 표시) ───────────────────────── */
@@ -1151,37 +1208,39 @@ export function setWorkFolders(userId: string, workId: string, folderIds: string
   for (const f of folderIds) if (mayFile(userId, f)) ins.run(workId, f);
 }
 
-export type ShareMode = "none" | "all" | "some";
-/** 공개한 폴더를 친구가 가져갈 수 있는 방식 */
-/** 퍼가기 갈래 — **쉼표로 이은 집합**이다.
+/** 누구에게 보이나 — 비공개 · 친구 전체 · 친구 선택 · 전체(친구와 팔로워).
 
-    한때 다섯 중 하나였고(`none|copy|mirror|both|edit`) 타입도 그렇게 적혀 있었는데,
-    once(8) 에서 켜고 끄는 방식으로 옮기면서 값이 `"copy,mirror"` 같은 모양이 되었다.
-    그런데 타입은 그대로여서, 실제로 담기는 값이 타입에 **하나도 안 맞는데** 여기저기
-    `as TakeMode` 로 우겨 넣고 있었다 — 타입이 거짓말을 하면 없느니만 못하다.
+    **팔로워에게 닿는 것은 public 하나뿐이다.** 팔로우는 되묻지 않고 거는 것이라,
+    친구에게 연 폴더가 거기까지 새어 나가면 주인이 모르는 사람에게 보이게 된다. */
+export type ShareMode = "none" | "all" | "some" | "public";
+export const SHARE_MODES: ShareMode[] = ["none", "all", "some", "public"];
 
-    지금 설 수 있는 값은 여섯이다:
-      일반 폴더 — "" · "copy" · "mirror" · "copy,mirror"
-      공유 폴더 — "edit"
-    (섞이지 않는다는 것은 server.ts 의 validTake 가 지킨다.) */
+/** 폴더의 갈래 — 일반("")과 공유("edit") 둘이다.
+
+    한때 이 칸에 클로닝·미러링을 켜고 끄는 값이 쉼표로 이어져 담겼다("copy,mirror").
+    이제 가져가는 방식은 **받는 사람이 고르므로**(once 13) 남은 뜻은 갈래뿐이다.
+    옛 낱말이 남아 있어도 edit 가 아니면 일반 폴더로 읽는다. */
 export type TakeMode = string;
-/* 함께 고치는 사이라면 담아가는 것도 된다 — 가장 너그러운 갈래다.
-   같이 꾸린 폴더에서 마음에 드는 것을 내 것으로 만드는 일은 그 폴더의 쓰임 그대로다. */
-/* **셋은 서로 독립이다.** 예전에는 하나만 고를 수 있어서 「둘 다」라는 갈래를 따로 두었고,
-   「폴더 공유」는 담아가기·미러링을 저절로 포함했다. 이제는 켜고 끄는 셋이라 그럴 필요가 없다 —
-   담아가기만, 미러링만, 셋 다, 무엇이든 된다. 셋이 다 꺼져 있으면 비공개다.
-
-   값은 쉼표로 이은 글자다("copy,mirror"). 칸을 셋으로 늘리지 않은 까닭은 이 값을 읽는
-   자리가 마흔 곳이 넘는데, 그 전부가 아래 세 함수를 지나기 때문이다 — 여기만 바꾸면 된다. */
 export const hasTake = (t: TakeMode, flag: string): boolean =>
   String(t ?? "").split(",").includes(flag);
-
-export const canCopy = (t: TakeMode): boolean => hasTake(t, "copy");
-/* 함께 고치는 폴더도 상대 쪽에서는 **비추는 폴더**로 선다 — 내 목록에 들어오는 길이
-   하나뿐이어야 하고, 그 길은 이미 미러링이 내고 있다. 다른 것은 고칠 수 있느냐뿐이다. */
-export const canMirror = (t: TakeMode): boolean => hasTake(t, "mirror");
 /** 이 폴더를 볼 수 있는 사람은 **넣고 뺄 수도** 있다 */
 export const canEdit = (t: TakeMode): boolean => hasTake(t, "edit");
+
+/** 그 사람과 나 사이 — 폴더가 보이는지를 가르는 밑감 */
+export type Tie = { friend: boolean; follower: boolean };
+export const tieOf = (ownerId: string, viewerId: string): Tie => ({
+  friend: areFriends(ownerId, viewerId),
+  follower: follows(viewerId, ownerId),
+});
+
+/** 이 공개 범위의 폴더가 그 사람에게 보이나. 가르는 규칙은 여기 하나다 —
+    폴더 목록(sharedView)도, 줄이 끊기는 사람 셈(setFolderShare)도 이것을 부른다. */
+export function visibleTo(mode: ShareMode, chosen: string[], viewer: string, tie: Tie): boolean {
+  if (mode === "public") return tie.friend || tie.follower;
+  if (mode === "all") return tie.friend;
+  if (mode === "some") return tie.friend && chosen.includes(viewer);
+  return false;
+}
 
 /** 그 폴더를 함께 쓰는 사람들 — 주인과, 주인이 보여 주기로 한 친구들.
 
@@ -1410,18 +1469,18 @@ const contributors = (folderId: string, ownerId: string): string[] =>
 export const leaveFolder = (userId: string, folderId: string): number =>
   dropContributions(folderId, [userId]);
 
-/** 퍼가기 권한을 정한다 — 비추고 있는 폴더에는 뜻이 없다 (내 것이 아니므로) */
+/** 폴더의 갈래를 적는다 — 비추고 있는 폴더에는 뜻이 없다 (내 것이 아니므로).
+    갈래는 만든 뒤에 바뀌지 않으므로(server 의 PATCH 가 막는다) 실제로 적히는 것은
+    만들 때 한 번이다. 그래도 끄는 길이 열리면 할 일은 여기 적어 둔다. */
 export const setFolderTake = (folderId: string, take: TakeMode): void => {
   const was = db.prepare("SELECT user_id, take_mode FROM folder WHERE id = ?").get(folderId) as any;
-  const old = (was?.take_mode ?? "copy") as TakeMode;
-  const cut = was && canMirror(old) && !canMirror(take) ? connectedTo(folderId) : [];
+  const old = (was?.take_mode ?? "") as TakeMode;
+  const cut = was && canEdit(old) && !canEdit(take) ? connectedTo(folderId) : [];
   db.prepare("UPDATE folder SET take_mode = ? WHERE id = ?").run(take, folderId);
   /* 함께 고치기를 끄면 더는 함께 쓰는 폴더가 아니다 — 남들이 걸어 둔 것을 걷어 낸다 */
   if (was && canEdit(old) && !canEdit(take))
     dropContributions(folderId, contributors(folderId, was.user_id));
-  /* 비추는 길이 닫히면 그쪽 폴더는 그 자리에서 빈다. 함께 쓰던 폴더였다면 그 말로 적는다 —
-     "미러링이 꺼졌습니다" 는 그 사람이 겪은 일과 다르다. */
-  if (cut.length) noticeBreak(folderId, canEdit(old) ? "함께 쓰기가 끝났습니다" : "미러링이 꺼졌습니다", cut);
+  if (cut.length) noticeBreak(folderId, "함께 쓰기가 끝났습니다", cut);
 };
 
 /** 그 폴더를 누구에게 보여 줄지 정한다. mode 가 "some" 이 아니면 짝은 지운다. */
@@ -1434,9 +1493,10 @@ export function setFolderShare(folderId: string, mode: ShareMode, viewers: strin
     .all(folderId) as any[]).map(r => [r.viewer_id, r.state ?? "ok"]));
   const f = db.prepare("SELECT user_id, take_mode FROM folder WHERE id = ?").get(folderId) as any;
   /* 좁아지면서 **줄이 끊기는 사람**을 먼저 셈해 둔다 — 아래에서 folder_share 를 지우고 나면
-     누가 닿아 있었는지 물어볼 데가 없다. 넓히는 쪽(some → all)은 아무도 잃지 않는다. */
-  const cut = mode === "all" ? []
-    : connectedTo(folderId).filter(id => mode !== "some" || !viewers.includes(id));
+     누가 닿아 있었는지 물어볼 데가 없다. 새 범위에서도 보이는 사람은 잃지 않는다 —
+     전체 공개에서 친구 전체로 좁히면 친구는 남고 팔로워만 떨어진다. */
+  const cut = f ? connectedTo(folderId).filter(id =>
+    !visibleTo(mode, viewers, id, tieOf(f.user_id, id))) : [];
   db.prepare("UPDATE folder SET share_mode = ? WHERE id = ?").run(mode, folderId);
   db.prepare("DELETE FROM folder_share WHERE folder_id = ?").run(folderId);
 
@@ -1593,7 +1653,7 @@ export const newId = (prefix: string): string =>
   prefix + Date.now().toString(36) + Math.trunc(Math.random() * 1e6).toString(36);
 
 /* ── 친구 ────────────────────────────────────────────────── */
-export type Friend = { id: string; displayName: string; since: number;
+export type Friend = { id: string; displayName: string; handle: string | null; since: number;
                        sharedFolders: number; starred: boolean };
 
 export function listFriends(userId: string): Friend[] {
@@ -1605,10 +1665,10 @@ export function listFriends(userId: string): Friend[] {
      ② 비추고 있는 폴더는 다시 공개하지 않으며(받은 것을 또 남에게 넘기지 않는다),
      ③ 함께 쓰는 폴더는 이미 상대의 폴더 탭에 제 줄로 서 있어 여기 또 나오지 않는다. */
   return (db.prepare(`
-    SELECT u.id, u.display_name, f.created_at, f.starred,
+    SELECT u.id, u.display_name, u.handle, f.created_at, f.starred,
            (SELECT COUNT(*) FROM folder fo WHERE fo.user_id = u.id
               AND fo.mirror_folder IS NULL AND fo.take_mode <> 'edit' AND (
-              fo.share_mode = 'all'
+              fo.share_mode IN ('all', 'public')
               OR (fo.share_mode = 'some'
                   AND EXISTS (SELECT 1 FROM folder_share fs
                               WHERE fs.folder_id = fo.id AND fs.viewer_id = ?))
@@ -1617,7 +1677,7 @@ export function listFriends(userId: string): Friend[] {
     WHERE f.user_id = ?
     ORDER BY f.starred DESC, f.created_at DESC`).all(userId, userId) as any[])
     .map(r => ({
-      id: r.id, displayName: r.display_name ?? "이름 없음",
+      id: r.id, displayName: r.display_name ?? "이름 없음", handle: r.handle ?? null,
       since: r.created_at, sharedFolders: r.shared_folders, starred: !!r.starred,
     }));
 }
@@ -1649,13 +1709,93 @@ export function removeFriend(a: string, b: string): void {
   del.run(b, a);
 }
 
-/** 친구에게 보이는 것 — 그 친구에게 연 폴더와 그 안의 활성 작품뿐이다.
-    "모든 친구" 로 연 폴더는 누구에게나, "고른 친구" 는 짝이 있는 사람에게만 보인다. */
+/* ── 팔로우 ──────────────────────────────────────────────── */
+
+/** a 가 b 를 팔로우하는가 — 한쪽으로만 읽는다 */
+export const follows = (a: string, b: string): boolean =>
+  !!db.prepare("SELECT 1 FROM follow WHERE user_id = ? AND target_id = ?").get(a, b);
+
+/** 아이디로 사람을 찾는다. 소문자로 접어 견주고, 글자가 안 맞으면 묻지도 않는다. */
+export function userByHandle(raw: unknown): { id: string; displayName: string | null; handle: string } | null {
+  const h = cleanHandle(raw);
+  if (!HANDLE_RE.test(h)) return null;
+  const r = db.prepare("SELECT id, display_name, handle FROM user WHERE handle = ?").get(h) as any;
+  return r ? { id: r.id, displayName: r.display_name ?? null, handle: r.handle } : null;
+}
+
+/** 팔로우를 건다. 되묻지 않는다 — 이미 걸려 있으면 그대로 둔다. */
+export function addFollow(me: string, target: string): void {
+  if (me === target) return;
+  db.prepare("INSERT OR IGNORE INTO follow(user_id, target_id, created_at) VALUES(?,?,?)")
+    .run(me, target, Date.now());
+}
+
+/** 이 사람이 **팔로우로만** 비추고 있던 폴더들 — 팔로우가 끊기면 비게 되는 것.
+    친구이기도 하면 친구에게 연 폴더는 그대로 보이므로 셈에 넣지 않는다. */
+function mirrorsLostBy(follower: string, owner: string): string[] {
+  if (areFriends(follower, owner)) return [];
+  return (db.prepare(`SELECT o.id FROM folder m JOIN folder o ON o.id = m.mirror_folder
+    WHERE m.user_id = ? AND m.mirror_owner = ? AND o.share_mode = 'public'`)
+    .all(follower, owner) as any[]).map(r => r.id);
+}
+
+/** 내가 건 팔로우를 푼다. 내가 한 일이라 나에게 알릴 것은 없다. */
+export const removeFollow = (me: string, target: string): boolean =>
+  !!db.prepare("DELETE FROM follow WHERE user_id = ? AND target_id = ?").run(me, target).changes;
+
+/** 나를 팔로우하던 사람을 끊는다. **그쪽이 모르는 사이에 폴더가 빈다** —
+    비추던 폴더가 있었다면 왜 비었는지 적어 둔다. 다시 팔로우하는 것은 막지 않는다:
+    닉네임만 알면 거는 사이라, 막으려면 공개 범위를 좁히는 것이 맞는 길이다. */
+export function removeFollower(me: string, follower: string): boolean {
+  const lost = mirrorsLostBy(follower, me);
+  const gone = removeFollow(follower, me);
+  if (gone) for (const f of lost) noticeBreak(f, "팔로우가 끊겼습니다", [follower]);
+  return gone;
+}
+
+/** 사이드 메뉴에 적을 두 숫자 — 내가 팔로우하는 사람과 나를 팔로우하는 사람 */
+export const countFollows = (userId: string): { following: number; followers: number } => ({
+  following: (db.prepare("SELECT COUNT(*) c FROM follow WHERE user_id = ?").get(userId) as any).c,
+  followers: (db.prepare("SELECT COUNT(*) c FROM follow WHERE target_id = ?").get(userId) as any).c,
+});
+
+export type Follow = { id: string; displayName: string; handle: string | null; since: number;
+                       sharedFolders: number; friend: boolean };
+
+/** 내가 팔로우하는 사람들. 세는 폴더는 **내게 실제로 보이는 것** — 친구이기도 하면
+    친구에게 연 폴더까지 든다(listFriends 와 같은 잣대: 보여 준 수와 열어 본 수가 같아야 한다). */
+export function listFollowing(userId: string): Follow[] {
+  return (db.prepare(`SELECT u.id, u.display_name, u.handle, f.created_at FROM follow f
+      JOIN user u ON u.id = f.target_id WHERE f.user_id = ? ORDER BY f.created_at DESC`)
+    .all(userId) as any[]).map(r => ({
+      id: r.id, displayName: r.display_name ?? "이름 없음", handle: r.handle ?? null,
+      since: r.created_at,
+      sharedFolders: sharedView(r.id, userId).folders.filter(f => !canEdit(f.take)).length,
+      friend: areFriends(userId, r.id),
+    }));
+}
+
+/** 나를 팔로우하는 사람들. 그 사람에게 보이는 것은 내 전체 공개 폴더뿐이라 셀 것이 없다. */
+export function listFollowers(userId: string): Follow[] {
+  return (db.prepare(`SELECT u.id, u.display_name, u.handle, f.created_at FROM follow f
+      JOIN user u ON u.id = f.user_id WHERE f.target_id = ? ORDER BY f.created_at DESC`)
+    .all(userId) as any[]).map(r => ({
+      id: r.id, displayName: r.display_name ?? "이름 없음", handle: r.handle ?? null,
+      since: r.created_at,
+      sharedFolders: 0, friend: areFriends(userId, r.id),
+    }));
+}
+
+/** 남에게 보이는 것 — 그 사람에게 연 폴더와 그 안의 활성 작품뿐이다.
+    무엇이 보이는지는 **둘 사이(친구인가, 팔로우하는가)** 와 폴더의 공개 범위가 정한다
+    (visibleTo). 아무 사이도 아니면 빈 목록이다 — 부르는 쪽이 따로 막지 않아도 새지 않는다. */
 export function sharedView(ownerId: string, viewerId: string): { folders: Folder[]; works: Work[] } {
+  const tie = tieOf(ownerId, viewerId);
+  if (!tie.friend && !tie.follower) return { folders: [], works: [] };
   /* 비추고 있는 폴더는 다시 공개하지 않는다 — 남에게서 받은 것을 또 남에게 넘기는 일이라,
      원래 주인이 한 사람에게만 연 것이 줄줄이 퍼질 수 있다. */
   const folders = listFolders(ownerId).filter(f => !f.mirror).filter(f =>
-    f.share.mode === "all" || (f.share.mode === "some" && f.share.with.includes(viewerId)));
+    visibleTo(f.share.mode, f.share.with, viewerId, tie));
   if (!folders.length) return { folders: [], works: [] };
   const ids = folders.map(f => f.id);
   const marks = ids.map(() => "?").join(",");

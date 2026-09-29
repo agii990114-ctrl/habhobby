@@ -9,10 +9,11 @@ import {
   db, kvGet, kvSet, listWorks, getWork, setWorkFolders, listFolders, newId, sitesFor, setSite, forgetSite,
   deleteUser, upsertUser, listFriends, countFriends, starFriend, contributedWorks,
   addFriend, removeFriend, areFriends,
+  follows, addFollow, removeFollow, removeFollower, listFollowing, listFollowers, userByHandle, setHandle, countFollows,
   createGuest, linkGuest, isGuest,
   createPasswordUser, passwordUser, linkGuestPassword, markLogin,
   sharedView, createInvite, inviteOwner, getUser, setFolderShare, setFolderTake,
-  getFolder, createFolder, canCopy, canMirror, canEdit, seenByMe, markSeen,
+  getFolder, createFolder, canEdit, SHARE_MODES, seenByMe, markSeen,
   folderInvites, acceptFolder, declineFolder, leaveFolder,
   noticeBreak, folderNotices, readNotices, sweepNotices, inviteToFolder, unlinkFromFolder,
   cleanName, setDisplayName, starFolder, findOrMakeUrl, findKeptWork, knownUrl,
@@ -323,7 +324,10 @@ function withMirrors(me: string): { folders: any[]; works: any[] } {
      폴더마다 읽으면 같은 질의를 몇 번씩 되풀이한다. */
   const views = new Map<string, ReturnType<typeof sharedView> | null>();
   const viewOf = (owner: string) => {
-    if (!views.has(owner)) views.set(owner, areFriends(me, owner) ? sharedView(owner, me) : null);
+    /* 친구든 팔로우든 **사이가 남아 있어야** 읽는다. 둘 다 끊겼으면 비어 있는 까닭이
+       「공개가 끝났다」가 아니라 「사이가 끊겼다」라서 따로 가른다. */
+    if (!views.has(owner)) views.set(owner,
+      areFriends(me, owner) || follows(me, owner) ? sharedView(owner, me) : null);
     return views.get(owner)!;
   };
   const names = new Map<string, string>();
@@ -342,9 +346,10 @@ function withMirrors(me: string): { folders: any[]; works: any[] } {
     const src = view?.folders.find(x => x.id === f.mirror!.folder);
     /* 원본이 사라져도 폴더를 말없이 지우지 않는다 — 내가 만든 줄이므로 내가 치워야 한다.
        대신 왜 비어 있는지를 적어 둔다. */
-    const why = !view ? "친구가 아닙니다"
-      : !src ? "공개가 끝났습니다"
-        : !canMirror(src.take) ? "미러링이 꺼졌습니다" : null;
+    /* 보이는 폴더는 누구든 비출 수 있다 — 가져가는 방식은 받는 사람이 고른다.
+       그래서 막히는 까닭은 둘뿐이다: 사이가 끊겼거나, 더는 나에게 보이지 않거나. */
+    const why = !view ? "연결이 끊겼습니다"
+      : !src ? "공개가 끝났습니다" : null;
     if (why) return { ...f, mirrorOf: who, broken: why, mirrorTake: "none" };
 
     const edit = canEdit(src!.take);
@@ -396,11 +401,12 @@ function stateSnapshot(user: User) {
     platforms: platformViews(user.id, ids),
     me: { id: user.id, provider: user.provider, name: user.name,
           email: user.email, avatar: user.avatar,
-          displayName: user.displayName },
+          displayName: user.displayName, handle: user.handle },
     /* 친구 **목록**은 여기 싣지 않는다. 쓰는 곳은 폴더 탭의 "친구 폴더 보기" 와 사이드
        메뉴뿐인데, 앱을 열 때마다 따라오면 캘린더만 보고 나가는 사람에게는 그냥 버려진다.
        200명이면 17KB다. 사이드 메뉴에 적을 숫자만 담고, 목록은 GET /api/friends 로 부른다. */
     friendCount: isGuest(user) ? 0 : countFriends(user.id),
+    followCount: isGuest(user) ? { following: 0, followers: 0 } : countFollows(user.id),
     // 폴더 탭의 알림 아이콘에 적을 숫자. 목록은 열 때 따로 부른다.
     folderInvites: isGuest(user) ? [] : folderInvites(user.id),
     /* 끊겼다는 소식. 새로 고칠 때 함께 실어 보내는 것이 곧 "알림이 오는" 길이다 —
@@ -594,16 +600,15 @@ async function copyCover(srcUrl: string | null, mineId: string): Promise<string 
 /** other 의 작품 가운데 내가 담아갈 수 있는 것.
 
     두 갈래다.
-    ① 그 사람이 나에게 연 폴더에 있고, 그 폴더가 담아가기를 허락한 것.
+    ① 그 사람이 나에게 연 폴더에 있는 것. 보이는 것은 다운로드할 수 있다 —
+       가져가는 방식은 주인이 아니라 받는 사람이 고른다.
     ② **내가 주인인 함께 고치는 폴더**에 그 사람이 넣어 둔 것 — 그 폴더는 내 것이라
        sharedView 에 잡히지 않는다. 같이 꾸린 목록에서 마음에 드는 것을 내 것으로
        만드는 일이라 막을 이유가 없다. */
 function takable(me: string, other: string): Map<string, Work> {
   const out = new Map<string, Work>();
   const view = sharedView(other, me);
-  // 담아가도 좋다고 열어 둔 폴더를 먼저 갈라 둔다 — 작품마다 폴더 목록을 훑지 않게
-  const open = new Set(view.folders.filter(f => canCopy(f.take)).map(f => f.id));
-  for (const w of view.works) if (w.folders.some(id => open.has(id))) out.set(w.id, w);
+  for (const w of view.works) out.set(w.id, w);
 
   for (const f of listFolders(me).filter(x => !x.mirror && canEdit(x.take)))
     for (const w of contributedWorks(f.id, { only: other })) out.set(w.id, w);
@@ -668,25 +673,20 @@ async function takeWork(userId: string, src: Work, folderIds: string[]):
   return { already: false, id };
 }
 
-/* 퍼가기 값은 쉼표로 이은 집합이다("copy,mirror"). 빈 글자는 비공개.
-   모르는 낱말이 섞여 있으면 통째로 물린다 — 반만 받아들이면 고른 것과 저장된 것이 달라진다. */
+/* **폴더의 갈래는 둘이고 섞이지 않는다** — 일반("")과 공유("edit").
+
+   한때 일반 폴더에서 클로닝·미러링을 켜고 끄는 값("copy,mirror")이 이 칸에 왔다.
+   이제 가져가는 방식은 받는 사람이 고르므로 그 낱말들은 뜻이 없다. 그래도 옛 화면이
+   보내는 값을 물리지는 않는다 — 앱을 막 고친 참에 기기에 남은 옛 app.js 가 폴더를
+   못 만들게 되면 안 된다. 받아서 일반 폴더("")로 읽는다.
+   edit 에 다른 낱말이 붙은 것만 물린다: 함께 쓰는 폴더가 아무나 가져가는 것이 되는 조합이다. */
 const TAKE_WORDS = ["copy", "mirror", "edit"];
-/* **폴더의 갈래는 둘이고 섞이지 않는다.**
-
-   ┌ 일반 폴더 — ""(비공개) · "copy" · "mirror" · "copy,mirror"
-   └ 공유 폴더 — "edit" 하나뿐
-
-   한때 셋을 자유롭게 조합할 수 있었다. 그러면 함께 쓰자고 만든 폴더가 편집 한 번으로
-   아무나 담아갈 수 있는 것이 되고, 갈래마다 대상이 다른데(「함께 쓰자」와 「아무나
-   담아가라」) 범위는 하나뿐이라 그 하나가 둘을 동시에 뜻하게 된다. 화면은 만들 때
-   갈래를 갈라 그 조합이 아예 안 생기게 하고, 여기서는 그것을 값으로 못 박는다. */
 const validTake = (v: unknown): boolean =>
   typeof v === "string" &&
   (v === "" || v.split(",").every(w => TAKE_WORDS.includes(w))) &&
   (!v.split(",").includes("edit") || v === "edit");
-/** 차례를 고정한다 — 같은 조합이 늘 같은 글자가 되어야 견주기 쉽다 */
-const normTake = (v: string): string =>
-  TAKE_WORDS.filter(w => v.split(",").includes(w)).join(",");
+/** 갈래만 남긴다 */
+const normTake = (v: string): string => (v === "edit" ? "edit" : "");
 
 /* ── 라우팅 ───────────────────────────────────────────────── */
 const MIME: Record<string, string> = {
@@ -782,7 +782,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
   /* 친구 기능은 게스트에게 열지 않는다. 되찾을 수 없는 계정으로 남과 이어지면,
      기기를 잃었을 때 상대 쪽에만 흔적이 남는다. 화면에서도 막지만 여기서 한 번 더 막는다 —
      막는 자리는 화면이 아니라 서버여야 한다. */
-  const guestBlocked = ["friends", "invites"].includes(seg[1] ?? "");
+  const guestBlocked = ["friends", "invites", "follows", "followers"].includes(seg[1] ?? "");
   if (guestBlocked && isGuest(user)) {
     json(res, 403, { ok: false, reason: "게스트는 친구 기능을 쓸 수 없습니다. 로그인하면 쓸 수 있어요." });
     return true;
@@ -1178,8 +1178,14 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       — 고른 것과 저장된 것이 달라지는, 바로 그 자리를 막으려던 검사가 그 탈을 냈다. */
   const badTake = (b: any) => b.take !== undefined && !validTake(b.take);
 
+  /** 공유 폴더는 **늘 비공개**다 — 명단에 오른 친구끼리만 오간다. 친구 전체나 전체 공개로
+      열면 함께 넣은 남의 콘텐츠까지 주인 한 사람의 결정으로 퍼진다. 화면에는 그 칸이
+      없으므로 여기 닿는 것은 짜맞춘 요청뿐이다. */
+  const badShare = (b: any, take: unknown) =>
+    canEdit(String(take ?? "")) && b.share && !["none", "some"].includes(b.share.mode);
+
   const applyShare = (id: string, b: any) => {
-    if (b.share && ["none", "all", "some"].includes(b.share.mode) && !isGuest(user)) {
+    if (b.share && SHARE_MODES.includes(b.share.mode) && !isGuest(user)) {
       const want: string[] = Array.isArray(b.share.with)
         ? b.share.with.filter((x: any) => typeof x === "string") : [];
       /* 함께 고치는 폴더는 **부른다고 곧바로 참여자가 되지 않는다** — 수락을 받는다.
@@ -1250,6 +1256,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     }
     if (badTake(b)) {
       json(res, 400, { ok: false, reason: "폴더는 일반 폴더이거나 공유 폴더입니다 — 섞을 수 없습니다." });
+      return true;
+    }
+    if (badShare(b, b.take)) {
+      json(res, 400, { ok: false, reason: "공유 폴더는 함께 쓰는 친구에게만 보입니다." });
       return true;
     }
     const { id } = createFolder(user.id, { name, emoji });
@@ -1355,6 +1365,10 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
         json(res, 403, { ok: false, reason: "폴더의 갈래는 만든 뒤에 바꿀 수 없습니다." });
         return true;
       }
+      if (badShare(b, mine.take)) {
+        json(res, 400, { ok: false, reason: "공유 폴더는 함께 쓰는 친구에게만 보입니다." });
+        return true;
+      }
       db.prepare("UPDATE folder SET name = ?, emoji = ? WHERE id = ?").run(next, nextEmoji, id);
 
       applyShare(id, b);
@@ -1449,26 +1463,48 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     }
   }
 
-  /* ── 표시 이름 — 친구에게 보이는 유일한 신원 ── */
+  /* ── 표시 이름과 아이디 ──
+     이름(닉네임)은 화면에 적히는 것이라 바뀌고 겹쳐도 된다. 아이디는 사람을 가리키는 것이라
+     **한 번 정하면 바뀌지 않고** 겹치지 않는다. 한 요청으로 둘을 함께 받는다 — 처음 정할 때
+     한 창에서 둘을 묻기 때문이다. */
   if (p === "/api/me" && m === "PUT") {
     const b = await readJson(req);
-    const want = cleanName(String(b.displayName ?? ""));
-    if (!want) { json(res, 400, { ok: false, reason: "이름을 입력해 주세요." }); return true; }
-    /* 겹치는 이름은 담지 않는다. 표시 이름이 **친구에게 보이는 유일한 신원**이라,
-       같은 이름이 둘이면 초대 명단에서 어느 쪽인지 가릴 것이 없다. */
-    const saved = setDisplayName(user.id, want);
-    if (!saved) {
-      json(res, 409, { ok: false, reason: "중복된 닉네임입니다." });
+    const hasName = typeof b.displayName === "string";
+    const hasHandle = b.handle !== undefined && b.handle !== null && b.handle !== "";
+    if (!hasName && !hasHandle) {
+      json(res, 400, { ok: false, reason: "이름이나 아이디를 알려 주세요." });
       return true;
     }
-    json(res, 200, { ok: true, displayName: saved });
+    const want = hasName ? cleanName(b.displayName) : "";
+    if (hasName && !want) { json(res, 400, { ok: false, reason: "이름을 입력해 주세요." }); return true; }
+    /* 아이디를 먼저 본다 — 걸리면 이름도 담지 않는다. 반만 저장되면 사람은 실패한 줄 알고
+       다시 누르는데, 그때는 이름만 바뀌어 있다. */
+    if (hasHandle) {
+      if (isGuest(user)) {
+        json(res, 403, { ok: false, reason: "둘러보기에서는 아이디를 정할 수 없습니다." });
+        return true;
+      }
+      const r = setHandle(user.id, b.handle);
+      if (r !== "ok") {
+        const why = {
+          invalid: "아이디는 영문·숫자·밑줄 3~20자로 지어 주세요.",
+          taken: "이미 쓰이고 있는 아이디입니다.",
+          fixed: "아이디는 한 번 정하면 바꿀 수 없습니다.",
+        }[r];
+        json(res, r === "invalid" ? 400 : 409, { ok: false, reason: why });
+        return true;
+      }
+    }
+    if (hasName) setDisplayName(user.id, want);
+    const me = getUser(user.id)!;
+    json(res, 200, { ok: true, displayName: me.displayName, handle: me.handle });
     return true;
   }
 
   /* ── 초대 ── */
   if (p === "/api/invites" && m === "POST") {
-    if (!user.displayName) {
-      json(res, 400, { ok: false, reason: "먼저 표시 이름을 정해 주세요." });
+    if (!user.displayName || !user.handle) {
+      json(res, 400, { ok: false, reason: "먼저 이름과 아이디를 정해 주세요." });
       return true;
     }
     const inv = createInvite(user.id);
@@ -1485,7 +1521,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     }
     if (m === "GET") {
       json(res, 200, {
-        ok: true, from: { id: owner.id, displayName: owner.displayName ?? "이름 없음" },
+        ok: true, from: { id: owner.id, displayName: owner.displayName ?? "이름 없음", handle: owner.handle },
         me: owner.id === user.id, already: areFriends(user.id, owner.id),
       });
       return true;
@@ -1495,12 +1531,12 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
         json(res, 400, { ok: false, reason: "자기 자신은 친구로 추가할 수 없습니다." });
         return true;
       }
-      if (!user.displayName) {
-        json(res, 400, { ok: false, reason: "먼저 표시 이름을 정해 주세요." });
+      if (!user.displayName || !user.handle) {
+        json(res, 400, { ok: false, reason: "먼저 이름과 아이디를 정해 주세요." });
         return true;
       }
       addFriend(user.id, owner.id);
-      json(res, 200, { ok: true, friend: { id: owner.id, displayName: owner.displayName } });
+      json(res, 200, { ok: true, friend: { id: owner.id, displayName: owner.displayName, handle: owner.handle } });
       return true;
     }
   }
@@ -1542,9 +1578,59 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
     return true;
   }
 
+  /* ── 팔로우 ──
+     **아이디로 건다.** 이름(닉네임)은 바뀌고 옛 이름을 남이 가져갈 수 있어서, 이름으로 걸면
+     엉뚱한 사람을 따르게 된다. 아이디를 알면 되묻지 않고 건다 — 친구와 달리 수락이 없어서,
+     팔로워에게 보이는 것은 주인이 「전체 공개」로 연 폴더뿐이다(visibleTo). */
+  if (p === "/api/follows" && m === "GET") {
+    json(res, 200, { ok: true,
+      following: listFollowing(user.id), followers: listFollowers(user.id) });
+    return true;
+  }
+  if (p === "/api/follows" && m === "POST") {
+    if (!user.displayName || !user.handle) {
+      json(res, 400, { ok: false, reason: "먼저 이름과 아이디를 정해 주세요." });
+      return true;
+    }
+    const b = await readJson(req);
+    const who = userByHandle(b.handle);
+    /* 없는 아이디와 막힌 아이디를 가르지 않는다 — 가르면 아이디를 넣어 보며 누가 가입했는지
+       하나씩 더듬는 길이 된다. 게스트는 아이디가 없으니 애초에 걸리지 않는다. */
+    const target = who ? getUser(who.id) : null;
+    if (!target || isGuest(target)) {
+      json(res, 404, { ok: false, reason: "그 아이디를 쓰는 사람이 없습니다." });
+      return true;
+    }
+    if (target.id === user.id) {
+      json(res, 400, { ok: false, reason: "자기 자신은 팔로우할 수 없습니다." });
+      return true;
+    }
+    const already = follows(user.id, target.id);
+    addFollow(user.id, target.id);
+    json(res, already ? 200 : 201, { ok: true, already,
+      user: { id: target.id, displayName: target.displayName ?? "이름 없음", handle: target.handle } });
+    return true;
+  }
+  if (seg[0] === "api" && seg[1] === "follows" && seg[2] && m === "DELETE") {
+    removeFollow(user.id, seg[2]);
+    json(res, 200, { ok: true });
+    return true;
+  }
+  if (seg[0] === "api" && seg[1] === "followers" && seg[2] && m === "DELETE") {
+    removeFollower(user.id, seg[2]);
+    json(res, 200, { ok: true });
+    return true;
+  }
+
+  /* ── 남의 폴더 ──
+     길 이름은 friends 지만 **팔로우하는 사람**에게도 같은 길을 연다 — 보기·다운로드·미러링은
+     무엇이 보이느냐만 다르고(sharedView 가 가른다) 하는 일은 같다. 별과 끊기는 친구에게만 뜻이 있다. */
   if (seg[0] === "api" && seg[1] === "friends" && seg[2]) {
     const other = seg[2];
-    if (!areFriends(user.id, other)) {
+    const friend = areFriends(user.id, other);
+    const viewOnly = (seg[3] === "shared" && m === "GET") ||
+      ((seg[3] === "take" || seg[3] === "mirror") && m === "POST");
+    if (!friend && !(viewOnly && follows(user.id, other))) {
       json(res, 403, { ok: false, reason: "친구가 아닙니다." });
       return true;
     }
@@ -1561,7 +1647,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       const ids = new Set<string>(works.map(w => w.platformId));
       json(res, 200, {
         ok: true,
-        friend: { id: owner.id, displayName: owner.displayName ?? "이름 없음" },
+        friend: { id: owner.id, displayName: owner.displayName ?? "이름 없음", handle: owner.handle },
         folders, works,
         platforms: platformViews(user.id, ids),
       });
@@ -1608,10 +1694,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       if (b.folder) {
         const src = view.folders.find(f => f.id === b.folder);
         if (!src) { json(res, 404, { ok: false, reason: "볼 수 없는 폴더입니다." }); return true; }
-        if (!canCopy(src.take)) {
-          json(res, 403, { ok: false, reason: "담아갈 수 없는 폴더입니다." });
-          return true;
-        }
         const items = view.works.filter(w => w.folders.includes(src.id));
 
         const { id: fid } = createFolder(user.id, { name: src.name, emoji: src.emoji });
@@ -1634,10 +1716,6 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL, user: Us
       const view = sharedView(other, user.id);
       const src = view.folders.find(f => f.id === b.folder);
       if (!src) { json(res, 404, { ok: false, reason: "볼 수 없는 폴더입니다." }); return true; }
-      if (!canMirror(src.take)) {
-        json(res, 403, { ok: false, reason: "미러링할 수 없는 폴더입니다." });
-        return true;
-      }
       const had = listFolders(user.id).find(f =>
         f.mirror?.owner === other && f.mirror?.folder === src.id);
       if (had) { json(res, 200, { ok: true, already: true, name: src.name }); return true; }

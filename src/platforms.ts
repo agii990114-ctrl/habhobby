@@ -22,7 +22,21 @@ export type Platform = {
   mediaType: string;
   hosts: string[];
   parse(u: URL, host: string): Parsed | null;
+  /** 이 사이트는 **제목을 자동으로 못 읽는 것이 정해져 있고**, 공유하면 글에 이름이 실려 온다(지도 앱).
+      그런 곳만 공유한 글의 첫 줄을 제목으로 삼아 담는다 — 아니면 짐작한 제목이 엉뚱하게 담긴다. */
+  titleFromShare?: boolean;
 };
+
+/** 공유한 글에서 **제목 후보**를 뽑는다 — 주소(URL)를 빼고, 앞의 [꼬리표]를 걷고, 첫 줄을 집는다.
+    지도 앱은 「[네이버지도] 장소 이름 / 주소 / 링크」 꼴로 보낸다. 화면(app.js)에도 같은 규칙의 한 벌이
+    있다 — 서버와 화면이 서로를 불러 쓸 수 없어 둘 다 둔다. 고치면 함께 고쳐야 한다. */
+export function titleFromSharedText(raw: string): string {
+  const lines = String(raw ?? "").replace(/https?:\/\/\S+/gi, "\n").split(/\r?\n/)
+    .map(l => l.replace(/^\s*\[[^\]]{1,20}\]\s*/, "").trim())
+    .filter(Boolean);
+  const t = lines[0] ?? "";
+  return t.length > 60 ? t.slice(0, 60).trimEnd() : t;
+}
 
 export const DOMAIN_PREFIX = "domain:";
 
@@ -229,7 +243,7 @@ export const PLATFORMS: Platform[] = [
        장소 상세 페이지는 자동 읽기 프로그램에 429 를 돌려준다(사람이 쓰는 브라우저에는 준다).
        막는 곳을 브라우저인 척 두드리지 않는다 — 제목은 공유한 글에서 채우고 사람이 확인한다(app.js). */
     id: "naver-place", name: "네이버 지도", color: "#03C75A", fg: "#fff", initial: "M",
-    mediaType: "link", hosts: ["map.naver.com", "place.naver.com"],
+    mediaType: "link", hosts: ["map.naver.com", "place.naver.com"], titleFromShare: true,
     parse(u) {
       const id = u.searchParams.get("pinId")
         ?? u.pathname.match(/\/place\/(\d{3,})/)?.[1]                       // 지도·상세: …/place/<번호>

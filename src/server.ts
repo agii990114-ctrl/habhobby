@@ -32,7 +32,7 @@ import {
 import { sendMail, mailMode } from "./mail.ts";
 import { allowRequest, issueCode, verifyCode, peekTicket, consumeTicket, revokeCodes,
          CODE_TTL, RESEND_COOLDOWN } from "./verify.ts";
-import { PLATFORMS, platformById, readableOn, DOMAIN_PREFIX, registrableDomain } from "./platforms.ts";
+import { PLATFORMS, platformById, readableOn, DOMAIN_PREFIX, registrableDomain, titleFromSharedText } from "./platforms.ts";
 import { resolveUrl, originLabel, fetchSiteName, type Resolved } from "./resolve.ts";
 
 const PORT = Number(process.env.PORT ?? 8080);
@@ -458,7 +458,7 @@ async function readUrl(raw: string): Promise<{ r: Extract<Resolved, { ok: true }
 async function intakeShared(user: User, raw: string): Promise<
   | { kind: "empty" }
   | { kind: "ask"; raw: string }
-  | { kind: "saved"; title: string; made: boolean }
+  | { kind: "saved"; title: string; made: boolean; fromText?: boolean }
 > {
   // 「제목 https://…」 처럼 글이 섞여 와도 주소만 집는다 (앱의 부팅 코드와 같은 잣대)
   const m = raw.match(/https?:\/\/\S+/);
@@ -468,8 +468,19 @@ async function intakeShared(user: User, raw: string): Promise<
 
   let got;
   try { got = await readUrl(target); } catch { return ask; }
-  if ("bad" in got || got.r.origin !== "og" || !got.r.title) return ask;
-  const r = got.r;
+  if ("bad" in got) return ask;
+  let r = got.r;
+  /* 사이트가 제목을 못 내주면 원래는 사람에게 넘긴다. **단, 제목을 자동으로 못 읽는 것이 정해져 있고
+     공유한 글에 이름이 실려 오는 곳(네이버 지도)만** 그 글의 첫 줄로 담는다. 지도 앱의 공유는 화면 없는
+     단축어로 오는 일이 많아 「앱에서 확인하세요」로 넘기면 담을 길이 없었다. 짐작한 제목이라
+     **「자동 저장된 콘텐츠」로 들어가고**(아래 filed: false) 알림이 그 사실을 말한다. */
+  let fromText = false;
+  if (r.origin !== "og" || !r.title) {
+    const t = platformById(r.platform.id).titleFromShare ? titleFromSharedText(raw) : "";
+    if (!t) return ask;
+    r = { ...r, title: t };
+    fromText = true;
+  }
 
   const { work, made } = upsertWork(user.id, {
     platformId: applyMerge(user.id, r.platform.id), seriesId: r.seriesId, title: r.title,
@@ -480,7 +491,7 @@ async function intakeShared(user: User, raw: string): Promise<
        않은 것이라 목록에 바로 세우면 뒤섞인다. 나중에 「확인」을 눌러 제자리로 보낸다. */
     filed: false, color: null,
   });
-  return { kind: "saved", title: work.title, made };
+  return { kind: "saved", title: work.title, made, ...(fromText ? { fromText } : {}) };
 }
 
 function upsertWork(userId: string, input: {
@@ -2244,7 +2255,8 @@ const server = createServer(async (req, res) => {
            일어난 일의 이름은 여기서 짓는다. 가는 길에 생긴 일(못 닿았다·열쇠가 틀렸다)은
            받는 쪽이 짓는다 — 그건 서버가 알 수 없는 것들이다. */
         const text = r.kind === "saved"
-          ? `${r.title} — ${r.made ? "담았습니다" : "이미 있습니다"}`
+          ? `${r.title} — ${r.made ? "담았습니다" : "이미 있습니다"}${r.fromText
+              ? " (공유한 글의 이름 · 자동 저장된 콘텐츠에서 확인하세요)" : ""}`
           : r.kind === "ask" ? "제목을 읽지 못했습니다 — 앱에서 확인하세요"
             : "보낼 주소가 없습니다";
         if (asText) { line(200, text); return; }

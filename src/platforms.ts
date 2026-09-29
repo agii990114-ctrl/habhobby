@@ -219,6 +219,31 @@ export const PLATFORMS: Platform[] = [
     },
   },
   {
+    /* 네이버 지도의 장소. 공유하면 naver.me 짧은 주소가 오고, 그것을 따라가면 세 갈래의 주소가 나온다:
+         · map.naver.com/p/entry/place/<번호>          (브라우저)
+         · m.map.naver.com/appLink.naver?pinId=<번호>…  (모바일 앱 연결 페이지)
+         · m.place.naver.com/place/<번호>/home         (장소 상세)
+       셋 다 같은 **장소 번호**를 가리키므로 번호로 모은다 — 같은 곳을 다른 경로로 담아도 한 줄이다.
+
+       **제목은 자동으로 못 읽는다.** 지도 주소는 어느 장소든 같은 대문 태그(「네이버지도」)를 주고,
+       장소 상세 페이지는 자동 읽기 프로그램에 429 를 돌려준다(사람이 쓰는 브라우저에는 준다).
+       막는 곳을 브라우저인 척 두드리지 않는다 — 제목은 공유한 글에서 채우고 사람이 확인한다(app.js). */
+    id: "naver-place", name: "네이버 지도", color: "#03C75A", fg: "#fff", initial: "M",
+    mediaType: "link", hosts: ["map.naver.com", "place.naver.com"],
+    parse(u) {
+      const id = u.searchParams.get("pinId")
+        ?? u.pathname.match(/\/place\/(\d{3,})/)?.[1]                       // 지도·상세: …/place/<번호>
+        ?? u.pathname.match(/^\/(?:[a-z]+\/)?(\d{3,})(?:\/|$)/)?.[1]         // 상세: /restaurant/<번호>
+        ?? null;
+      if (!id || !/^\d{3,}$/.test(id)) return null;
+      return {
+        seriesId: id, episode: null,
+        listUrl: `https://map.naver.com/p/entry/place/${id}`,
+        appUrl: null,
+      };
+    },
+  },
+  {
     id: "ridi", name: "리디", color: "#1F8CE6", fg: "#fff", initial: "R",
     mediaType: "novel", hosts: ["ridibooks.com"],
     parse(u) {

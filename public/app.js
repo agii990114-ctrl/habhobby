@@ -2149,14 +2149,16 @@ function openBreakNotices(back) {
 /** 누구의 폴더를 볼지 고른다 */
 async function openWhose() {
   try { await loadFriends(); await loadFollows(); } catch (e) { toast(e.message); return; }
-  /* 볼 수 있는 사람만 보여 준다 — 나에게 공개한 폴더가 없는 친구는 눌러도 빈 화면이라
-     목록에 둘 이유가 없다. "내 폴더" 도 두지 않는다: 돌아가는 길은 폴더 탭 머리줄의
-     "내 폴더" 버튼이고, 같은 일을 하는 자리가 둘이면 어느 쪽을 눌러야 하는지 헷갈린다. */
-  /* **팔로우하는 사람도 함께 선다.** 친구이기도 하면 친구 줄 하나로 족하다 — 보이는 폴더는
-     서버가 사이를 합쳐 가르므로(sharedView) 어느 줄로 들어가도 같은 것이 보인다. */
-  const open = [...friends.filter(f => f.sharedFolders > 0),
-    ...followLists.following.filter(f => !f.friend && f.sharedFolders > 0)
-      .map(f => ({ ...f, starred: false, followOnly: true }))];
+  /* **친구와 팔로우하는 사람을 모두 세우고, 줄마다 무엇인지 적는다.** 친구이면서 팔로우도 하는
+     사람은 **친구 줄 하나**뿐이다 — 보이는 폴더는 서버가 사이를 합쳐 가르므로(sharedView) 어느
+     줄로 들어가도 같은 것이 보이고, 한 사람이 두 줄이면 어느 쪽을 눌러야 하는지 헷갈린다.
+
+     공개한 폴더가 없는 사람도 줄은 선다(눌리지는 않는다) — 팔로우해 놓고 목록에 없으면
+     제대로 걸렸는지 알 길이 없다. 볼 것이 있는 사람이 위로 온다. */
+  const people = [...friends.map(f => ({ ...f, kind: "friend" })),
+    ...followLists.following.filter(f => !f.friend)
+      .map(f => ({ ...f, starred: false, kind: "follow" }))];
+  const open = [...people.filter(f => f.sharedFolders > 0), ...people.filter(f => f.sharedFolders === 0)];
   let query = "";
 
   const rows = () => {
@@ -2164,14 +2166,17 @@ async function openWhose() {
     const list = q ? open.filter(f => nameHit(f, q)) : open;
     if (!list.length) {
       return `<div class="empty">${q ? "찾는 이름이 없습니다."
-        : "폴더를 공개한 친구가 아직 없습니다.<br>왼쪽 메뉴의 친구에서 초대 링크를 보내거나, 팔로우에서 닉네임으로 팔로우해 보세요."}</div>`;
+        : "아직 친구도, 팔로우하는 사람도 없습니다.<br>왼쪽 메뉴의 친구에서 초대 링크를 보내거나, 팔로우에서 아이디로 팔로우해 보세요."}</div>`;
     }
     /* 별은 여기서 켜고 끄지 않는다 — 보여 주기만 한다. 같은 스위치가 여러 화면에 있으면
        어디서 켠 것인지 헷갈린다. 순서는 서버가 이미 별 켠 사람을 위로 올려 준다. */
-    return list.map(f => `<button class="uf-item" data-go-friend="${esc(f.id)}">
-      <span class="ub"><b>${f.starred ? `<i class="star-on">${icon("star", "on")}</i> ` : ""}${esc(f.displayName)}</b>
-        <span>${atOf(f)}${f.followOnly ? "팔로우 · " : ""}나에게 공개한 폴더 ${f.sharedFolders}개</span></span>
-      ${viewing?.id === f.id ? `<span class="wnow">보는 중</span>` : `<span class="chev">${icon("right")}</span>`}</button>`).join("");
+    return list.map(f => {
+      const has = f.sharedFolders > 0;
+      return `<button class="uf-item${has ? "" : " flat"}" ${has ? `data-go-friend="${esc(f.id)}"` : "disabled"}>
+      <span class="ub"><b>${f.starred ? `<i class="star-on">${icon("star", "on")}</i> ` : ""}${esc(f.displayName)}<i class="kind ${f.kind}">${f.kind === "friend" ? "친구" : "팔로우"}</i></b>
+        <span>${atOf(f)}${has ? `나에게 공개한 폴더 ${f.sharedFolders}개` : "공개한 폴더가 없습니다"}</span></span>
+      ${!has ? "" : viewing?.id === f.id ? `<span class="wnow">보는 중</span>` : `<span class="chev">${icon("right")}</span>`}</button>`;
+    }).join("");
   };
 
   openSheet(`
@@ -5517,8 +5522,21 @@ function openManual() {
   softFocus(sheet.querySelector("#man-title"));
 }
 
-function openAdd(prefill, fromShare) {
+/** 공유한 글에서 **제목 후보**를 뽑는다. 지도 앱은 「[네이버지도] 장소 이름 / 주소 / 주소」 꼴로 보내
+    사이트가 제목을 안 내줘도 이름은 글에 들어 있다. 주소(URL)를 빼고, 꼬리표(「[네이버지도]」)를 걷고,
+    첫 줄을 집는다. **맞는지는 사람이 본다** — 후보일 뿐 그대로 담지 않는다(화면이 그렇게 말한다). */
+function titleFromShared(text) {
+  if (!text) return "";
+  const lines = String(text).replace(/https?:\/\/\S+/gi, "\n").split(/\r?\n/)
+    .map(l => l.replace(/^\s*\[[^\]]{1,20}\]\s*/, "").trim())          // 앞의 [꼬리표] 를 걷는다
+    .filter(Boolean);
+  const t = lines[0] ?? "";
+  return t.length > 60 ? t.slice(0, 60).trimEnd() : t;
+}
+
+function openAdd(prefill, fromShare, sharedText) {
   let resolved = null, seq = 0, timer = null, input, preview;
+  const hint = titleFromShared(sharedText);
   const draft = { schedule: { mode: "unknown", days: [], next: null }, folders: [], color: null };
 
   /* 시트를 통째로 그린다. 새 폴더를 만들고 돌아올 때 다시 부른다 — 폴더 창이 이 시트를
@@ -5558,7 +5576,11 @@ function openAdd(prefill, fromShare) {
     if (!resolved) { preview.innerHTML = ""; return; }
     if (!resolved.ok) { preview.innerHTML = `<div class="note">${esc(resolved.reason)}</div>`; return; }
     const auto = resolved.origin === "og";
-    const title = draft.title ?? resolved.title;
+    /* 사이트가 제목을 안 내주면 **공유한 글에서 뽑은 후보**를 채워 둔다(titleFromShared). 지도 앱은
+       장소 이름을 글에 실어 보내기 때문이다. 후보일 뿐이라 「확인해 주세요」를 말하고, 안 고치고
+       담아도 사람이 본 것이다. 사이트가 준 제목이 있으면 그것이 이긴다. */
+    const fromHint = !auto && !resolved.title && !!hint && draft.title == null;
+    const title = draft.title ?? (resolved.title || hint);
     const had = resolved.mine;              // 이미 들고 있는 그 작품 (없으면 null)
     /* **보관에 있으면 그렇게 말한다.** 「이미 담아 둔 작품」이라고만 하면 목록에서
        찾다가 없어서 다시 담게 된다. 담기는 그 줄의 정보만 새로 적고 상태는 두므로,
@@ -5573,7 +5595,8 @@ function openAdd(prefill, fromShare) {
       <dl class="kv"><dt>플랫폼</dt><dd>${esc(resolved.platform.name)} · ${MEDIA[resolved.mediaType] ?? "링크"}</dd></dl>
       <div class="field" style="margin-bottom:0">
         <label for="in-title">제목
-          <span style="text-transform:none;letter-spacing:0">— <span style="color:var(--${auto ? "good" : "warn"})">${auto ? "자동" : "직접 입력"}</span> · ${esc(resolved.originLabel)}</span>
+          <span style="text-transform:none;letter-spacing:0">— <span style="color:var(--${auto ? "good" : "warn"})">${auto ? "자동" : "직접 입력"}</span> · ${fromHint
+            ? "공유한 글에서 가져왔습니다 — 맞는지 확인해 주세요" : esc(resolved.originLabel)}</span>
         </label>
         <input id="in-title" value="${esc(title)}" placeholder="콘텐츠 제목을 입력하세요"></div>
       ${/* **여기서도 고친다.** 한때 읽기만 하는 칸이었다 — 이 값이 공용 줄(url)에
@@ -7434,7 +7457,7 @@ const takeInvite = () => {
   if (shared) {
     if (location.search) history.replaceState(null, "", location.pathname + location.hash);
     const m = shared.match(/https?:\/\/\S+/);
-    openAdd(m ? m[0] : shared.trim(), true);
+    openAdd(m ? m[0] : shared.trim(), true, shared);
   }
 
   /* 워커가 담아 준 것 — **어디로 갔는지까지 말한다.** 「담았습니다」로 끝내면 목록에

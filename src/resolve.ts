@@ -43,12 +43,20 @@ export type Resolved =
 async function unshorten(raw: string): Promise<string> {
   if (!isShortener(raw)) return raw;
   const url = /^https?:/i.test(raw) ? raw : "https://" + raw;
-  try {
+  const go = async (method: "HEAD" | "GET") => {
     const res = await fetch(url, {
-      method: "HEAD", redirect: "follow",
+      method, redirect: "follow",
       headers: { "User-Agent": UA }, signal: AbortSignal.timeout(TIMEOUT),
     });
-    return res.url || raw;
+    res.body?.cancel().catch(() => {});      // 몸통은 필요 없다 — 닿은 주소만 본다
+    return res;
+  };
+  try {
+    const head = await go("HEAD");
+    /* **HEAD 를 받지 않는 단축 주소가 있다**(kko.to 는 405 를 준다). 그때 최종 주소는 그 405 페이지의 것이
+       아니라 그냥 물어본 주소이므로, 원본을 못 얻는다 — GET 으로 한 번 더 따라간다. */
+    if (head.ok) return head.url || raw;
+    return (await go("GET")).url || raw;
   } catch { return raw; }
 }
 

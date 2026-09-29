@@ -258,6 +258,28 @@ export const PLATFORMS: Platform[] = [
     },
   },
   {
+    /* 카카오맵의 장소. 공유하면 kko.to 짧은 주소가 오고, 따라가면 applink.map.kakao.com/place?id=<번호> 가
+       나온다 — 그 연결 페이지는 어느 장소든 「카카오맵」이라는 같은 제목을 준다. **장소 상세
+       페이지(place.map.kakao.com/<번호>)는 자동 읽기 프로그램에도 장소 이름과 주소를 내준다**
+       (og:title · og:description). 그래서 번호만 뽑아 상세 페이지 주소로 다시 세우면 제목이 저절로 온다.
+       (네이버 지도와 다른 점 — 저쪽은 상세 페이지가 자동 읽기를 막는다.) */
+    id: "kakao-place", name: "카카오맵", color: "#FEE500", fg: "#191919", initial: "K",
+    mediaType: "link", hosts: ["map.kakao.com", "place.map.kakao.com", "applink.map.kakao.com"],
+    titleFromShare: true,
+    parse(u) {
+      const id = u.searchParams.get("id") ?? u.searchParams.get("itemId")
+        ?? u.pathname.match(/^\/link\/map\/(\d+)\/?$/)?.[1]                       // 좌표 꼴(link/map/이름,위도,경도)은 번호가 아니다
+        ?? u.pathname.match(/^\/(\d{3,})\/?$/)?.[1]                                  // place.map.kakao.com/<번호>
+        ?? null;
+      if (!id || !/^\d{3,}$/.test(id)) return null;
+      return {
+        seriesId: id, episode: null,
+        listUrl: `https://place.map.kakao.com/${id}`,
+        appUrl: `kakaomap://place?id=${id}`,
+      };
+    },
+  },
+  {
     id: "ridi", name: "리디", color: "#1F8CE6", fg: "#fff", initial: "R",
     mediaType: "novel", hosts: ["ridibooks.com"],
     parse(u) {
@@ -393,7 +415,7 @@ export function parseShared(raw: string): ParseResult {
 }
 
 /** 단축 URL은 서버가 리다이렉트를 한 번 따라가야 원본이 나온다. */
-const SHORTENERS = ["naver.me", "kko.kakao.com", "kakao.link", "bit.ly", "tv.naver.me"];
+const SHORTENERS = ["naver.me", "kko.kakao.com", "kko.to", "kakao.link", "bit.ly", "tv.naver.me"];
 export const isShortener = (raw: string): boolean => {
   try {
     const h = new URL(/^https?:/i.test(raw) ? raw : "https://" + raw).hostname.replace(/^www\./, "");

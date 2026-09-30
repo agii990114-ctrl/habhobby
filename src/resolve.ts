@@ -60,6 +60,24 @@ async function unshorten(raw: string): Promise<string> {
   } catch { return raw; }
 }
 
+/** 네이버웹툰의 공유 주소(`m.comic.naver.com/share/<해시>`)에는 작품 번호(titleId)가 없다. 그대로 두면
+    앱을 열 주소(webtoonkr://…titleId=)를 만들 수 없어 **웹 주소로 열리고**, 그 페이지가 다시 앱으로 넘겨
+    새 창이 뜬 채 앱이 열렸다. 공유 페이지는 「웹으로 볼게요」 링크와 스크립트(pcRedirectUrl · mwRedirectUrl)에
+    작품 번호를 실어 두므로, 한 번 읽어 원래의 작품 주소로 바꾼다. 못 읽으면 주소를 그대로 둔다. */
+export async function expandNaverShare(url: string): Promise<string> {
+  let u: URL;
+  try { u = new URL(url); } catch { return url; }
+  if (!/^(m\.)?comic\.naver\.com$/.test(u.hostname) || !/^\/share\/[A-Za-z0-9]+\/?$/.test(u.pathname)) return url;
+  try {
+    const res = await fetch(u.href, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(TIMEOUT) });
+    if (!res.ok) return url;
+    const html = (await res.text()).slice(0, 300_000);
+    const id = html.match(/(?:pcRedirectUrl|mwRedirectUrl)\s*:\s*"[^"]*[?&]titleId=(\d+)/)?.[1]
+      ?? html.match(/webtoon\/list\?titleId=(\d+)/)?.[1];
+    return id ? `https://comic.naver.com/webtoon/list?titleId=${id}` : url;
+  } catch { return url; }
+}
+
 /** HTML 엔티티를 푼다.
 
     **숫자 엔티티는 하나씩 적을 수 없다.** 한때 `&#39;` 와 `&#x27;` 만 적어 두었는데,
@@ -331,7 +349,7 @@ export async function resolveUrl(raw: string, known?: KnownLookup): Promise<Reso
 async function resolveOnce(raw: string, known?: KnownLookup): Promise<Resolved> {
   // 주소를 먼저 골라낸다. 공유받은 문자열은 제목이 붙어 있어서, 그대로는
   // 단축 주소인지조차 알아볼 수 없다 — 그러면 리다이렉트를 못 따라간다.
-  const p = parseShared(await unshorten(extractUrl(raw)));
+  const p = parseShared(await expandNaverShare(await unshorten(extractUrl(raw))));
   if (!p.ok) return { ok: false, reason: p.reason };
 
   const plat: Platform = p.platform;

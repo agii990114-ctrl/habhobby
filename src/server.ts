@@ -2171,12 +2171,6 @@ function scriptHashes(html: string): string {
 let CSP = "";
 {
   const html = await readFile(pathResolve(PUBLIC, "index.html"), "utf8");
-  /* **앱을 여는 주소(webtoonkr:// 등)를 iframe 으로 열 수 있게 그 스킴만 허락한다.** 설치한 iOS 웹앱에서
-     링크를 누르면 문서가 흰 화면으로 넘어갔다가 앱이 떴다 — 그래서 눈에 안 보이는 iframe 으로 조용히
-     연다(app.js 의 openAppQuietly). frame-src 는 default-src('self')를 따르므로 안 적으면 막힌다.
-     스킴은 플랫폼 표(platforms.ts)의 appUrl 에서 뽑는다 — 플랫폼을 더하면 저절로 따라온다. */
-  const schemes = [...new Set([...(await readFile(new URL("./platforms.ts", import.meta.url), "utf8"))
-    .matchAll(/appUrl:\s*`([a-z][a-z0-9+.\-]*):\/\//g)].map(m => m[1]))];
   CSP = [
     "default-src 'self'",
     `script-src 'self' ${scriptHashes(html)}`.trim(),
@@ -2184,7 +2178,6 @@ let CSP = "";
     "font-src https://fonts.gstatic.com",
     "img-src 'self' data: https:",              // 표지는 남의 CDN 에서 온다
     "connect-src 'self'",
-    `frame-src ${schemes.length ? schemes.map(x => x + ":").join(" ") : "'none'"}`,
     "frame-ancestors 'none'",
     "base-uri 'none'",
     "form-action 'self'",

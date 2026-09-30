@@ -3238,32 +3238,9 @@ const goHtml = (w, plat, primary) => `<a class="link-btn${primary ? " primary" :
 
 /** 어디에 적을지는 서버가 정한다 — 내 작품이면 그 줄에, 남의 작품이면 **내 쪽 기록**에.
     남의 칸을 고칠 수는 없지만, 내가 언제 보러 갔는지는 내 목록의 차례를 정하는 값이다. */
-/** 홈 화면에 설치한 iOS 웹앱인가. 이 안에서는 앱 주소로 **문서를 옮기면**(링크를 누르면 일어나는 일)
-    흰 화면으로 넘어갔다가 앱이 뜬다 — 앱에서 돌아오면 그 흰 화면이 남아 있다. */
-const iosStandalone = () => navigator.standalone === true;
-
-/** 앱 주소를 **문서를 옮기지 않고** 연다 — 눈에 안 보이는 iframe 에 주소를 준다.
-    문서가 그대로라 화면이 넘어가지 않고 앱만 뜬다. 앱이 없으면 아무 일도 안 일어난다. */
-function openAppQuietly(url) {
-  const f = document.createElement("iframe");
-  f.style.display = "none"; f.setAttribute("aria-hidden", "true");
-  f.src = url;
-  document.body.append(f);
-  setTimeout(() => f.remove(), 4000);
-}
-
 function wireGo(w) {
   const el = sheet.querySelector("#go"); if (!el) return;
-  el.onclick = guard(async e => {
-    /* **iOS 설치 앱에서는 링크가 문서를 옮기지 못하게 막고 조용히 연다.** 그래도 앱이 안 뜨면(iframe 으로는
-       못 여는 기기·버전) **예전 방식(문서 옮기기)** 으로 한 번 더 시도하고, 그래도 안 뜨면 웹으로 간다.
-       조용한 길이 통하면 화면이 넘어가지 않고, 안 통해도 예전과 같아 나빠지는 일이 없다. */
-    let quiet = false;
-    if (!viaWeb(w) && iosStandalone() && e instanceof Event) {
-      e.preventDefault();
-      quiet = true;
-      openAppQuietly(w.appUrl);
-    }
+  el.onclick = guard(async () => {
     if (!viaWeb(w)) {
       /* 앱이 없으면 아무 일도 안 일어나므로 잠시 뒤 웹으로 넘긴다. 문제는 앱이 **떴을 때도**
          이 타이머가 돌아 웹까지 열리던 것이다. 넘기기 직전에 세 가지를 확인한다.
@@ -3273,12 +3250,7 @@ function wireGo(w) {
             동안 이 문서는 포커스를 잃는다 — 묻는 중에 웹으로 넘겨 버리면 안 된다.
          ③ 앱에 다녀오면 그동안 타이머가 멈춰 있다가 돌아온 뒤에 뒤늦게 터진다.
             잰 시간이 정한 것보다 한참 지났으면 이미 앱에 다녀온 것이다. */
-      const DELAY = quiet ? 3000 : 1600, at = Date.now();
-      // 조용히 열었는데 앱이 안 떴으면 문서를 옮기는 예전 방식으로 한 번 더 — 웹으로 가기 전에
-      const t0 = quiet ? setTimeout(() => {
-        if (document.hidden || !document.hasFocus()) return;
-        location.href = w.appUrl;
-      }, 1100) : null;
+      const DELAY = 1600, at = Date.now();
       const t = setTimeout(() => {
         if (document.hidden || !document.hasFocus()) return;
         if (Date.now() - at > DELAY + 700) return;
@@ -3287,7 +3259,7 @@ function wireGo(w) {
         if (narrow()) location.href = w.listUrl;
         else window.open(w.listUrl, "_blank", "noopener");
       }, DELAY);
-      const cancel = () => { clearTimeout(t); clearTimeout(t0); };
+      const cancel = () => clearTimeout(t);
       document.addEventListener("visibilitychange", cancel, { once: true });
       window.addEventListener("pagehide", cancel, { once: true });
       window.addEventListener("blur", cancel, { once: true });

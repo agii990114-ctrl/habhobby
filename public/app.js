@@ -3238,10 +3238,18 @@ const goHtml = (w, plat, primary) => `<a class="link-btn${primary ? " primary" :
 
 /** 어디에 적을지는 서버가 정한다 — 내 작품이면 그 줄에, 남의 작품이면 **내 쪽 기록**에.
     남의 칸을 고칠 수는 없지만, 내가 언제 보러 갔는지는 내 목록의 차례를 정하는 값이다. */
+/** 아이폰·아이패드인가. 아이패드는 데스크톱 사파리인 척하므로 터치 지점 수로도 본다. */
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent)
+  || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
 function wireGo(w) {
   const el = sheet.querySelector("#go"); if (!el) return;
   el.onclick = guard(async () => {
-    if (!viaWeb(w)) {
+    /* **iOS 에서는 웹으로 넘기는 타이머를 아예 걸지 않는다.** 앱이 뜨는 것을 이 문서가 알 수 없다 —
+       아래 세 검사(가려짐·포커스·시간)가 iOS 에서는 앱이 뜨는 중에도 「아직 여기 있다」로 나와서, 앱이
+       열리는 동시에 이 앱 안에서도 웹툰 웹페이지로 넘어갔다. 앱이 없는 기기에서는 아무 일도 안 일어난다:
+       그런 사람은 설정의 「웹으로 열기」를 고르면 된다. */
+    if (!viaWeb(w) && !isIOS()) {
       /* 앱이 없으면 아무 일도 안 일어나므로 잠시 뒤 웹으로 넘긴다. 문제는 앱이 **떴을 때도**
          이 타이머가 돌아 웹까지 열리던 것이다. 넘기기 직전에 세 가지를 확인한다.
 
